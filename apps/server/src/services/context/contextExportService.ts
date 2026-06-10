@@ -1,10 +1,11 @@
 import { nanoid } from "nanoid";
-import type { ChatSessionMode } from "@detaches/shared";
+import type { ChatSessionMode, UploadedFileRef } from "@detaches/shared";
 
 interface ContextExportRecord {
   token: string;
   sessionKey: string;
   sessionMode: ChatSessionMode;
+  attachments: UploadedFileRef[];
   expiresAtMs: number;
 }
 
@@ -17,7 +18,7 @@ function cleanupExpired(now = Date.now()): void {
 }
 
 export const contextExportService = {
-  create(input: { sessionKey: string; sessionMode: ChatSessionMode; ttlMs?: number }): ContextExportRecord {
+  create(input: { sessionKey: string; sessionMode: ChatSessionMode; attachments?: UploadedFileRef[]; ttlMs?: number }): ContextExportRecord {
     cleanupExpired();
     const sessionKey = input.sessionKey.trim();
     if (!sessionKey) throw new Error("sessionKey is required.");
@@ -27,6 +28,7 @@ export const contextExportService = {
       token,
       sessionKey,
       sessionMode: input.sessionMode,
+      attachments: input.attachments?.map((attachment) => ({ ...attachment })) ?? [],
       expiresAtMs: Date.now() + ttlMs
     };
     exportsByToken.set(token, record);

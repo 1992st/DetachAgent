@@ -64,11 +64,13 @@ export interface DetachesSessionContext {
   contextExport?: {
     createEndpoint: string;
     consumeEndpointPattern: string;
+    consumeUrl?: string;
     createdBy: "detaches-ui-loopback";
     consumedBy: "remote-agent-host";
     oneTime: true;
     ttlSeconds: number;
     adapterCommand: "context-fetch";
+    generatedForMessage?: boolean;
     note: string;
   };
   capabilities: DetachesToolCapability[];

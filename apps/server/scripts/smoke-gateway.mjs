@@ -444,6 +444,7 @@ async function main() {
     assert.match(userChatSend.message, /agentId: agent-alpha/);
     assert.match(userChatSend.message, /remoteAdapter: state=error/);
     assert.match(userChatSend.message, /clientContext\.detaches/);
+    assert.match(userChatSend.message, /contextExport\.consumeUrl/);
     assert.match(userChatSend.message, /doctor --url/);
     assert.doesNotMatch(userChatSend.message, new RegExp(`toolBroker: gatewayEventEndpoint=${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
     assert.equal(userChatSend.idempotencyKey, "smoke-idempotency");
@@ -466,6 +467,8 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.oneTime, true);
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.adapterCommand, "context-fetch");
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.createdBy, "detaches-ui-loopback");
+    assert.equal(userChatSend.clientContext?.detaches?.contextExport?.generatedForMessage, true);
+    assert.match(userChatSend.clientContext?.detaches?.contextExport?.consumeUrl, new RegExp(`^${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/context/exports/`));
     assert.equal(userChatSend.clientContext?.detaches?.capabilities?.some((capability) => capability.name === "terminal" && capability.supportedTargets.includes("local-user-machine")), true);
     assert.equal(userChatSend.clientContext?.routeContext?.origin?.provider, "detaches_agent");
     assert.equal(userChatSend.attachments, undefined);
@@ -476,6 +479,14 @@ async function main() {
       source: "detaches-ui"
     };
     const brokerSubmitToken = userChatSend.clientContext.detaches.broker.submitToken;
+    const autoContextExport = await requestJson(userChatSend.clientContext.detaches.contextExport.consumeUrl.replace(publicBaseUrl, ""));
+    assert.equal(autoContextExport.sessionKey, chatSessionKey);
+    assert.equal(autoContextExport.redacted.brokerSubmitToken, false);
+    assert.equal(autoContextExport.detaches.files.staged.length, 1);
+    assert.equal(autoContextExport.detaches.files.staged[0].fileId, upload.file.id);
+    assert.equal(autoContextExport.detaches.contextExport.consumeUrl, undefined);
+    const repeatedAutoContextExport = await fetch(userChatSend.clientContext.detaches.contextExport.consumeUrl);
+    assert.equal(repeatedAutoContextExport.status, 404);
 
     const preparedTransfer = await requestJson("/api/files/transfer/prepare", {
       method: "POST",

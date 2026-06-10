@@ -75,8 +75,8 @@ export function attachChatSocket(server: HttpServer): void {
         if (event.type === "history") {
           await sendHistory();
         } else if (event.type === "send") {
-          const clientContext = await buildChatClientContext(sessionMode, sessionKey, event.attachments);
-          const detachesContext = await buildDetachesSessionContext(sessionMode, sessionKey, event.attachments);
+          const detachesContext = await buildDetachesSessionContext(sessionMode, sessionKey, event.attachments, { createContextExport: true });
+          const clientContext = await buildChatClientContext(sessionMode, sessionKey, event.attachments, { detachesContext });
           const response = await gatewayClient.sendChat({
             sessionKey,
             message: buildOutboundMessage(event.message, detachesContext, event.attachments, event.attachmentContextOverride),

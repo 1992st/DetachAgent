@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import express from "express";
 import multer from "multer";
-import type { AppHealth, DetachesContextExportResponse, DiagnosticItem, DiagnosticsResponse, NetworkTestResponse, NetworkTestStep, ToolDecisionActor, ToolTarget } from "@detaches/shared";
+import type { AppHealth, DetachesContextExportResponse, DiagnosticItem, DiagnosticsResponse, NetworkTestResponse, NetworkTestStep, ToolDecisionActor, ToolTarget, UploadedFileRef } from "@detaches/shared";
 import { appConfig, publicServerBaseUrl } from "../config/appConfig.js";
 import { settingsStore, runtimeConfig } from "../config/settingsStore.js";
 import { sshTunnelService } from "../services/tunnel/sshTunnelService.js";
@@ -40,9 +40,10 @@ function cloneJson<T>(value: T): T {
 async function buildContextExportBody(
   sessionKey: string,
   sessionMode: "main" | "device",
-  includeSubmitToken: boolean
+  includeSubmitToken: boolean,
+  attachments: UploadedFileRef[] = []
 ): Promise<DetachesContextExportResponse> {
-  const rawClientContext = await buildChatClientContext(sessionMode, sessionKey);
+  const rawClientContext = await buildChatClientContext(sessionMode, sessionKey, attachments);
   const cloned = cloneJson(rawClientContext);
   const detaches = cloned.detaches as { broker?: { submitToken?: string; submitTokenRedacted?: boolean } } | undefined;
   if (!detaches || typeof detaches !== "object") {
@@ -419,7 +420,7 @@ apiRoutes.get("/context/exports/:token", async (req, res) => {
     return;
   }
   try {
-    res.json(await buildContextExportBody(record.sessionKey, record.sessionMode, true));
+    res.json(await buildContextExportBody(record.sessionKey, record.sessionMode, true, record.attachments));
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }

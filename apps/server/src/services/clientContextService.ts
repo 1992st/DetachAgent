@@ -5,6 +5,7 @@ import { runtimeConfig } from "../config/settingsStore.js";
 import { loadOrCreateDeviceIdentity } from "./gateway/deviceIdentityService.js";
 import { openclawDetachesAdapterService } from "./adapters/openclawDetachesAdapterService.js";
 import { brokerTokenService } from "./tools/brokerTokenService.js";
+import { contextExportService } from "./context/contextExportService.js";
 
 function deviceShortId(deviceId: string): string {
   return deviceId.replace(/[^a-z0-9]/gi, "").slice(0, 12).toLowerCase() || "local";
@@ -21,12 +22,25 @@ export function publicClientIdentity(): ClientIdentity {
   };
 }
 
-export async function buildDetachesSessionContext(sessionMode: ChatSessionMode, sessionKey: string, attachments: UploadedFileRef[] = []): Promise<DetachesSessionContext> {
+interface DetachesContextBuildOptions {
+  createContextExport?: boolean;
+  detachesContext?: DetachesSessionContext;
+}
+
+export async function buildDetachesSessionContext(
+  sessionMode: ChatSessionMode,
+  sessionKey: string,
+  attachments: UploadedFileRef[] = [],
+  options: DetachesContextBuildOptions = {}
+): Promise<DetachesSessionContext> {
   const identity = publicClientIdentity();
   const agentId = agentIdFromSessionKey(sessionKey);
   const remoteAdapter = openclawDetachesAdapterService.lastRemoteReadiness();
   const config = await runtimeConfig();
   const baseUrl = publicServerBaseUrl(config);
+  const contextExportRecord = options.createContextExport
+    ? contextExportService.create({ sessionKey, sessionMode, attachments })
+    : null;
   const stagedFiles: DetachesStagedFileContext[] = attachments.map((file) => ({
     fileId: file.id,
     name: file.name,
@@ -76,12 +90,18 @@ export async function buildDetachesSessionContext(sessionMode: ChatSessionMode, 
     contextExport: {
       createEndpoint: `${baseUrl}/api/context/exports`,
       consumeEndpointPattern: `${baseUrl}/api/context/exports/{token}`,
+      consumeUrl: contextExportRecord
+        ? `${baseUrl}/api/context/exports/${encodeURIComponent(contextExportRecord.token)}`
+        : undefined,
       createdBy: "detaches-ui-loopback",
       consumedBy: "remote-agent-host",
       oneTime: true,
       ttlSeconds: 300,
       adapterCommand: "context-fetch",
-      note: "Ask the user to generate a one-time context URL in the detaches_agent Adapter panel when the remote agent host needs a fresh full clientContext. Do not invent or request broker tokens in chat."
+      generatedForMessage: Boolean(contextExportRecord),
+      note: contextExportRecord
+        ? "A one-time context URL was generated for this message. Remote agent hosts should prefer doctor --url and must treat the URL as sensitive."
+        : "Ask the user to generate a one-time context URL in the detaches_agent Adapter panel when the remote agent host needs a fresh full clientContext. Do not invent or request broker tokens in chat."
     },
     capabilities: [
       {
@@ -113,8 +133,13 @@ export async function buildDetachesSessionContext(sessionMode: ChatSessionMode, 
   };
 }
 
-export async function buildChatClientContext(sessionMode: ChatSessionMode, sessionKey: string, attachments: UploadedFileRef[] = []): Promise<Record<string, unknown>> {
-  const detaches = await buildDetachesSessionContext(sessionMode, sessionKey, attachments);
+export async function buildChatClientContext(
+  sessionMode: ChatSessionMode,
+  sessionKey: string,
+  attachments: UploadedFileRef[] = [],
+  options: DetachesContextBuildOptions = {}
+): Promise<Record<string, unknown>> {
+  const detaches = options.detachesContext ?? await buildDetachesSessionContext(sessionMode, sessionKey, attachments, options);
   const identity = detaches.userDevice;
   return {
     app: "detaches_agent",
@@ -157,7 +182,7 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
     `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}`,
     "完整机器可读上下文已随 chat.send.clientContext.detaches 发送；请优先读取结构化 context，不要只依赖本段文字。",
-    "若远端已安装 detaches-agent skill，请在真实 OpenClaw agent host 上运行 `node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --url <one-time-context-export-url> --output-context /tmp/detaches-client-context.json`，或对已保存 context 运行 `doctor --context <context-json>`。",
+    "若远端已安装 detaches-agent skill，请读取 clientContext.detaches.contextExport.consumeUrl，并在真实 OpenClaw agent host 上运行 `node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --url \"$CONSUME_URL\" --output-context /tmp/detaches-client-context.json`；如果已经保存 context，则运行 `doctor --context <context-json>`。",
     "工具请求必须经过 detaches_agent 审批；不要声称命令、文件读取、传输或归档已完成，除非已收到 approved tool output。",
     "不要把 remote-agent-host/gateway-managed 请求退化成本机 local-user-machine。"
   ].join("\n");
