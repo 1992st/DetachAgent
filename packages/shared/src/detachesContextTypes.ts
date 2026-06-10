@@ -74,3 +74,10 @@ export interface DetachesContextExportResponse {
     brokerSubmitToken: boolean;
   };
 }
+
+export interface DetachesContextExportCreateResponse {
+  sessionKey: string;
+  sessionMode: ChatSessionMode;
+  expiresAt: string;
+  consumeUrl: string;
+}

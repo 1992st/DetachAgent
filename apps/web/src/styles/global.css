@@ -1273,3 +1273,31 @@ h3 { font-size: 14px; }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.adapter-context-export {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.adapter-context-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.adapter-context-heading strong {
+  display: block;
+  font-size: 13px;
+}
+
+.adapter-context-heading small,
+.adapter-command-box small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

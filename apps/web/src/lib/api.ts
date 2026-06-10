@@ -2,6 +2,7 @@ import type {
   AgentsListResponse,
   AppHealth,
   ClientIdentity,
+  DetachesContextExportCreateResponse,
   DiagnosticsResponse,
   FileTransferPrepareResponse,
   FileUploadResponse,
@@ -47,6 +48,16 @@ export async function fetchAgents(): Promise<AgentsListResponse> {
 
 export async function fetchClientIdentity(): Promise<ClientIdentity> {
   const res = await fetch("/api/client");
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function createDetachesContextExport(input: { sessionKey: string; sessionMode?: "main" | "device" }): Promise<DetachesContextExportCreateResponse> {
+  const res = await fetch("/api/context/exports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }

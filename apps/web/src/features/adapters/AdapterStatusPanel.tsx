@@ -1,7 +1,7 @@
-import { CheckCircle2, Clipboard, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
+import { CheckCircle2, Clipboard, KeyRound, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { OpenClawAdapterInstallPlan, OpenClawAdapterReadiness, ToolBrokerSocketEvent, ToolRequestRecord } from "@detaches/shared";
-import { createToolRequest, fetchOpenClawAdapterInstallPlan, fetchOpenClawAdapterReadiness, fetchToolRequests } from "../../lib/api.js";
+import type { DetachesContextExportCreateResponse, OpenClawAdapterInstallPlan, OpenClawAdapterReadiness, ToolBrokerSocketEvent, ToolRequestRecord } from "@detaches/shared";
+import { createDetachesContextExport, createToolRequest, fetchOpenClawAdapterInstallPlan, fetchOpenClawAdapterReadiness, fetchToolRequests } from "../../lib/api.js";
 
 const defaultInstallDir = "~/.openclaw/detaches_agent";
 
@@ -15,9 +15,21 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
   const [error, setError] = useState<string | null>(null);
   const [requestMessage, setRequestMessage] = useState<string | null>(null);
   const [installRequest, setInstallRequest] = useState<ToolRequestRecord | null>(null);
+  const [contextExport, setContextExport] = useState<DetachesContextExportCreateResponse | null>(null);
+  const [contextMessage, setContextMessage] = useState<string | null>(null);
 
   const installCommands = useMemo(() => installPlan?.commands.join("\n") ?? "", [installPlan]);
   const remoteVerifyCommands = useMemo(() => installPlan?.verifyCommands.join("\n") ?? "", [installPlan]);
+  const contextFetchCommand = useMemo(() => {
+    if (!contextExport) return "";
+    const cliPath = shellPath(`${installDir.replace(/\/+$/, "")}/bin/detaches-agent-adapter.mjs`);
+    return [
+      `node ${cliPath} context-fetch \\`,
+      `  ${shellQuote(contextExport.consumeUrl)} \\`,
+      "  --output /tmp/detaches-client-context.json",
+      `node ${cliPath} inspect-context /tmp/detaches-client-context.json`
+    ].join("\n");
+  }, [contextExport, installDir]);
 
   async function refresh(nextProbe = probe) {
     setLoading(true);
@@ -91,6 +103,25 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
       setRequestMessage(`已创建安装审批请求：${response.request.id}`);
       setInstallRequest(response.request);
       setProbe("remote-ssh");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function createContextExport() {
+    if (!sessionKey) {
+      setError("选择 Agent 后才能生成本会话上下文。");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setContextMessage(null);
+    try {
+      const response = await createDetachesContextExport({ sessionKey, sessionMode: "main" });
+      setContextExport(response);
+      setContextMessage("已生成一次性上下文 URL。远端 agent host 消费后会立即失效。");
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -196,6 +227,38 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
           <pre>{remoteVerifyCommands}</pre>
         </div>
       ) : null}
+      <div className="adapter-context-export">
+        <div className="adapter-context-heading">
+          <div>
+            <strong>本会话上下文</strong>
+            <small>给远端 OpenClaw adapter 拉取 session、broker 和能力信息。</small>
+          </div>
+          <button type="button" className="secondary-button compact" onClick={() => void createContextExport()} disabled={!sessionKey || loading}>
+            <KeyRound size={14} />
+            生成一次性 URL
+          </button>
+        </div>
+        {contextMessage ? <p className="adapter-request-message">{contextMessage}</p> : null}
+        {contextExport ? (
+          <div className="adapter-command-box">
+            <div>
+              <strong>Context Fetch</strong>
+              <button type="button" className="copy-button" title="Copy context fetch command" onClick={() => void copy(contextFetchCommand)}>
+                <Clipboard size={13} />
+              </button>
+            </div>
+            <small>过期时间：{formatTime(contextExport.expiresAt)}</small>
+            <pre>{contextFetchCommand}</pre>
+            <div>
+              <strong>One-time URL</strong>
+              <button type="button" className="copy-button" title="Copy one-time context URL" onClick={() => void copy(contextExport.consumeUrl)}>
+                <Clipboard size={13} />
+              </button>
+            </div>
+            <pre>{contextExport.consumeUrl}</pre>
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -222,4 +285,21 @@ function requestMatchesInstallDir(request: ToolRequestRecord, installDir: string
   return request.kind === "adapter-install"
     && request.target === "remote-agent-host"
     && (typeof request.payload.installDir !== "string" || request.payload.installDir === installDir);
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function shellPath(value: string): string {
+  const normalized = value.replace(/\/+$/, "");
+  if (normalized === "~") return "$HOME";
+  if (normalized.startsWith("~/")) return `$HOME/${normalized.slice(2).replace(/'/g, "'\\''")}`;
+  return shellQuote(normalized);
+}
+
+function formatTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
