@@ -254,12 +254,17 @@ const targetLabels: Record<ToolTarget, string> = {
   "gateway-managed": "Gateway 托管"
 };
 
-function targetIsSupported(target: ToolTarget): boolean {
-  return target === "local-user-machine";
+function toolRequestSupported(request: ToolRequestRecord): boolean {
+  if (request.kind === "adapter-install") return request.target === "remote-agent-host";
+  if (request.kind === "terminal" || request.kind === "file-transfer") return request.target === "local-user-machine";
+  return false;
 }
 
-function unsupportedTargetMessage(target: ToolTarget): string {
-  return `${targetLabels[target]} 当前还没有执行 adapter，不能把请求退化到用户本机执行。`;
+function unsupportedTargetMessage(request: ToolRequestRecord): string {
+  if (request.target === "remote-agent-host") {
+    return `${toolRequestTitle(request)} 当前只支持 adapter-install 这种远端受控操作，不能退化到用户本机执行。`;
+  }
+  return `${targetLabels[request.target]} 当前还没有执行 adapter，不能把请求退化到用户本机执行。`;
 }
 
 function ToolRequests({
@@ -324,18 +329,18 @@ function ToolRequests({
       {errors[0] && !requests.length ? <p className="request-error">{errors[0]}</p> : null}
       {requests.map((request, index) => {
         const state = handled[index];
-        const unsupported = !targetIsSupported(request.target);
-        const actionLabel = request.kind === "file-transfer" ? "Transfer" : "Run";
+        const unsupported = !toolRequestSupported(request);
+        const actionLabel = request.kind === "file-transfer" ? "Transfer" : request.kind === "adapter-install" ? "Install" : "Run";
         return (
           <div className={`terminal-request-card ${request.kind === "file-transfer" ? "file-transfer-card" : ""}`} key={request.id}>
             <div>
-              <strong>{request.kind === "file-transfer" ? "File transfer request" : "Terminal command request"}</strong>
+              <strong>{toolRequestTitle(request)} request</strong>
               <p className={`target-pill ${request.target}`}>Target: {targetLabels[request.target]}</p>
               {request.risk ? <p className={`risk-pill ${request.risk.level}`}>Risk: {request.risk.level}{request.risk.reasons.length ? ` · ${request.risk.reasons.join("; ")}` : ""}</p> : null}
               {request.reason ? <p>{request.reason}</p> : null}
               <code>{toolRequestCode(request)}</code>
               <small>requestId: {request.id}</small>
-              {unsupported ? <p className="request-error">{unsupportedTargetMessage(request.target)}</p> : null}
+              {unsupported ? <p className="request-error">{unsupportedTargetMessage(request)}</p> : null}
               {errors[index] ? <p className="request-error">{errors[index]}</p> : null}
               {resultSummaries[index] ? <small>{resultSummaries[index]}</small> : null}
             </div>
@@ -345,6 +350,7 @@ function ToolRequests({
                 className="secondary-button"
                 disabled={unsupported || Boolean(state && state !== "error")}
                 onClick={() => {
+                  if (!confirmElevatedRisk(request)) return;
                   setHandled((current) => ({ ...current, [index]: "running" }));
                   approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated", actor: decisionActor(clientIdentity) })
                     .then((response) => {
@@ -440,6 +446,18 @@ function toolRequestCode(request: ToolRequestRecord): string {
     `fileId: ${typeof request.payload.fileId === "string" ? request.payload.fileId : ""}`,
     `remotePath: ${typeof request.payload.remotePath === "string" ? request.payload.remotePath : ""}`
   ].join("\n");
+}
+
+function toolRequestTitle(request: ToolRequestRecord): string {
+  if (request.kind === "file-transfer") return "File transfer";
+  if (request.kind === "adapter-install") return "Adapter install";
+  return "Terminal command";
+}
+
+function confirmElevatedRisk(request: ToolRequestRecord): boolean {
+  if (request.risk?.level !== "elevated") return true;
+  const reason = request.risk.reasons.join("; ") || "Elevated-risk tool request";
+  return window.confirm(`确认执行高风险工具请求？\n\n${reason}`);
 }
 
 function buildDefaultAttachmentContext(attachments: UploadedFileRef[]): string {

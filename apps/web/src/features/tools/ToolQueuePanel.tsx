@@ -56,6 +56,7 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
   }, [sessionKey, agentId, refresh]);
 
   async function runRequest(request: ToolRequestRecord) {
+    if (!confirmElevatedRisk(request)) return;
     setBusy((current) => ({ ...current, [request.id]: true }));
     setError(null);
     try {
@@ -115,18 +116,18 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
       {sessionKey && !requests.length && !loading ? <div className="empty-state">暂无待处理工具请求。</div> : null}
       <div className="tool-queue-list">
         {requests.map((request) => {
-          const unsupported = !targetIsSupported(request.target);
+          const unsupported = !toolRequestSupported(request);
           const disabled = busy[request.id] || request.status === "rejected" || unsupported;
           return (
             <div className={`terminal-request-card ${request.kind === "file-transfer" ? "file-transfer-card" : ""}`} key={request.id}>
               <div>
-                <strong>{request.kind === "file-transfer" ? "File transfer" : request.kind === "adapter-install" ? "Adapter install" : "Terminal command"}</strong>
+                <strong>{toolRequestTitle(request)}</strong>
                 <p className={`target-pill ${request.target}`}>Target: {targetLabels[request.target]}</p>
                 {request.risk ? <p className={`risk-pill ${request.risk.level}`}>Risk: {request.risk.level}{request.risk.reasons.length ? ` · ${request.risk.reasons.join("; ")}` : ""}</p> : null}
                 <small>{request.status} · {request.source || "unknown"}{request.sourceEventId ? ` · ${request.sourceEventId}` : ""}</small>
                 {request.reason ? <p>{request.reason}</p> : null}
                 <code>{toolRequestCode(request)}</code>
-                {unsupported ? <p className="request-error">{unsupportedTargetMessage(request.target)}</p> : null}
+                {unsupported ? <p className="request-error">{unsupportedTargetMessage(request)}</p> : null}
                 {summaries[request.id] ? <small>{summaries[request.id]}</small> : null}
               </div>
               <div className="terminal-request-actions">
@@ -172,12 +173,29 @@ const targetLabels: Record<ToolTarget, string> = {
   "gateway-managed": "Gateway 托管"
 };
 
-function targetIsSupported(target: ToolTarget): boolean {
-  return target === "local-user-machine" || target === "remote-agent-host";
+function toolRequestSupported(request: ToolRequestRecord): boolean {
+  if (request.kind === "adapter-install") return request.target === "remote-agent-host";
+  if (request.kind === "terminal" || request.kind === "file-transfer") return request.target === "local-user-machine";
+  return false;
 }
 
-function unsupportedTargetMessage(target: ToolTarget): string {
-  return `${targetLabels[target]} 当前还没有执行 adapter，不能把请求退化到用户本机执行。`;
+function unsupportedTargetMessage(request: ToolRequestRecord): string {
+  if (request.target === "remote-agent-host") {
+    return `${toolRequestTitle(request)} 当前只支持 adapter-install 这种远端受控操作，不能退化到用户本机执行。`;
+  }
+  return `${targetLabels[request.target]} 当前还没有执行 adapter，不能把请求退化到用户本机执行。`;
+}
+
+function toolRequestTitle(request: ToolRequestRecord): string {
+  if (request.kind === "file-transfer") return "File transfer";
+  if (request.kind === "adapter-install") return "Adapter install";
+  return "Terminal command";
+}
+
+function confirmElevatedRisk(request: ToolRequestRecord): boolean {
+  if (request.risk?.level !== "elevated") return true;
+  const reason = request.risk.reasons.join("; ") || "Elevated-risk tool request";
+  return window.confirm(`确认执行高风险工具请求？\n\n${reason}`);
 }
 
 function toolRequestCode(request: ToolRequestRecord): string {
