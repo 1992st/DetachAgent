@@ -374,7 +374,10 @@ async function main() {
     const adapterInfo = await requestJson("/api/adapters/openclaw-detaches");
     assert.equal(adapterInfo.id, "detaches_agent.openclaw.adapter");
     assert.equal(adapterInfo.manifest.targets["local-user-machine"].status, "supported");
+    assert.equal(adapterInfo.manifest.skill.manifest, "skill.manifest.json");
     assert.equal(adapterInfo.files.some((file) => file.path === "AGENT.md" && /^[a-f0-9]{64}$/.test(file.sha256)), true);
+    assert.equal(adapterInfo.files.some((file) => file.path === "README.md" && /^[a-f0-9]{64}$/.test(file.sha256)), true);
+    assert.equal(adapterInfo.files.some((file) => file.path === "skill.manifest.json" && /^[a-f0-9]{64}$/.test(file.sha256)), true);
     assert.match(adapterInfo.bundle.downloadUrl, /\/api\/adapters\/openclaw-detaches\/bundle$/);
     const adapterAgentDoc = await fetch(`http://${host}:${serverPort}/api/adapters/openclaw-detaches/files/${encodeURIComponent("AGENT.md")}`);
     assert.equal(adapterAgentDoc.status, 200);
@@ -398,6 +401,7 @@ async function main() {
     assert.equal(adapterReadiness.state, "ready");
     assert.equal(adapterReadiness.expectedAdapterId, "detaches_agent.openclaw.adapter");
     assert.equal(adapterReadiness.checks.every((check) => check.state === "ready"), true);
+    assert.equal(adapterReadiness.checks.some((check) => check.id === "skill-manifest"), true);
     const missingAdapterReadiness = await requestJson(`/api/adapters/openclaw-detaches/readiness?target=remote-agent-host&installDir=${encodeURIComponent("/tmp/detaches-agent-missing-adapter-smoke")}`);
     assert.equal(missingAdapterReadiness.target, "remote-agent-host");
     assert.equal(missingAdapterReadiness.state, "missing");

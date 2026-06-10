@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "detaches_agent.openclaw.skill",
+  "name": "detaches_agent Session Bridge",
+  "description": "Agent-side skill metadata for OpenClaw sessions mediated by detaches_agent.",
+  "adapterId": "detaches_agent.openclaw.adapter",
+  "entrypoints": {
+    "instructions": "AGENT.md",
+    "adapterManifest": "adapter.manifest.json",
+    "cli": "bin/detaches-agent-adapter.mjs"
+  },
+  "commands": {
+    "fetchContext": "detaches-agent-adapter context-fetch <one-time-context-export-url> --output /tmp/detaches-client-context.json",
+    "inspectContext": "detaches-agent-adapter inspect-context /tmp/detaches-client-context.json",
+    "probeBroker": "detaches-agent-adapter broker-probe <detaches-agent-base-url>",
+    "terminalRequest": "detaches-agent-adapter terminal-request --context /tmp/detaches-client-context.json --target local-user-machine --format broker-event --submit",
+    "fileTransferRequest": "detaches-agent-adapter file-transfer-request --context /tmp/detaches-client-context.json --target local-user-machine --format broker-event --submit"
+  },
+  "context": {
+    "accepts": [
+      "clientContext.detaches",
+      "clientContext",
+      "one-time context export URL"
+    ],
+    "sensitiveFields": [
+      "broker.submitToken"
+    ]
+  },
+  "safety": {
+    "requiresUserApproval": true,
+    "executesToolsDirectly": false,
+    "approvalBroker": "detaches_agent local UI",
+    "forbiddenFallbacks": [
+      "remote-agent-host -> local-user-machine",
+      "gateway-managed -> local-user-machine"
+    ]
+  }
+}

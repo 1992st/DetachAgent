@@ -8,6 +8,12 @@
     "requiresApprovalBroker": true,
     "approvalBroker": "detaches_agent local UI"
   },
+  "skill": {
+    "manifest": "skill.manifest.json",
+    "instructions": "AGENT.md",
+    "readme": "README.md",
+    "cli": "bin/detaches-agent-adapter.mjs"
+  },
   "targets": {
     "local-user-machine": {
       "status": "supported",

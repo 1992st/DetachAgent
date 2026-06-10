@@ -15,6 +15,8 @@ const adapterRoot = path.join(repoRoot, "packages", "openclaw-detaches-adapter")
 const adapterFiles = [
   { path: "package.json", mode: 0o644, mimeType: "application/json" },
   { path: "adapter.manifest.json", mode: 0o644, mimeType: "application/json" },
+  { path: "skill.manifest.json", mode: 0o644, mimeType: "application/json" },
+  { path: "README.md", mode: 0o644, mimeType: "text/markdown; charset=utf-8" },
   { path: "AGENT.md", mode: 0o644, mimeType: "text/markdown; charset=utf-8" },
   { path: "bin/detaches-agent-adapter.mjs", mode: 0o755, mimeType: "text/javascript; charset=utf-8" }
 ] as const;
@@ -152,6 +154,7 @@ async function readJsonFile(filePath: string): Promise<unknown> {
 
 function remoteReadinessScript(installDir: string, expectedAdapterId: string, expectedVersion: string): string {
   const manifestPath = `${installDir}/adapter.manifest.json`;
+  const skillManifestPath = `${installDir}/skill.manifest.json`;
   const packagePath = `${installDir}/package.json`;
   const cliPath = `${installDir}/bin/detaches-agent-adapter.mjs`;
   return [
@@ -160,6 +163,7 @@ function remoteReadinessScript(installDir: string, expectedAdapterId: string, ex
     `EXPECTED_ADAPTER_ID=${shellQuote(expectedAdapterId)}`,
     `EXPECTED_VERSION=${shellQuote(expectedVersion)}`,
     `MANIFEST_PATH=${shellQuote(manifestPath)}`,
+    `SKILL_MANIFEST_PATH=${shellQuote(skillManifestPath)}`,
     `PACKAGE_PATH=${shellQuote(packagePath)}`,
     `CLI_PATH=${shellQuote(cliPath)}`,
     "STATE=ready",
@@ -187,6 +191,15 @@ function remoteReadinessScript(installDir: string, expectedAdapterId: string, ex
     "  fi",
     "else",
     "  emit_check manifest missing \"Adapter manifest is missing at $MANIFEST_PATH.\"",
+    "fi",
+    "if [ -f \"$SKILL_MANIFEST_PATH\" ]; then",
+    "  if grep -q \"\\\"adapterId\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$SKILL_MANIFEST_PATH\"; then",
+    "    emit_check skill-manifest ready \"Skill manifest references $EXPECTED_ADAPTER_ID.\"",
+    "  else",
+    "    emit_check skill-manifest invalid \"Skill manifest adapterId mismatch: expected $EXPECTED_ADAPTER_ID.\"",
+    "  fi",
+    "else",
+    "  emit_check skill-manifest missing \"Skill manifest is missing at $SKILL_MANIFEST_PATH.\"",
     "fi",
     "if [ -f \"$PACKAGE_PATH\" ]; then",
     "  if grep -q \"\\\"version\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_VERSION\\\"\" \"$PACKAGE_PATH\"; then",
@@ -242,6 +255,7 @@ function remoteInstallScript(plan: OpenClawAdapterInstallPlan): string {
     "tar -xzf \"$TMP_BUNDLE\" -C \"$INSTALL_DIR\" --strip-components=1",
     "chmod +x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
     "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\"",
+    "grep -q \"\\\"adapterId\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/skill.manifest.json\"",
     "if command -v node >/dev/null 2>&1; then node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest >/dev/null; fi",
     "printf 'detaches adapter installed: %s\\n' \"$INSTALL_DIR\""
   ].join("\n");
@@ -322,6 +336,7 @@ export const openclawDetachesAdapterService = {
         "tar -xzf \"$TMP_BUNDLE\" -C \"$INSTALL_DIR\" --strip-components=1",
         "chmod +x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
         "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\"",
+        "grep -q \"\\\"adapterId\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/skill.manifest.json\"",
         "if command -v node >/dev/null 2>&1; then node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest >/dev/null; fi",
         "printf 'detaches adapter installed: %s\\n' \"$INSTALL_DIR\""
       ],
@@ -330,6 +345,7 @@ export const openclawDetachesAdapterService = {
         `EXPECTED_ADAPTER_ID=${shellQuote(info.id)}`,
         "test -x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
         "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\"",
+        "grep -q \"\\\"adapterId\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/skill.manifest.json\"",
         "if command -v node >/dev/null 2>&1; then node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" --help >/dev/null; fi"
       ],
       notes: [
@@ -346,6 +362,7 @@ export const openclawDetachesAdapterService = {
     const installDir = input.installDir ? normalizeInstallDir(input.installDir) : adapterRoot;
     const absoluteInstallDir = input.installDir ? path.resolve(expandHomeDir(installDir)) : adapterRoot;
     const manifestPath = path.join(absoluteInstallDir, "adapter.manifest.json");
+    const skillManifestPath = path.join(absoluteInstallDir, "skill.manifest.json");
     const cliPath = path.join(absoluteInstallDir, "bin", "detaches-agent-adapter.mjs");
     const checks: OpenClawAdapterReadinessCheck[] = [];
 
@@ -411,6 +428,27 @@ export const openclawDetachesAdapterService = {
     }
 
     try {
+      const skillManifest = await readJsonFile(skillManifestPath) as Record<string, unknown>;
+      const adapterId = skillManifest.adapterId;
+      checks.push({
+        id: "skill-manifest",
+        state: adapterId === info.id ? "ready" : "invalid",
+        message: adapterId === info.id
+          ? `Skill manifest references ${info.id}.`
+          : `Skill manifest adapterId mismatch: expected ${info.id}, got ${String(adapterId || "missing")}.`,
+        details: { adapterId }
+      });
+    } catch (error: any) {
+      checks.push({
+        id: "skill-manifest",
+        state: error?.code === "ENOENT" ? "missing" : "error",
+        message: error?.code === "ENOENT"
+          ? `Skill manifest is missing at ${path.join(installDir, "skill.manifest.json")}.`
+          : error?.message || "Failed to read skill manifest."
+      });
+    }
+
+    try {
       const stats = await fs.stat(cliPath);
       checks.push({
         id: "cli",
@@ -442,8 +480,10 @@ export const openclawDetachesAdapterService = {
         `EXPECTED_ADAPTER_ID=${shellQuote(info.id)}`,
         "test -d \"$INSTALL_DIR\"",
         "test -f \"$INSTALL_DIR/adapter.manifest.json\"",
+        "test -f \"$INSTALL_DIR/skill.manifest.json\"",
         "test -x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" || test -f \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
-        "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\""
+        "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\"",
+        "grep -q \"\\\"adapterId\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/skill.manifest.json\""
       ]
     };
   },
@@ -467,8 +507,10 @@ export const openclawDetachesAdapterService = {
         `EXPECTED_ADAPTER_ID=${shellQuote(info.id)}`,
         "test -d \"$INSTALL_DIR\"",
         "test -f \"$INSTALL_DIR/adapter.manifest.json\"",
+        "test -f \"$INSTALL_DIR/skill.manifest.json\"",
         "test -x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" || test -f \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
-        "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\""
+        "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\"",
+        "grep -q \"\\\"adapterId\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/skill.manifest.json\""
       ]
     };
     if (!config.remoteUser) {

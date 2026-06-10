@@ -29,6 +29,16 @@ assert.equal(parsedManifest.targets["local-user-machine"].status, "supported");
 assert.equal(parsedManifest.targets["remote-agent-host"].status, "reserved");
 assert.equal(parsedManifest.cliCommands["inspect-context"].includes("routing warnings"), true);
 assert.equal(parsedManifest.cliCommands["context-fetch"].includes("one-time"), true);
+assert.equal(parsedManifest.skill.manifest, "skill.manifest.json");
+
+const parsedSkillManifest = JSON.parse(await fs.readFile(path.join(adapterDir, "skill.manifest.json"), "utf8"));
+assert.equal(parsedSkillManifest.adapterId, "detaches_agent.openclaw.adapter");
+assert.equal(parsedSkillManifest.entrypoints.instructions, "AGENT.md");
+assert.equal(parsedSkillManifest.safety.executesToolsDirectly, false);
+
+const readme = await fs.readFile(path.join(adapterDir, "README.md"), "utf8");
+assert.match(readme, /context-fetch/);
+assert.match(readme, /require user approval/i);
 
 const validContext = await run(["validate-context", "test/valid-context.json"]);
 assert.equal(validContext.code, 0);

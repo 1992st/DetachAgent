@@ -103,7 +103,7 @@ detaches_agent/
 ### Adapter Distribution
 
 - `apps/server/src/services/adapters/openclawDetachesAdapterService.ts`
-  - 读取 `packages/openclaw-detaches-adapter` 的 manifest、AGENT.md、CLI 和 package metadata。
+  - 读取 `packages/openclaw-detaches-adapter` 的 adapter manifest、skill manifest、README、AGENT.md、CLI 和 package metadata。
   - 计算每个文件与 bundle 的 sha256。
   - 生成 `openclaw-detaches-adapter.tar.gz`，供真实 OpenClaw agent host 下载。
 

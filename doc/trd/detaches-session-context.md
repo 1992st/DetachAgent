@@ -17,7 +17,9 @@
 `packages/openclaw-detaches-adapter` 提供第一版可放到远端 agent host 的协议资产：
 
 - `adapter.manifest.json`：机器可读 capability、target、hard rules。
+- `skill.manifest.json`：agent-side skill 入口元数据，声明 instructions、CLI、context 和 safety。
 - `AGENT.md`：给远端 OpenClaw agent/skill 使用的操作说明。
+- `README.md`：安装后给人类 operator/agent maintainer 阅读的使用流程。
 - `bin/detaches-agent-adapter.mjs`：CLI，可打印 manifest、校验/诊断 `clientContext.detaches`、生成标准 `detaches-terminal` / `detaches-file-transfer` fenced request。
 
 它本身不执行命令、不传输文件，也不绕过 detaches_agent UI 审批。它的作用是让真实 agent 机器拥有稳定、可测试、可安装的协议入口，后续再按 OpenClaw 官方 skill/plugin 目录规范包装。
@@ -41,7 +43,8 @@
 - 下载 detaches adapter bundle。
 - 校验 sha256。
 - 解包到指定 installDir。
-- 运行 `detaches-agent-adapter manifest` 验证 adapter id。
+- 校验 `adapter.manifest.json` 和 `skill.manifest.json` 都指向同一 adapter id。
+- 运行 `detaches-agent-adapter manifest` 验证 CLI 可执行。
 
 当前 UI 可以把 install-plan 创建为待审批远端操作。`adapter-install` 请求：
 
@@ -55,7 +58,7 @@
 readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 
 - 默认不传 `installDir` 时，检查本仓库内 adapter distribution 是否完整。
-- 传入 `installDir` 时，检查该目录中的 `adapter.manifest.json`、`package.json` 和 CLI 文件。
+- 传入 `installDir` 时，检查该目录中的 `adapter.manifest.json`、`skill.manifest.json`、`package.json` 和 CLI 文件。
 - 返回 verify commands，可作为后续远端 SSH/agent-side skill 的健康检查脚本。
 - 传 `probe=remote-ssh` 时，通过当前 SSH 配置在远端 agent host 执行只读检查脚本；不安装、不写文件、不改变远端状态。
 
