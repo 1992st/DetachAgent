@@ -37,7 +37,7 @@
     "manifest": "Print this adapter manifest.",
     "validate-context": "Validate a clientContext.detaches JSON object.",
     "inspect-context": "Summarize session identity, adapter readiness, capability targets, and routing warnings without executing tools.",
-    "doctor": "Turn a detaches context file into an agent-side runbook: current identity, requestable targets, blocked targets, safety rules, and exact broker-event command templates.",
+    "doctor": "Turn a detaches context file or one-time context export URL into an agent-side runbook: current identity, requestable targets, blocked targets, safety rules, and exact broker-event command templates.",
     "context-fetch": "Fetch a one-time detaches_agent context export URL, validate it, and write clientContext or detaches JSON for subsequent adapter commands.",
     "broker-probe": "Verify a detaches_agent Tool Broker capabilities endpoint before submitting requests.",
     "terminal-request": "Emit a detaches-terminal fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Supports --context to read session and broker fields; use --submit to post with the context endpoint.",

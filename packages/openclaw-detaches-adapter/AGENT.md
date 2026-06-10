@@ -22,7 +22,15 @@ If the context is missing, ask the user to resend through detaches_agent or avoi
 
 `clientContext.detaches.contextExport` describes how a fresh full context can be handed to the real agent host. The remote agent host consumes the URL, but only the user's local detaches_agent UI can create it.
 
-If detaches_agent provides a one-time context export URL, fetch it on the real agent host and save it before requesting tools:
+If detaches_agent provides a one-time context export URL, consume it with `doctor` on the real agent host before requesting tools:
+
+```sh
+node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor \
+  --url "$DETACHES_CONTEXT_EXPORT_URL" \
+  --output-context /tmp/detaches-client-context.json
+```
+
+If you only need to fetch the context without the runbook, use:
 
 ```sh
 node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs context-fetch \

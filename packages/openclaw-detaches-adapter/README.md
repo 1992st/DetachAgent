@@ -16,17 +16,19 @@ It does not execute commands or move files by itself. It validates session conte
 
 1. Install this package on the remote OpenClaw agent host.
 2. In detaches_agent, generate a one-time context URL for the selected session.
-3. On the remote agent host, fetch and save the context:
+3. On the remote agent host, run the agent-side doctor. Prefer the one-step URL flow when a fresh export URL is available:
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs context-fetch "$DETACHES_CONTEXT_EXPORT_URL" --output /tmp/detaches-client-context.json
+node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --url "$DETACHES_CONTEXT_EXPORT_URL" --output-context /tmp/detaches-client-context.json
 ```
 
-4. Run the agent-side doctor before requesting tools:
+4. If you already saved the context, run doctor against the file:
 
 ```sh
 node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --context /tmp/detaches-client-context.json
 ```
+
+Use `context-fetch` only when you need to fetch or print the context without generating a runbook.
 
 5. Inspect the raw context diagnostics when needed:
 

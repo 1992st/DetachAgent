@@ -101,6 +101,8 @@ assert.equal(parsedDoctor.session.sessionKey, "agent:audio-process:main");
 assert.equal(parsedDoctor.preferredRequestFormat, "broker-event");
 assert.equal(parsedDoctor.broker.endpoint, "http://127.0.0.1:38888/api/tools/events/gateway");
 assert.equal(parsedDoctor.broker.submitTokenAvailable, true);
+assert.equal(parsedDoctor.contextSource.type, "file");
+assert.equal(parsedDoctor.contextSource.path, "test/valid-context.json");
 assert.deepEqual(parsedDoctor.requestableTargets["local-user-machine"], ["terminal", "file-transfer"]);
 assert.equal(parsedDoctor.blockedTargets["remote-agent-host"].manifestStatus, "reserved");
 assert.equal(parsedDoctor.stagedFiles[0].fileId, "file-123");
@@ -134,11 +136,37 @@ const fetchedContextToFile = await run([
   "--print",
   "detaches"
 ]);
-contextFetchServer.close();
 assert.equal(fetchedContextToFile.code, 0);
 assert.equal(JSON.parse(fetchedContextToFile.stdout).ok, true);
 assert.equal(JSON.parse(await fs.readFile(fetchedContextPath, "utf8")).broker.submitToken, "client-context-submit-token");
 await fs.rm(fetchedContextPath, { force: true });
+
+const doctorContextPath = path.join(adapterDir, "test", ".tmp-doctor-context.json");
+const doctorFromUrl = await run([
+  "doctor",
+  "--url",
+  `http://127.0.0.1:${contextFetchPort}/context-export-token-3`,
+  "--output-context",
+  doctorContextPath
+]);
+assert.equal(doctorFromUrl.code, 0);
+const parsedDoctorFromUrl = JSON.parse(doctorFromUrl.stdout);
+assert.equal(parsedDoctorFromUrl.contextSource.type, "one-time-url");
+assert.equal(parsedDoctorFromUrl.contextSource.url, `http://127.0.0.1:${contextFetchPort}/context-export-token-3`);
+assert.equal(parsedDoctorFromUrl.contextSource.savedTo, doctorContextPath);
+assert.equal(parsedDoctorFromUrl.broker.submitTokenAvailable, true);
+assert.equal(JSON.parse(await fs.readFile(doctorContextPath, "utf8")).broker.submitToken, "client-context-submit-token");
+await fs.rm(doctorContextPath, { force: true });
+const conflictingDoctorSource = await run([
+  "doctor",
+  "--context",
+  "test/valid-context.json",
+  "--url",
+  `http://127.0.0.1:${contextFetchPort}/context-export-token-4`
+]);
+assert.equal(conflictingDoctorSource.code, 1);
+assert.match(conflictingDoctorSource.stderr, /either --context or --url/);
+contextFetchServer.close();
 
 const invalidContext = await run(["validate-context", "adapter.manifest.json"]);
 assert.equal(invalidContext.code, 1);

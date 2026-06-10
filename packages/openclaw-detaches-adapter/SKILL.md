@@ -13,13 +13,13 @@ detaches_agent is a local UI and approval broker running on the user's computer.
 ## Required Flow
 
 1. Inspect the latest `clientContext.detaches` or ask the user to generate a one-time context URL in the detaches_agent OpenClaw Adapter panel.
-2. On the real OpenClaw agent host, fetch the full context:
+2. On the real OpenClaw agent host, run the agent-side doctor. Prefer the one-step URL flow when a fresh export URL is available:
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs context-fetch "$DETACHES_CONTEXT_EXPORT_URL" --output /tmp/detaches-client-context.json
+node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --url "$DETACHES_CONTEXT_EXPORT_URL" --output-context /tmp/detaches-client-context.json
 ```
 
-3. Run the agent-side doctor before requesting tools:
+3. If you already saved the context, run doctor against the file:
 
 ```sh
 node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --context /tmp/detaches-client-context.json

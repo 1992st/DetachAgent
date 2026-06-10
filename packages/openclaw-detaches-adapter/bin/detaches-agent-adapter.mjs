@@ -15,6 +15,7 @@ function usage(exitCode = 0) {
     "  validate-context <context-json-file>",
     "  inspect-context <context-json-file>",
     "  doctor --context <context-json-file>",
+    "  doctor --url <one-time-context-export-url> [--output-context <file>]",
     "  context-fetch <one-time-context-export-url> [--output <file> --print client-context|detaches|export]",
     "  broker-probe <detaches-agent-base-url-or-capabilities-url>",
     "  terminal-request --target <target> --command <command> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
@@ -319,7 +320,7 @@ async function brokerProbe(value) {
   if (errors.length) process.exit(1);
 }
 
-async function contextFetch(value, args) {
+async function fetchContextExport(value) {
   const url = String(value || "").trim();
   if (!url) fail("Missing one-time context export URL.");
   const response = await fetch(url, { headers: { Accept: "application/json" } });
@@ -334,6 +335,11 @@ async function contextFetch(value, args) {
   const context = detachesContextFrom(payload);
   const errors = validateContext(context);
   if (errors.length) fail(`Fetched invalid detaches context: ${errors.join("; ")}`);
+  return { url, payload, context };
+}
+
+async function contextFetch(value, args) {
+  const { payload, context } = await fetchContextExport(value);
   const printMode = optionalString(args, "print") || "client-context";
   const selected = printableContextFromExport(payload, printMode);
   const output = optionalString(args, "output");
@@ -349,6 +355,22 @@ async function contextFetch(value, args) {
     return;
   }
   console.log(JSON.stringify(selected, null, 2));
+}
+
+async function doctorFromArgs(args) {
+  const contextPath = optionalString(args, "context");
+  const exportUrl = optionalString(args, "url");
+  if (contextPath && exportUrl) fail("Use either --context or --url, not both.");
+  if (contextPath) {
+    return { context: readContextOption(args), fetched: null };
+  }
+  if (!exportUrl) fail("Missing --context or --url");
+  const fetched = await fetchContextExport(exportUrl);
+  const outputContext = optionalString(args, "output-context");
+  if (outputContext) {
+    fs.writeFileSync(outputContext, `${JSON.stringify(fetched.context, null, 2)}\n`);
+  }
+  return { context: fetched.context, fetched: { url: fetched.url, outputContext: outputContext ?? null } };
 }
 
 function emitFence(fence, payload) {
@@ -444,9 +466,20 @@ async function main() {
 
   if (command === "doctor") {
     const args = parseArgs(rest);
-    const context = readContextOption(args);
-    if (!context) fail("Missing --context");
+    const { context, fetched } = await doctorFromArgs(args);
     const result = doctorContext(context);
+    if (fetched) {
+      result.contextSource = {
+        type: "one-time-url",
+        url: fetched.url,
+        savedTo: fetched.outputContext
+      };
+    } else {
+      result.contextSource = {
+        type: "file",
+        path: optionalString(args, "context")
+      };
+    }
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exit(1);
     return;
