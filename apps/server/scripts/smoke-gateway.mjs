@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import http from "node:http";
 import { once } from "node:events";
 import WebSocket, { WebSocketServer } from "ws";
+import { DEFAULT_OPENCLAW_REMOTE_HOST } from "../dist/config/appConfig.js";
 
 const gatewayPort = Number(process.env.SMOKE_GATEWAY_PORT ?? 19879);
 const serverPort = Number(process.env.SMOKE_SERVER_PORT ?? 39888);
@@ -62,7 +63,17 @@ function createMockGateway() {
             protocol: 3,
             server: { name: "mock-openclaw", version: "smoke" },
             features: { methods: ["health", "sessions.list", "chat.history", "chat.send", "chat.abort"] },
-            snapshot: { presence: [], health: { ok: true }, uptimeMs: 1 },
+            snapshot: {
+              presence: [],
+              health: {
+                ok: true,
+                agents: [
+                  { id: "agent-alpha", name: "Alpha Agent", model: { primary: "openai/gpt-5.4" }, agentRuntime: { id: "codex" } },
+                  { id: "agent-gamma", name: "Gamma Agent", workspace: "/tmp/gamma", agentRuntime: { id: "openclaw" } }
+                ]
+              },
+              uptimeMs: 1
+            },
             auth: { role: "operator" },
             policy: { maxPayload: 16 * 1024 * 1024 }
           }
@@ -199,6 +210,7 @@ async function main() {
       OPENCLAW_REMOTE_USER: "",
       OPENCLAW_AUTH_MODE: "token",
       OPENCLAW_AUTH_TOKEN: "smoke-token",
+      DETACHES_PUBLIC_HOST: host,
       DETACHES_STORAGE_DIR: "./storage-smoke"
     }
   });
@@ -211,7 +223,7 @@ async function main() {
     await waitForHttp(`http://${host}:${serverPort}/`);
 
     const settings = await requestJson("/api/settings");
-    assert.equal(settings.remoteHost, "100.114.139.72");
+    assert.equal(settings.remoteHost, DEFAULT_OPENCLAW_REMOTE_HOST);
     assert.equal(settings.hasAuthToken, true);
 
     const health = await requestJson("/api/health");
@@ -226,13 +238,11 @@ async function main() {
     assert.equal(diagnostics.items.some((item) => item.id === "ssh-user-missing"), true);
 
     const agents = await requestJson("/api/agents");
-    assert.equal(agents.agents.length, 4);
+    assert.equal(agents.agents.length, 2);
     assert.equal(agents.source, "gateway-agents+sessions");
     assert.deepEqual(agents.agents.map((agent) => agent.sessionKey), [
       "agent:agent-alpha:main",
-      "agent:agent-gamma:main",
-      "agent-alpha-session",
-      "agent-beta-session"
+      "agent:agent-gamma:main"
     ]);
 
     const uploadForm = new FormData();
@@ -241,8 +251,9 @@ async function main() {
     const upload = await requestJson("/api/files/upload", { method: "POST", body: uploadForm });
     assert.equal(upload.file.name, "note.txt");
     assert.equal(upload.file.mimeType, "text/plain");
-    assert.equal(upload.file.contentBase64, Buffer.from("hello").toString("base64"));
+    assert.equal(upload.file.contentBase64, undefined);
     assert.equal(upload.file.remotePath, undefined);
+    assert.match(upload.file.localPath, /storage(?:-smoke)?\/uploads\/.+note\.txt$/);
 
     const rejectedDownload = await fetch(`http://${host}:${serverPort}/api/files/download?remotePath=${encodeURIComponent("/etc/passwd")}`);
     assert.equal(rejectedDownload.status, 400);
@@ -275,16 +286,33 @@ async function main() {
       await wait(50);
     }
     assert.equal(observed.chatSend.sessionKey, "agent-alpha-session");
-    assert.equal(observed.chatSend.message, "hello smoke");
+    assert.match(observed.chatSend.message, /^hello smoke/);
+    assert.match(observed.chatSend.message, /detaches_agent 文件上下文/);
+    assert.match(observed.chatSend.message, /note\.txt/);
+    assert.match(observed.chatSend.message, new RegExp(`fileId: ${upload.file.id}`));
+    assert.match(observed.chatSend.message, /currentLocation: 用户本机 detaches_agent staging 区/);
+    assert.match(observed.chatSend.message, /remotePath: not uploaded/);
+    assert.match(observed.chatSend.message, /detaches-file-transfer/);
+    assert.match(observed.chatSend.message, /detaches_agent 接入上下文/);
     assert.equal(observed.chatSend.idempotencyKey, "smoke-idempotency");
-    assert.deepEqual(observed.chatSend.attachments, [
-      {
-        type: "file",
-        mimeType: "text/plain",
-        fileName: "note.txt",
-        content: Buffer.from("hello").toString("base64")
-      }
-    ]);
+    assert.equal(observed.chatSend.attachments, undefined);
+
+    const preparedTransfer = await requestJson("/api/files/transfer/prepare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId: upload.file.id, remotePath: "/tmp/detaches-note.txt" })
+    });
+    assert.equal(preparedTransfer.fileId, upload.file.id);
+    assert.equal(preparedTransfer.remotePath, "/tmp/detaches-note.txt");
+    assert.match(preparedTransfer.downloadUrl, new RegExp(`^http://${host}:${serverPort}/api/files/staged/`));
+    assert.match(preparedTransfer.command, /curl -fL/);
+    assert.match(preparedTransfer.command, /detaches-note\.txt/);
+
+    const stagedDownload = await fetch(preparedTransfer.downloadUrl);
+    assert.equal(stagedDownload.status, 200);
+    assert.equal(await stagedDownload.text(), "hello");
+    const repeatedDownload = await fetch(preparedTransfer.downloadUrl);
+    assert.equal(repeatedDownload.status, 404);
 
     chat.send(JSON.stringify({ type: "abort", runId: "run-smoke-1" }));
     while (!observed.abort) {

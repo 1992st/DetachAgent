@@ -14,6 +14,20 @@ export interface FileUploadResponse {
   warning?: string;
 }
 
+export interface FileTransferPrepareRequest {
+  fileId: string;
+  remotePath: string;
+}
+
+export interface FileTransferPrepareResponse {
+  fileId: string;
+  fileName: string;
+  remotePath: string;
+  downloadUrl: string;
+  command: string;
+  expiresAt: string;
+}
+
 export interface DownloadableArtifact {
   id: string;
   name: string;

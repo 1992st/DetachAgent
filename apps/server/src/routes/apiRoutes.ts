@@ -354,12 +354,37 @@ apiRoutes.post("/files/upload", upload.single("file"), async (req, res) => {
     res.status(400).json({ error: "Missing file." });
     return;
   }
-  const sessionKey = String(req.body.sessionKey || "default");
   try {
-    const file = await fileTransferService.saveUpload(req.file, sessionKey);
+    const file = await fileTransferService.saveUpload(req.file);
     res.json({ file });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/files/transfer/prepare", async (req, res) => {
+  try {
+    const fileId = String(req.body.fileId || "");
+    const remotePath = String(req.body.remotePath || "");
+    if (!fileId || !remotePath) {
+      res.status(400).json({ error: "Missing fileId or remotePath." });
+      return;
+    }
+    res.json(fileTransferService.prepareTransfer(fileId, remotePath));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.get("/files/staged/:fileId", async (req, res) => {
+  try {
+    const token = String(req.query.token || "");
+    const file = await fileTransferService.consumeStagedDownload(req.params.fileId, token);
+    res.download(file.localPath, file.name, async (error) => {
+      if (!error) await file.cleanup();
+    });
+  } catch (error) {
+    res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
 

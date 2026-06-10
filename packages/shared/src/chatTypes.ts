@@ -28,6 +28,7 @@ export interface ChatSendRequest {
   message: string;
   thinking?: string;
   attachments?: UploadedFileRef[];
+  attachmentContextOverride?: string;
 }
 
 export interface ChatSendResponse {
@@ -45,6 +46,6 @@ export type ChatSocketServerEvent =
   | { type: "error"; message: string; details?: unknown };
 
 export type ChatSocketClientEvent =
-  | { type: "send"; message: string; thinking?: string; attachments?: UploadedFileRef[]; idempotencyKey?: string }
+  | { type: "send"; message: string; thinking?: string; attachments?: UploadedFileRef[]; attachmentContextOverride?: string; idempotencyKey?: string }
   | { type: "history" }
   | { type: "abort"; runId: string };

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import SftpClient from "ssh2-sftp-client";
-import type { UploadedFileRef } from "@detaches/shared";
+import type { FileTransferPrepareResponse, UploadedFileRef } from "@detaches/shared";
 import { appConfig } from "../../config/appConfig.js";
 import { runtimeConfig } from "../../config/settingsStore.js";
 
@@ -20,51 +20,85 @@ function sanitizeFileName(name: string): string {
   return name.replace(/[^\w.\- \u4e00-\u9fa5]/g, "_").slice(0, 180) || "upload.bin";
 }
 
+interface StagedFileRecord extends UploadedFileRef {
+  localPath: string;
+}
+
+interface TransferTokenRecord {
+  fileId: string;
+  token: string;
+  expiresAtMs: number;
+}
+
 export class FileTransferService {
-  async saveUpload(file: Express.Multer.File, sessionKey: string): Promise<UploadedFileRef> {
+  private stagedFiles = new Map<string, StagedFileRecord>();
+  private transferTokens = new Map<string, TransferTokenRecord>();
+
+  async saveUpload(file: Express.Multer.File): Promise<UploadedFileRef> {
     const id = nanoid();
     const safeName = sanitizeFileName(file.originalname);
     const localPath = path.join(appConfig.storageDir, "uploads", `${id}-${safeName}`);
     await fs.rename(file.path, localPath);
-    const ref: UploadedFileRef = {
+    const ref: StagedFileRecord = {
       id,
       name: safeName,
       mimeType: file.mimetype || "application/octet-stream",
       size: file.size,
       localPath,
-      contentBase64: (await fs.readFile(localPath)).toString("base64"),
       createdAt: new Date().toISOString()
     };
-    try {
-      ref.remotePath = await this.uploadToRemote(localPath, safeName, sessionKey);
-    } catch {
-      // Keep the local attachment usable even when SFTP is not configured yet.
-    }
+    this.stagedFiles.set(id, ref);
     return ref;
   }
 
-  async uploadToRemote(localPath: string, fileName: string, sessionKey: string): Promise<string> {
-    const config = await runtimeConfig();
-    if (!config.remoteUser) {
-      throw new Error("OPENCLAW_REMOTE_USER is not configured.");
+  prepareTransfer(fileId: string, remotePath: string): FileTransferPrepareResponse {
+    const file = this.stagedFiles.get(fileId);
+    if (!file) {
+      throw new Error("Staged file not found or already transferred.");
     }
-    const remoteHome = await this.remoteHome();
-    const remoteDir = `${normalizeRemotePath(config.remoteWorkspaceRoot, remoteHome)}/ui_uploads/${sessionKey}`;
-    const remotePath = `${remoteDir}/${fileName}`;
-    const sftp = new SftpClient();
-    await sftp.connect({
-      host: config.remoteHost,
-      port: config.remoteSshPort,
-      username: config.remoteUser,
-      privateKey: config.remoteIdentityPath ? await fs.readFile(config.remoteIdentityPath) : undefined
-    });
-    try {
-      await sftp.mkdir(remoteDir, true);
-      await sftp.fastPut(localPath, remotePath);
-      return remotePath;
-    } finally {
-      await sftp.end();
+    const cleanedRemotePath = remotePath.trim();
+    if (!cleanedRemotePath || cleanedRemotePath.includes("\0") || cleanedRemotePath.endsWith("/")) {
+      throw new Error("remotePath must be a target file path.");
     }
+    const token = nanoid(32);
+    const expiresAtMs = Date.now() + 10 * 60 * 1000;
+    this.transferTokens.set(token, { fileId, token, expiresAtMs });
+    const downloadUrl = `http://${this.localAccessHost()}:${appConfig.serverPort}/api/files/staged/${encodeURIComponent(fileId)}?token=${encodeURIComponent(token)}`;
+    return {
+      fileId,
+      fileName: file.name,
+      remotePath: cleanedRemotePath,
+      downloadUrl,
+      command: buildCurlCommand(downloadUrl, cleanedRemotePath),
+      expiresAt: new Date(expiresAtMs).toISOString()
+    };
+  }
+
+  async consumeStagedDownload(fileId: string, token: string): Promise<{ localPath: string; name: string; cleanup: () => Promise<void> }> {
+    const tokenRecord = this.transferTokens.get(token);
+    if (!tokenRecord || tokenRecord.fileId !== fileId) {
+      throw new Error("Invalid staged file token.");
+    }
+    if (tokenRecord.expiresAtMs < Date.now()) {
+      this.transferTokens.delete(token);
+      throw new Error("Staged file token expired.");
+    }
+    const file = this.stagedFiles.get(fileId);
+    if (!file) {
+      this.transferTokens.delete(token);
+      throw new Error("Staged file not found or already transferred.");
+    }
+    await fs.access(file.localPath);
+    const cleanup = async () => {
+      this.transferTokens.delete(token);
+      this.stagedFiles.delete(fileId);
+      try {
+        await fs.unlink(file.localPath);
+      } catch {
+        // Best effort cleanup after a successful one-time transfer.
+      }
+    };
+    return { localPath: file.localPath, name: file.name, cleanup };
   }
 
   async downloadRemote(remotePath: string): Promise<{ localPath: string; name: string }> {
@@ -121,6 +155,30 @@ export class FileTransferService {
       await sftp.end();
     }
   }
+
+  private localAccessHost(): string {
+    const configured = process.env.DETACHES_PUBLIC_HOST?.trim();
+    if (configured) return configured;
+    const directHost = process.env.TAILSCALE_IP?.trim();
+    if (directHost) return directHost;
+    return appConfig.serverHost === "0.0.0.0" ? "127.0.0.1" : appConfig.serverHost;
+  }
 }
 
 export const fileTransferService = new FileTransferService();
+
+function buildCurlCommand(downloadUrl: string, remotePath: string): string {
+  return [
+    "mkdir -p",
+    shellQuote(path.posix.dirname(remotePath)),
+    "&&",
+    "curl -fL",
+    shellQuote(downloadUrl),
+    "-o",
+    shellQuote(remotePath)
+  ].join(" ");
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}

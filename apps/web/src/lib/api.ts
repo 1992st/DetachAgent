@@ -3,6 +3,7 @@ import type {
   AppHealth,
   ClientIdentity,
   DiagnosticsResponse,
+  FileTransferPrepareResponse,
   FileUploadResponse,
   NetworkTestResponse,
   PublicSettings,
@@ -48,6 +49,16 @@ export async function uploadFile(file: File, sessionKey: string): Promise<FileUp
   form.append("file", file);
   form.append("sessionKey", sessionKey);
   const res = await fetch("/api/files/upload", { method: "POST", body: form });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function prepareFileTransfer(fileId: string, remotePath: string): Promise<FileTransferPrepareResponse> {
+  const res = await fetch("/api/files/transfer/prepare", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileId, remotePath })
+  });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }

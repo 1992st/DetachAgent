@@ -10,6 +10,7 @@ storage/downloads/*
 storage/cache/*
 storage/logs/*
 storage-smoke/
+testcase/results/
 !storage/uploads/.gitkeep
 !storage/downloads/.gitkeep
 !storage/cache/.gitkeep

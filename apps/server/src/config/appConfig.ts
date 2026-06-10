@@ -8,6 +8,7 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "../../../..");
+export const DEFAULT_OPENCLAW_REMOTE_HOST = "100.74.38.97";
 
 function intEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -23,12 +24,12 @@ function stringEnv(name: string, fallback = ""): string {
 export const appConfig = {
   serverHost: stringEnv("DETACHES_SERVER_HOST", "127.0.0.1"),
   serverPort: intEnv("DETACHES_SERVER_PORT", 38888),
-  remoteHost: stringEnv("OPENCLAW_REMOTE_HOST", "100.74.38.97"),
+  remoteHost: stringEnv("OPENCLAW_REMOTE_HOST", DEFAULT_OPENCLAW_REMOTE_HOST),
   remoteSshPort: intEnv("OPENCLAW_REMOTE_SSH_PORT", 22),
   remoteUser: stringEnv("OPENCLAW_REMOTE_USER"),
   remoteIdentityPath: stringEnv("OPENCLAW_REMOTE_IDENTITY_PATH"),
   gatewayTransport: stringEnv("OPENCLAW_GATEWAY_TRANSPORT", "ssh") as "ssh" | "direct",
-  gatewayDirectHost: stringEnv("OPENCLAW_GATEWAY_DIRECT_HOST", stringEnv("OPENCLAW_REMOTE_HOST", "100.74.38.97")),
+  gatewayDirectHost: stringEnv("OPENCLAW_GATEWAY_DIRECT_HOST", stringEnv("OPENCLAW_REMOTE_HOST", DEFAULT_OPENCLAW_REMOTE_HOST)),
   gatewayRemoteHost: stringEnv("OPENCLAW_GATEWAY_REMOTE_HOST", "127.0.0.1"),
   gatewayRemotePort: intEnv("OPENCLAW_GATEWAY_REMOTE_PORT", 18789),
   gatewayLocalPort: intEnv("OPENCLAW_GATEWAY_LOCAL_PORT", 18790),

@@ -15,7 +15,7 @@
 
 ## Remaining risks
 
-- Full live chat verification still requires valid SSH credentials and a Gateway token/password for `100.114.139.72`. The latest local handshake reached the remote Gateway auth layer and returned `unauthorized: gateway token missing`, which confirms the protocol/device-identity path but blocks `sessions.list` and `chat.send` until credentials are supplied.
+- Full live chat verification still requires valid SSH credentials and a Gateway token/password for `100.74.38.97`. The latest local handshake reached the remote Gateway auth layer and returned `unauthorized: gateway token missing`, which confirms the protocol/device-identity path but blocks `sessions.list` and `chat.send` until credentials are supplied.
 - File artifact download is still SFTP-based and constrained to the configured workspace root. A native Gateway artifact/download RPC should replace this when the remote API is confirmed.
 - The current WebSocket chat event renderer is intentionally tolerant; once a live Gateway is available, event payload mapping should be tightened against real `chat` event samples.
 

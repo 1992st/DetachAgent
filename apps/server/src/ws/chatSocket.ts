@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { ChatSessionMode, ChatSocketClientEvent, ChatSocketServerEvent } from "@detaches/shared";
+import type { ChatSessionMode, ChatSocketClientEvent, ChatSocketServerEvent, UploadedFileRef } from "@detaches/shared";
 import { gatewayClient } from "../services/gateway/gatewayClient.js";
 import { mapHistory } from "../services/gateway/chatMapper.js";
 import { buildChatClientContext } from "../services/clientContextService.js";
@@ -77,7 +77,7 @@ export function attachChatSocket(server: HttpServer): void {
         } else if (event.type === "send") {
           const response = await gatewayClient.sendChat({
             sessionKey,
-            message: withTerminalControlHint(event.message, sessionKey),
+            message: buildOutboundMessage(event.message, sessionKey, event.attachments, event.attachmentContextOverride),
             thinking: event.thinking,
             attachments: event.attachments,
             idempotencyKey: event.idempotencyKey,
@@ -100,11 +100,58 @@ export function attachChatSocket(server: HttpServer): void {
   });
 }
 
-function withTerminalControlHint(message: string, sessionKey: string): string {
+function buildOutboundMessage(
+  message: string,
+  sessionKey: string,
+  attachments?: UploadedFileRef[],
+  attachmentContextOverride?: string
+): string {
+  const blocks = [message];
+  const attachmentContext = buildAttachmentContext(attachments, attachmentContextOverride);
+  if (attachmentContext) blocks.push("", attachmentContext);
+  blocks.push("", withTerminalControlHint(sessionKey));
+  return blocks.join("\n");
+}
+
+function buildAttachmentContext(attachments?: UploadedFileRef[], override?: string): string | null {
+  const cleanedOverride = override?.trim();
+  if (cleanedOverride) return cleanedOverride;
+  if (!attachments?.length) return null;
   return [
-    message,
+    "[detaches_agent 文件上下文]",
+    `本次消息附带 ${attachments.length} 个文件。`,
     "",
-    "---",
+    ...attachments.flatMap((file, index) => [
+      `${index + 1}. ${file.name}`,
+      `   fileId: ${file.id}`,
+      `   mimeType: ${file.mimeType || "application/octet-stream"}`,
+      `   size: ${formatFileSize(file.size)}`,
+      `   localPath: ${file.localPath || "not exposed"}`,
+      "   currentLocation: 用户本机 detaches_agent staging 区",
+      "   remotePath: not uploaded",
+      "   role: 主输入/待确认",
+      ""
+    ]),
+    "这些文件目前只在用户本机，尚未自动上传到远端。",
+    "如果你需要读取或处理文件，请先决定远端目标文件路径，然后向 UI 发起 detaches-file-transfer 待审批请求。",
+    "请求格式必须是唯一一个 fenced code block：",
+    "```detaches-file-transfer",
+    "{\"fileId\":\"上面的文件 id\",\"remotePath\":\"/absolute/or/relative/target-file\",\"reason\":\"说明为什么需要传输\"}",
+    "```",
+    "用户批准后，detaches_agent 会生成一次性下载链接并在本会话 terminal 中执行 curl，把文件传到你指定的 remotePath。",
+    "用户批准前不要假装已经读取文件；如果传输失败，请根据 terminal 输出继续处理。"
+  ].join("\n").trimEnd();
+}
+
+function formatFileSize(size: number): string {
+  if (!Number.isFinite(size) || size < 0) return "unknown";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function withTerminalControlHint(sessionKey: string): string {
+  return [
     "[detaches_agent 接入上下文]",
     "你正在通过 detaches_agent 本地 UI 与用户对话，不是普通 webchat。",
     "当前用户这台电脑已经为本对话绑定了一个持久本机 terminal。",

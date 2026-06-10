@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Copy, Eye, Paperclip, Send, Square, X } from "lucide-react";
+import { Check, Copy, Eye, FileText, Paperclip, Send, Square, X } from "lucide-react";
 import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, UploadedFileRef } from "@detaches/shared";
+import { prepareFileTransfer } from "../../lib/api.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
 
 interface Props {
@@ -26,6 +27,8 @@ export function ChatPanel({
   const [draft, setDraft] = useState("");
   const [socketState, setSocketState] = useState("idle");
   const [lastRunId, setLastRunId] = useState<string | null>(null);
+  const [attachmentContext, setAttachmentContext] = useState("");
+  const [attachmentContextOpen, setAttachmentContextOpen] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -73,6 +76,12 @@ export function ChatPanel({
     el.scrollTop = el.scrollHeight;
   }, [messages]);
 
+  useEffect(() => {
+    const nextContext = buildDefaultAttachmentContext(attachments);
+    setAttachmentContext(nextContext);
+    setAttachmentContextOpen(Boolean(nextContext));
+  }, [attachments]);
+
   const canSend = useMemo(() => Boolean(sessionKey && draft.trim() && socketRef.current?.readyState === WebSocket.OPEN), [sessionKey, draft, socketState]);
 
   function submit(event: FormEvent) {
@@ -83,6 +92,7 @@ export function ChatPanel({
       type: "send",
       message: text,
       attachments,
+      attachmentContextOverride: attachments.length ? attachmentContext : undefined,
       idempotencyKey: crypto.randomUUID()
     }));
     setMessages((current) => [
@@ -116,6 +126,15 @@ export function ChatPanel({
         ...current,
         { id: crypto.randomUUID(), role: "system", text: "Terminal is not connected yet. Open Agent Terminal and try again.", timestamp: new Date().toISOString() }
       ]);
+    }
+  }
+
+  async function prepareAndRunFileTransfer(request: FileTransferRequest) {
+    const response = await prepareFileTransfer(request.fileId, request.remotePath);
+    const ok = terminalRef.current?.runCommand(response.command) ?? false;
+    terminalRef.current?.reveal();
+    if (!ok) {
+      throw new Error("Terminal is not connected yet. Open Agent Terminal and try again.");
     }
   }
 
@@ -161,6 +180,7 @@ export function ChatPanel({
               </button>
             </div>
             <p>{messageText(message)}</p>
+            <FileTransferRequests text={messageText(message)} onPrepareTransfer={prepareAndRunFileTransfer} onReveal={() => terminalRef.current?.reveal()} />
             <TerminalCommandRequests text={messageText(message)} onApprove={approveTerminalCommand} onReveal={() => terminalRef.current?.reveal()} />
             {message.attachments?.map((attachment) => (
               <small className="attachment-chip" key={`${message.id}-${attachment.name}`}>{attachment.name}</small>
@@ -172,8 +192,32 @@ export function ChatPanel({
       <TerminalPanel ref={terminalRef} sessionKey={sessionKey} />
       <form className="composer" onSubmit={submit}>
         {attachments.length ? (
-          <div className="attachment-strip">
-            {attachments.map((file) => <span key={file.id}>{file.name}</span>)}
+          <div className="attachment-context-panel">
+            <div className="attachment-strip">
+              {attachments.map((file) => (
+                <span key={file.id} title={file.localPath ? `Local staging: ${file.localPath}` : "Local staging file"}>
+                  {file.name}
+                </span>
+              ))}
+              <button
+                type="button"
+                className="secondary-button compact"
+                onClick={() => setAttachmentContextOpen((current) => !current)}
+              >
+                <FileText size={15} />
+                {attachmentContextOpen ? "隐藏上下文" : "编辑上下文"}
+              </button>
+            </div>
+            {attachmentContextOpen ? (
+              <label className="attachment-context-editor">
+                <span>本次发送嵌入上下文</span>
+                <textarea
+                  value={attachmentContext}
+                  onChange={(event) => setAttachmentContext(event.target.value)}
+                  placeholder="描述这些文件的作用，以及远端 agent 应该如何读取和处理。"
+                />
+              </label>
+            ) : null}
           </div>
         ) : null}
         <input
@@ -199,6 +243,80 @@ export function ChatPanel({
 interface TerminalCommandRequest {
   command: string;
   reason?: string;
+}
+
+interface FileTransferRequest {
+  fileId: string;
+  remotePath: string;
+  reason?: string;
+}
+
+function FileTransferRequests({
+  text,
+  onPrepareTransfer,
+  onReveal
+}: {
+  text: string;
+  onPrepareTransfer: (request: FileTransferRequest) => Promise<void>;
+  onReveal: () => void;
+}) {
+  const requests = parseFileTransferRequests(text);
+  const [handled, setHandled] = useState<Record<number, "approved" | "rejected" | "running" | "error">>({});
+  const [errors, setErrors] = useState<Record<number, string>>({});
+  useEffect(() => {
+    setHandled({});
+    setErrors({});
+  }, [text]);
+  if (!requests.length) return null;
+
+  return (
+    <div className="terminal-requests">
+      {requests.map((request, index) => {
+        const state = handled[index];
+        return (
+          <div className="terminal-request-card file-transfer-card" key={`${index}-${request.fileId}-${request.remotePath}`}>
+            <div>
+              <strong>File transfer request</strong>
+              {request.reason ? <p>{request.reason}</p> : null}
+              <code>{`fileId: ${request.fileId}\nremotePath: ${request.remotePath}`}</code>
+              {errors[index] ? <p className="request-error">{errors[index]}</p> : null}
+            </div>
+            <div className="terminal-request-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={Boolean(state && state !== "error")}
+                onClick={() => {
+                  setHandled((current) => ({ ...current, [index]: "running" }));
+                  onPrepareTransfer(request)
+                    .then(() => setHandled((current) => ({ ...current, [index]: "approved" })))
+                    .catch((error) => {
+                      setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
+                      setHandled((current) => ({ ...current, [index]: "error" }));
+                    });
+                }}
+              >
+                <Check size={15} />
+                {state === "approved" ? "Started" : state === "running" ? "Starting" : "Transfer"}
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={Boolean(state && state !== "error")}
+                onClick={() => setHandled((current) => ({ ...current, [index]: "rejected" }))}
+              >
+                <X size={15} />
+                {state === "rejected" ? "Rejected" : "Reject"}
+              </button>
+              <button type="button" className="icon-button" title="Show terminal" onClick={onReveal}>
+                <Eye size={15} />
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function TerminalCommandRequests({
@@ -271,6 +389,35 @@ function parseTerminalCommandRequests(text: string): TerminalCommandRequest[] {
   return requests;
 }
 
+function parseFileTransferRequests(text: string): FileTransferRequest[] {
+  const requests: FileTransferRequest[] = [];
+  const fencePattern = /```(?:detaches-file-transfer|file-transfer)\s*\n([\s\S]*?)```/gi;
+  let match: RegExpExecArray | null;
+  while ((match = fencePattern.exec(text))) {
+    const body = match[1].trim();
+    if (!body) continue;
+    try {
+      const parsed = JSON.parse(body) as { fileId?: unknown; remotePath?: unknown; target?: { remotePath?: unknown }; reason?: unknown };
+      const fileId = typeof parsed.fileId === "string" ? parsed.fileId.trim() : "";
+      const remotePath = typeof parsed.remotePath === "string"
+        ? parsed.remotePath.trim()
+        : typeof parsed.target?.remotePath === "string"
+          ? parsed.target.remotePath.trim()
+          : "";
+      if (fileId && remotePath) {
+        requests.push({
+          fileId,
+          remotePath,
+          reason: typeof parsed.reason === "string" ? parsed.reason.trim() : undefined
+        });
+      }
+    } catch {
+      // Ignore malformed requests; the agent can resend a valid JSON block.
+    }
+  }
+  return requests;
+}
+
 function parseTerminalCommandBody(body: string): TerminalCommandRequest | null {
   if (!body) return null;
   try {
@@ -288,6 +435,41 @@ function parseTerminalCommandBody(body: string): TerminalCommandRequest | null {
   const lines = body.split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean);
   const command = lines.join("\n").trim();
   return command ? { command } : null;
+}
+
+function buildDefaultAttachmentContext(attachments: UploadedFileRef[]): string {
+  if (!attachments.length) return "";
+  return [
+    "[detaches_agent 文件上下文]",
+    `本次消息附带 ${attachments.length} 个文件。`,
+    "",
+    ...attachments.flatMap((file, index) => [
+      `${index + 1}. ${file.name}`,
+      `   fileId: ${file.id}`,
+      `   mimeType: ${file.mimeType || "application/octet-stream"}`,
+      `   size: ${formatFileSize(file.size)}`,
+      `   localPath: ${file.localPath || "not exposed"}`,
+      "   currentLocation: 用户本机 detaches_agent staging 区",
+      "   remotePath: not uploaded",
+      "   role: 主输入/待确认",
+      ""
+    ]),
+    "这些文件目前只在用户本机，尚未自动上传到远端。",
+    "如果你需要读取或处理文件，请先决定远端目标文件路径，然后向 UI 发起 detaches-file-transfer 待审批请求。",
+    "请求格式必须是唯一一个 fenced code block：",
+    "```detaches-file-transfer",
+    "{\"fileId\":\"上面的文件 id\",\"remotePath\":\"/absolute/or/relative/target-file\",\"reason\":\"说明为什么需要传输\"}",
+    "```",
+    "用户批准后，detaches_agent 会生成一次性下载链接并在本会话 terminal 中执行 curl，把文件传到你指定的 remotePath。",
+    "用户批准前不要假装已经读取文件；如果传输失败，请根据 terminal 输出继续处理。"
+  ].join("\n").trimEnd();
+}
+
+function formatFileSize(size: number): string {
+  if (!Number.isFinite(size) || size < 0) return "unknown";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(2)} MB`;
 }
 
 function upsertGatewayChat(current: ChatMessage[], payload: unknown): ChatMessage[] {

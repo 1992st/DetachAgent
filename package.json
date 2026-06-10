@@ -8,7 +8,8 @@
     "build": "pnpm --filter @detaches/shared build && pnpm --filter @detaches/server build && pnpm --filter @detaches/web build",
     "typecheck": "pnpm --filter @detaches/shared build && pnpm --filter @detaches/server typecheck && pnpm --filter @detaches/web typecheck",
     "lint": "pnpm -r lint",
-    "smoke": "pnpm --filter @detaches/server smoke"
+    "smoke": "pnpm --filter @detaches/server smoke",
+    "test:full": "node testcase/run-full-test.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
