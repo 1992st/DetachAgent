@@ -62,6 +62,7 @@
 - 请求块必须包含 fenced code block、target 和 reason。
 - broker-event JSON 必须包含 `source: gateway-event`、`sourceEventId`、`sessionKey` 和 `payload`。
 - `--context` 必须支持完整 `clientContext` 或 `clientContext.detaches`，并自动填充 `sessionKey`、`agentId` 和 broker submit token。
+- `--context -` 必须支持从 stdin 读取完整 `clientContext`。
 - `--submit-url` 必须 POST 同一份 broker-event，并输出服务端响应。
 - gateway-event 提交缺少 per-session submit token 时必须返回 401。
 - 未知 target 被拒绝。

@@ -90,7 +90,7 @@ readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 
 `broker.submitToken` 是当前服务生命周期内按 `sessionKey` 生成的轻量提交令牌。`POST /api/tools/events/gateway` 必须带 `Authorization: Bearer <submitToken>` 或 body/payload 中的 `submitToken`，否则返回 401。它不是最终身份系统，但能避免公开 broker endpoint 被任意来源直接塞入待审批请求。
 
-adapter CLI 的 request 命令支持 `--context <clientContext-or-detaches.json>`，既可以传完整 `clientContext`，也可以只传 `clientContext.detaches` 子对象；CLI 会自动提取 `sessionKey`、`agentId`、`broker.gatewayEventEndpoint` 和 `broker.submitToken`。默认只生成 broker-event JSON；加 `--submit` 时才使用 context 中的 endpoint 直接提交。显式命令行参数仍可覆盖 context 字段。
+adapter CLI 的 request 命令支持 `--context <clientContext-or-detaches.json>`，也支持 `--context -` 从 stdin 读取；既可以传完整 `clientContext`，也可以只传 `clientContext.detaches` 子对象。CLI 会自动提取 `sessionKey`、`agentId`、`broker.gatewayEventEndpoint` 和 `broker.submitToken`。默认只生成 broker-event JSON；加 `--submit` 时才使用 context 中的 endpoint 直接提交。显式命令行参数仍可覆盖 context 字段。
 
 ### Gateway 参数兼容
 

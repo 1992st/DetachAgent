@@ -74,6 +74,7 @@ function detachesContextFrom(value) {
 }
 
 function readContextFile(file) {
+  if (file === "-") return detachesContextFrom(JSON.parse(fs.readFileSync(0, "utf8")));
   return detachesContextFrom(JSON.parse(fs.readFileSync(file, "utf8")));
 }
 

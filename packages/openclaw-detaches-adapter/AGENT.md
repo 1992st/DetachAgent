@@ -54,6 +54,8 @@ node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs terminal-request 
   --source-event-id "$UNIQUE_EVENT_ID"
 ```
 
+Use `--context -` to read the same JSON from stdin.
+
 POST the JSON output to detaches_agent `/api/tools/events/gateway`. This keeps fenced blocks as compatibility only.
 
 If detaches_agent is reachable from the agent host, the CLI can submit the event itself:

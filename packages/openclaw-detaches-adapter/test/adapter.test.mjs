@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import { spawn } from "node:child_process";
 import http from "node:http";
 import path from "node:path";
@@ -8,14 +9,15 @@ import { fileURLToPath } from "node:url";
 const adapterDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cli = path.join(adapterDir, "bin", "detaches-agent-adapter.mjs");
 
-function run(args) {
+function run(args, input = "") {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [cli, ...args], { cwd: adapterDir, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [cli, ...args], { cwd: adapterDir, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
     child.on("exit", (code) => resolve({ code, stdout, stderr }));
+    child.stdin.end(input);
   });
 }
 
@@ -34,6 +36,11 @@ assert.deepEqual(JSON.parse(validContext.stdout), { ok: true });
 const validClientContext = await run(["validate-context", "test/valid-client-context.json"]);
 assert.equal(validClientContext.code, 0);
 assert.deepEqual(JSON.parse(validClientContext.stdout), { ok: true });
+
+const validClientContextJson = await fs.readFile(path.join(adapterDir, "test", "valid-client-context.json"), "utf8");
+const validContextFromStdin = await run(["validate-context", "-"], validClientContextJson);
+assert.equal(validContextFromStdin.code, 0);
+assert.deepEqual(JSON.parse(validContextFromStdin.stdout), { ok: true });
 
 const inspectedContext = await run(["inspect-context", "test/valid-context.json"]);
 assert.equal(inspectedContext.code, 0);
@@ -60,6 +67,10 @@ assert.equal(inspectedClientContext.code, 0);
 const parsedClientContextInspection = JSON.parse(inspectedClientContext.stdout);
 assert.equal(parsedClientContextInspection.sessionKey, "agent:audio-process:main");
 assert.equal(parsedClientContextInspection.broker.submitToken, "client-context-submit-token");
+
+const inspectedStdinClientContext = await run(["inspect-context", "-"], validClientContextJson);
+assert.equal(inspectedStdinClientContext.code, 0);
+assert.equal(JSON.parse(inspectedStdinClientContext.stdout).broker.submitToken, "client-context-submit-token");
 
 const invalidContext = await run(["validate-context", "adapter.manifest.json"]);
 assert.equal(invalidContext.code, 1);
@@ -148,6 +159,24 @@ assert.equal(fullContextTerminalBrokerEvent.code, 0);
 const parsedFullContextTerminalBrokerEvent = JSON.parse(fullContextTerminalBrokerEvent.stdout);
 assert.equal(parsedFullContextTerminalBrokerEvent.sessionKey, "agent:audio-process:main");
 assert.equal(parsedFullContextTerminalBrokerEvent.submitToken, "client-context-submit-token");
+
+const stdinContextTerminalBrokerEvent = await run([
+  "terminal-request",
+  "--target",
+  "local-user-machine",
+  "--command",
+  "pwd",
+  "--reason",
+  "stdin context broker event",
+  "--format",
+  "broker-event",
+  "--context",
+  "-",
+  "--source-event-id",
+  "adapter-test-stdin-context-terminal-1"
+], validClientContextJson);
+assert.equal(stdinContextTerminalBrokerEvent.code, 0);
+assert.equal(JSON.parse(stdinContextTerminalBrokerEvent.stdout).submitToken, "client-context-submit-token");
 
 const fileRequest = await run([
   "file-transfer-request",
