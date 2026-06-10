@@ -1,0 +1,42 @@
+{
+  "app": "detaches_agent",
+  "provider": "detaches_agent",
+  "channel": "detaches_agent",
+  "sessionMode": "main",
+  "sessionKey": "agent:audio-process:main",
+  "agentId": "audio-process",
+  "detaches": {
+    "app": "detaches_agent",
+    "version": 1,
+    "sessionMode": "main",
+    "sessionKey": "agent:audio-process:main",
+    "agentId": "audio-process",
+    "userDevice": {
+      "deviceId": "detaches-test-device",
+      "deviceIdShort": "detaches",
+      "displayName": "detaches test machine",
+      "sessionNamespace": "detaches:detaches"
+    },
+    "broker": {
+      "gatewayEventEndpoint": "http://127.0.0.1:38888/api/tools/events/gateway",
+      "eventSource": "gateway-event",
+      "idempotencyField": "sourceEventId",
+      "submitToken": "client-context-submit-token",
+      "submitTokenHeader": "Authorization",
+      "requestFormats": ["broker-event", "fence"]
+    },
+    "capabilities": [
+      {
+        "name": "terminal",
+        "requestFence": "detaches-terminal",
+        "supportedTargets": ["local-user-machine"],
+        "unavailableTargets": ["remote-agent-host", "gateway-managed"],
+        "approvalRequired": true,
+        "executionHost": "user-local-machine"
+      }
+    ],
+    "invariants": [
+      "Tools are never executed by assistant text alone."
+    ]
+  }
+}

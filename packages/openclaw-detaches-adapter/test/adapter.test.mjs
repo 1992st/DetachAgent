@@ -31,6 +31,10 @@ const validContext = await run(["validate-context", "test/valid-context.json"]);
 assert.equal(validContext.code, 0);
 assert.deepEqual(JSON.parse(validContext.stdout), { ok: true });
 
+const validClientContext = await run(["validate-context", "test/valid-client-context.json"]);
+assert.equal(validClientContext.code, 0);
+assert.deepEqual(JSON.parse(validClientContext.stdout), { ok: true });
+
 const inspectedContext = await run(["inspect-context", "test/valid-context.json"]);
 assert.equal(inspectedContext.code, 0);
 const parsedInspection = JSON.parse(inspectedContext.stdout);
@@ -50,6 +54,12 @@ assert.equal(parsedInspection.targetSupport["local-user-machine"].requestable, t
 assert.deepEqual(parsedInspection.targetSupport["remote-agent-host"].unavailableBy, ["terminal"]);
 assert.equal(parsedInspection.targetSupport["remote-agent-host"].requestable, false);
 assert.equal(parsedInspection.warnings.some((warning) => /remote-agent-host is unavailable/.test(warning)), true);
+
+const inspectedClientContext = await run(["inspect-context", "test/valid-client-context.json"]);
+assert.equal(inspectedClientContext.code, 0);
+const parsedClientContextInspection = JSON.parse(inspectedClientContext.stdout);
+assert.equal(parsedClientContextInspection.sessionKey, "agent:audio-process:main");
+assert.equal(parsedClientContextInspection.broker.submitToken, "client-context-submit-token");
 
 const invalidContext = await run(["validate-context", "adapter.manifest.json"]);
 assert.equal(invalidContext.code, 1);
@@ -118,6 +128,26 @@ const parsedContextTerminalBrokerEvent = JSON.parse(contextTerminalBrokerEvent.s
 assert.equal(parsedContextTerminalBrokerEvent.sessionKey, "agent:audio-process:main");
 assert.equal(parsedContextTerminalBrokerEvent.agentId, "audio-process");
 assert.equal(parsedContextTerminalBrokerEvent.submitToken, "test-submit-token");
+
+const fullContextTerminalBrokerEvent = await run([
+  "terminal-request",
+  "--target",
+  "local-user-machine",
+  "--command",
+  "pwd",
+  "--reason",
+  "full context broker event",
+  "--format",
+  "broker-event",
+  "--context",
+  "test/valid-client-context.json",
+  "--source-event-id",
+  "adapter-test-full-context-terminal-1"
+]);
+assert.equal(fullContextTerminalBrokerEvent.code, 0);
+const parsedFullContextTerminalBrokerEvent = JSON.parse(fullContextTerminalBrokerEvent.stdout);
+assert.equal(parsedFullContextTerminalBrokerEvent.sessionKey, "agent:audio-process:main");
+assert.equal(parsedFullContextTerminalBrokerEvent.submitToken, "client-context-submit-token");
 
 const fileRequest = await run([
   "file-transfer-request",

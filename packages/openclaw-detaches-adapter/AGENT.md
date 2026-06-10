@@ -46,7 +46,7 @@ If the OpenClaw runtime can send structured gateway tool events, prefer broker-e
 
 ```sh
 node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs terminal-request \
-  --context /path/to/clientContext.detaches.json \
+  --context /path/to/clientContext-or-detaches.json \
   --target local-user-machine \
   --command pwd \
   --reason "check the user's local working directory" \
@@ -60,7 +60,7 @@ If detaches_agent is reachable from the agent host, the CLI can submit the event
 
 ```sh
 node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs terminal-request \
-  --context /path/to/clientContext.detaches.json \
+  --context /path/to/clientContext-or-detaches.json \
   --target local-user-machine \
   --command pwd \
   --reason "check the user's local working directory" \

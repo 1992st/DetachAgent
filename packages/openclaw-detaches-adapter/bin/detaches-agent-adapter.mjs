@@ -66,6 +66,17 @@ function validateContext(context) {
   return errors;
 }
 
+function detachesContextFrom(value) {
+  if (value?.app === "detaches_agent" && value?.version === 1 && value?.sessionKey) return value;
+  if (value?.detaches?.app === "detaches_agent") return value.detaches;
+  if (value?.clientContext?.detaches?.app === "detaches_agent") return value.clientContext.detaches;
+  return value;
+}
+
+function readContextFile(file) {
+  return detachesContextFrom(JSON.parse(fs.readFileSync(file, "utf8")));
+}
+
 function listCapabilities(context) {
   return Array.isArray(context?.capabilities) ? context.capabilities : [];
 }
@@ -152,7 +163,7 @@ function optionalString(args, name) {
 function readContextOption(args) {
   const contextPath = optionalString(args, "context");
   if (!contextPath) return null;
-  const context = JSON.parse(fs.readFileSync(contextPath, "utf8"));
+  const context = readContextFile(contextPath);
   const errors = validateContext(context);
   if (errors.length) fail(`Invalid --context: ${errors.join("; ")}`);
   return context;
@@ -261,7 +272,7 @@ async function main() {
   if (command === "validate-context") {
     const file = rest[0];
     if (!file) usage(1);
-    const context = JSON.parse(fs.readFileSync(file, "utf8"));
+    const context = readContextFile(file);
     const errors = validateContext(context);
     if (errors.length) {
       console.error(JSON.stringify({ ok: false, errors }, null, 2));
@@ -274,7 +285,7 @@ async function main() {
   if (command === "inspect-context") {
     const file = rest[0];
     if (!file) usage(1);
-    const context = JSON.parse(fs.readFileSync(file, "utf8"));
+    const context = readContextFile(file);
     const result = inspectContext(context);
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exit(1);
