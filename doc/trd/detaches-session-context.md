@@ -80,9 +80,9 @@ gateway-managed      预留，需 Gateway 原生文件/工具/artifact adapter
 执行结果查询：
 
 - `GET /api/tools/requests/:requestId/result`
-- 返回 `executionId`、`terminalId`、`sessionKey`、terminal replay 输出切片、`capturedAt`。
+- 返回 `executionId`、`terminalId`、`sessionKey`、terminal replay 输出切片、`completed`、`exitCode`、`capturedAt`。
 - Tool Broker 会 best-effort 通过 Gateway `chat.send` 把 `[detaches_agent 工具结果]` 快照回写到同一 session。
-- 当前结果是输出快照，不代表命令已经自然结束；后续需要补完成检测。
+- Tool Broker 通过注入 `__DETACHES_TOOL_START__` / `__DETACHES_TOOL_END__` marker 判断命令是否结束。
 
 审批入口：
 

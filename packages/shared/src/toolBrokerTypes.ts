@@ -53,6 +53,8 @@ export interface ToolExecutionResult {
   status: ToolRequestStatus;
   terminalId?: string;
   sessionKey: string;
+  completed: boolean;
+  exitCode?: number;
   output: string;
   outputBytes: number;
   capturedAt: string;

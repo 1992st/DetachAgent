@@ -29,6 +29,7 @@ interface ToolExecutionRecord {
   terminalId: string;
   startOffset: number;
   command: string;
+  wrappedCommand: string;
   createdAt: string;
 }
 
@@ -146,6 +147,7 @@ class ToolBrokerService {
           requestId,
           status: request.status,
           sessionKey: request.sessionKey,
+          completed: false,
           output: "",
           outputBytes: 0,
           capturedAt: new Date().toISOString(),
@@ -154,7 +156,8 @@ class ToolBrokerService {
       };
     }
     const snapshot = await terminalService.snapshot(execution.sessionKey);
-    const output = snapshot.replay.slice(execution.startOffset).slice(-20_000);
+    const parsed = parseExecutionOutput(snapshot.replay.slice(execution.startOffset), execution.executionId);
+    const output = parsed.output.slice(-20_000);
     return {
       request,
       result: {
@@ -163,10 +166,14 @@ class ToolBrokerService {
         status: request.status,
         terminalId: execution.terminalId,
         sessionKey: execution.sessionKey,
+        completed: parsed.completed,
+        exitCode: parsed.exitCode,
         output,
         outputBytes: Buffer.byteLength(output, "utf8"),
         capturedAt: new Date().toISOString(),
-        message: "Output is a terminal replay snapshot captured after the broker wrote the command."
+        message: parsed.completed
+          ? "Output is a terminal replay snapshot captured after the broker completion marker."
+          : "Output is a terminal replay snapshot; completion marker has not appeared yet."
       }
     };
   }
@@ -206,15 +213,18 @@ class ToolBrokerService {
   }
 
   private async runInTerminal(request: ToolRequestRecord, command: string): Promise<ToolExecutionRecord> {
+    const executionId = nanoid();
     const before = await terminalService.snapshot(request.sessionKey);
-    const terminal = await terminalService.runCommand(request.sessionKey, command);
+    const wrappedCommand = wrapCommandForCompletion(command, executionId);
+    const terminal = await terminalService.runCommand(request.sessionKey, wrappedCommand);
     const execution: ToolExecutionRecord = {
-      executionId: nanoid(),
+      executionId,
       requestId: request.id,
       sessionKey: request.sessionKey,
       terminalId: terminal.terminalId,
       startOffset: before.replay.length,
       command,
+      wrappedCommand,
       createdAt: new Date().toISOString()
     };
     this.executions.set(execution.executionId, execution);
@@ -242,6 +252,8 @@ class ToolBrokerService {
           status: request.status,
           terminalId: result.result.terminalId,
           sessionKey: result.result.sessionKey,
+          completed: result.result.completed,
+          exitCode: result.result.exitCode,
           outputBytes: result.result.outputBytes,
           outputTail: output.slice(-4000)
         }, null, 2),
@@ -386,4 +398,44 @@ function targetObject(value: unknown): value is { [key: string]: unknown } {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function wrapCommandForCompletion(command: string, executionId: string): string {
+  return [
+    `printf '%s\\n' ${shellQuote(`__DETACHES_TOOL_START__:${executionId}`)}`,
+    "{",
+    command,
+    "\n}",
+    "__detaches_status=$?",
+    `printf '%s\\n' \"__DETACHES_TOOL_END__:${executionId}:$__detaches_status\"`
+  ].join("\n");
+}
+
+function parseExecutionOutput(raw: string, executionId: string): { output: string; completed: boolean; exitCode?: number } {
+  const startMarker = `__DETACHES_TOOL_START__:${executionId}`;
+  const endPattern = new RegExp(`__DETACHES_TOOL_END__:${escapeRegExp(executionId)}:(\\d+)`);
+  const afterStart = raw.includes(startMarker) ? raw.slice(raw.indexOf(startMarker) + startMarker.length) : raw;
+  const endMatch = endPattern.exec(afterStart);
+  const beforeEnd = endMatch ? afterStart.slice(0, endMatch.index) : afterStart;
+  return {
+    output: stripCommandEcho(beforeEnd).trim(),
+    completed: Boolean(endMatch),
+    exitCode: endMatch ? Number(endMatch[1]) : undefined
+  };
+}
+
+function stripCommandEcho(value: string): string {
+  return value
+    .replace(/\r/g, "")
+    .split("\n")
+    .filter((line) => !line.includes("__DETACHES_TOOL_START__") && !line.includes("__DETACHES_TOOL_END__"))
+    .join("\n");
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

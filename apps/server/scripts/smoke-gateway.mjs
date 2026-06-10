@@ -379,23 +379,30 @@ async function main() {
         sessionKey: chatSessionKey,
         agentId: "agent-alpha",
         reason: "smoke terminal broker",
-        payload: { command: "pwd" }
+        payload: { command: "printf 'smoke-complete\\n'" }
       })
     });
     assert.equal(terminalTool.request.status, "pending");
     const approvedTerminalTool = await requestJson(`/api/tools/requests/${terminalTool.request.id}/approve`, { method: "POST" });
     assert.equal(approvedTerminalTool.request.status, "approved");
-    assert.equal(approvedTerminalTool.command, "pwd");
+    assert.equal(approvedTerminalTool.command, "printf 'smoke-complete\\n'");
     assert.equal(approvedTerminalTool.execution.target, "local-user-machine");
     assert.equal(approvedTerminalTool.execution.sessionKey, chatSessionKey);
     assert.equal(approvedTerminalTool.execution.wroteToTerminal, true);
     assert.match(approvedTerminalTool.execution.terminalId, /.+/);
-    await wait(200);
-    const terminalToolResult = await requestJson(`/api/tools/requests/${terminalTool.request.id}/result`);
+    let terminalToolResult = await requestJson(`/api/tools/requests/${terminalTool.request.id}/result`);
+    while (!terminalToolResult.result.completed) {
+      if (Date.now() - started > 12000) throw new Error("Timed out waiting for terminal tool completion marker.");
+      await wait(100);
+      terminalToolResult = await requestJson(`/api/tools/requests/${terminalTool.request.id}/result`);
+    }
     assert.equal(terminalToolResult.result.requestId, terminalTool.request.id);
     assert.equal(terminalToolResult.result.executionId, approvedTerminalTool.execution.executionId);
     assert.equal(terminalToolResult.result.terminalId, approvedTerminalTool.execution.terminalId);
     assert.equal(terminalToolResult.result.sessionKey, chatSessionKey);
+    assert.equal(terminalToolResult.result.completed, true);
+    assert.equal(terminalToolResult.result.exitCode, 0);
+    assert.match(terminalToolResult.result.output, /smoke-complete/);
     assert.equal(typeof terminalToolResult.result.output, "string");
     assert.equal(terminalToolResult.result.outputBytes >= 0, true);
     while (!observed.chatSends.some((item) => item.idempotencyKey === `detaches-tool-result:${approvedTerminalTool.execution.executionId}`)) {
@@ -423,6 +430,11 @@ async function main() {
     assert.equal(blockedTerminalTool.request.status, "blocked");
     assert.match(blockedTerminalTool.request.error, /cannot fallback/);
 
+    const brokerUploadForm = new FormData();
+    brokerUploadForm.append("sessionKey", chatSessionKey);
+    brokerUploadForm.append("file", new Blob(["broker"], { type: "text/plain" }), "broker-transfer.txt");
+    const brokerUpload = await requestJson("/api/files/upload", { method: "POST", body: brokerUploadForm });
+
     const brokerTransfer = await requestJson("/api/tools/requests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -432,7 +444,7 @@ async function main() {
         sessionKey: chatSessionKey,
         agentId: "agent-alpha",
         reason: "smoke file broker",
-        payload: { fileId: upload.file.id, remotePath: "/tmp/detaches-note-via-broker.txt" }
+        payload: { fileId: brokerUpload.file.id, remotePath: "/tmp/detaches-note-via-broker.txt" }
       })
     });
     assert.equal(brokerTransfer.request.status, "pending");
@@ -442,9 +454,15 @@ async function main() {
     assert.match(approvedBrokerTransfer.command, /detaches-note-via-broker\.txt/);
     assert.equal(approvedBrokerTransfer.execution.wroteToTerminal, true);
     assert.equal(approvedBrokerTransfer.execution.sessionKey, chatSessionKey);
-    const brokerTransferResult = await requestJson(`/api/tools/requests/${brokerTransfer.request.id}/result`);
+    let brokerTransferResult = await requestJson(`/api/tools/requests/${brokerTransfer.request.id}/result`);
+    while (!brokerTransferResult.result.completed) {
+      if (Date.now() - started > 12000) throw new Error("Timed out waiting for broker transfer completion marker.");
+      await wait(100);
+      brokerTransferResult = await requestJson(`/api/tools/requests/${brokerTransfer.request.id}/result`);
+    }
     assert.equal(brokerTransferResult.result.executionId, approvedBrokerTransfer.execution.executionId);
     assert.equal(brokerTransferResult.result.terminalId, approvedBrokerTransfer.execution.terminalId);
+    assert.equal(brokerTransferResult.result.exitCode, 0);
 
     const extractedTools = await requestJson("/api/tools/requests/extract", {
       method: "POST",
@@ -511,7 +529,7 @@ async function main() {
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "terminal" && event.request.target === "local-user-machine"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "terminal" && event.request.target === "remote-agent-host" && event.request.status === "blocked"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.payload?.command === "echo broker-parse"), true);
-    assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.command === "pwd" && typeof event.terminalId === "string"), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.command === "printf 'smoke-complete\\n'" && typeof event.terminalId === "string"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && /detaches-note-via-broker\.txt/.test(event.command || "") && typeof event.terminalId === "string"), true);
 
     chat.send(JSON.stringify({ type: "abort", runId: "run-smoke-1" }));

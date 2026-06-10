@@ -75,7 +75,7 @@ detaches_agent/
   - 阻断不可用 target，禁止把 `remote-agent-host` / `gateway-managed` 退化成本机执行。
   - 审批本机 terminal 请求时直接调用 `terminalService.runCommand` 写入会话 terminal。
   - 审批文件传输请求时复用 `fileTransferService.prepareTransfer` 生成一次性 curl 命令，并由 Broker 写入会话 terminal。
-  - 记录 executionId、terminalId 和 terminal replay 起点；`/api/tools/requests/:requestId/result` 可查询执行后的输出快照。
+  - 写入命令时注入 start/end marker，记录 executionId、terminalId 和 terminal replay 起点；`/api/tools/requests/:requestId/result` 可查询输出快照、completed 和 exitCode。
   - best-effort 通过 Gateway `chat.send` 把 `[detaches_agent 工具结果]` 快照回写到同一 session，让 agent 可继续推理。
   - 写入 `storage/logs/tool-broker-audit.jsonl`。
 
