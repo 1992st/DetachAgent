@@ -73,7 +73,7 @@ gateway-managed      预留，需 Gateway 原生文件/工具/artifact adapter
 
 ### Tool request broker
 
-服务端 `/api/tools/requests/extract` 负责解析 assistant 文本中的 `detaches-terminal` / `detaches-file-transfer` fenced block，并生成 `ToolRequestRecord`。前端只渲染 broker 返回的请求状态，不再维护自己的协议解析器。
+服务端 `/api/tools/requests/extract` 负责解析 assistant 文本中的 `detaches-terminal` / `detaches-file-transfer` fenced block，并生成 `ToolRequestRecord`。前端只渲染 broker 返回的请求状态，不再维护自己的协议解析器。兼容文本解析路径会带上 `sourceMessageId` / `sourceRunId`，用于把工具请求回溯到具体聊天消息或 run。
 
 结构化 Gateway 事件入口：
 

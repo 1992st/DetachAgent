@@ -170,7 +170,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
               </button>
             </div>
             <p>{messageText(message)}</p>
-            <ToolRequests text={messageText(message)} sessionKey={sessionKey} agentId={agentId} clientIdentity={clientIdentity} onReveal={() => terminalRef.current?.reveal()} />
+            <ToolRequests
+              text={messageText(message)}
+              sessionKey={sessionKey}
+              agentId={agentId}
+              sourceMessageId={message.id}
+              clientIdentity={clientIdentity}
+              onReveal={() => terminalRef.current?.reveal()}
+            />
             {message.attachments?.map((attachment) => (
               <small className="attachment-chip" key={`${message.id}-${attachment.name}`}>{attachment.name}</small>
             ))}
@@ -258,12 +265,14 @@ function ToolRequests({
   text,
   sessionKey,
   agentId,
+  sourceMessageId,
   clientIdentity,
   onReveal
 }: {
   text: string;
   sessionKey: string | null;
   agentId: string | null;
+  sourceMessageId: string;
   clientIdentity: ClientIdentity | null;
   onReveal: () => void;
 }) {
@@ -280,7 +289,7 @@ function ToolRequests({
     setErrors({});
     setResultSummaries({});
     setRequests([]);
-    const loadRequests = () => extractToolRequests({ text, sessionKey, agentId })
+    const loadRequests = () => extractToolRequests({ text, sessionKey, agentId, sourceMessageId })
       .then((response) => {
         const extractedIds = new Set(response.requests.map((request) => request.id));
         return fetchToolRequests({ sessionKey, agentId, limit: 100 })
@@ -304,7 +313,7 @@ function ToolRequests({
       })
       .catch((error) => setErrors({ 0: error instanceof Error ? error.message : String(error) }));
     void loadRequests();
-  }, [text, sessionKey, agentId]);
+  }, [text, sessionKey, agentId, sourceMessageId]);
   if (!requests.length && !errors[0]) return null;
 
   return (

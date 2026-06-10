@@ -73,6 +73,7 @@ detaches_agent/
   - 从 assistant 文本中解析 fenced request，生成服务端 `ToolRequestRecord`；也支持 `POST /api/tools/events/gateway` 写入结构化 Gateway tool event。
   - 分配服务端 `requestId`。
   - 记录 `source` / `sourceEventId`，对 Gateway/OpenClaw tool event 做幂等去重。
+  - 记录 `sourceMessageId` / `sourceRunId`，让兼容文本解析出的工具请求能回溯到触发它的聊天消息。
   - 入队时执行基础风险分级：safe/elevated/destructive；destructive 会直接 blocked，elevated 在 UI 标记风险原因，审批 API 必须带 `riskAccepted: true`。
   - 阻断不可用 target，禁止把 `remote-agent-host` / `gateway-managed` 退化成本机执行。
   - 审批本机 terminal 请求时直接调用 `terminalService.runCommand` 写入会话 terminal。

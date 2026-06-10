@@ -597,6 +597,8 @@ async function main() {
       body: JSON.stringify({
         sessionKey: chatSessionKey,
         agentId: "agent-alpha",
+        sourceMessageId: "message-smoke-tools-1",
+        sourceRunId: "run-smoke-tools-1",
         text: [
           "please run",
           "```detaches-terminal",
@@ -611,6 +613,8 @@ async function main() {
     assert.equal(extractedTools.requests.length, 2);
     assert.equal(extractedTools.requests[0].kind, "terminal");
     assert.equal(extractedTools.requests[0].status, "pending");
+    assert.equal(extractedTools.requests[0].sourceMessageId, "message-smoke-tools-1");
+    assert.equal(extractedTools.requests[0].sourceRunId, "run-smoke-tools-1");
     assert.equal(extractedTools.requests[0].payload.command, "echo broker-parse");
     assert.equal(extractedTools.requests[1].target, "remote-agent-host");
     assert.equal(extractedTools.requests[1].status, "blocked");

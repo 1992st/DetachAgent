@@ -33,6 +33,8 @@ export interface ToolRequestCreateInput {
   reason?: string;
   source?: ToolRequestSource;
   sourceEventId?: string;
+  sourceMessageId?: string;
+  sourceRunId?: string;
   payload: Record<string, unknown>;
 }
 
@@ -97,6 +99,8 @@ export interface ToolRequestExtractInput {
   text: string;
   sessionKey: string;
   agentId?: string;
+  sourceMessageId?: string;
+  sourceRunId?: string;
 }
 
 export interface ToolRequestExtractResponse {

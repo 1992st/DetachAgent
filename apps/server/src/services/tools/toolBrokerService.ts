@@ -65,7 +65,7 @@ class ToolBrokerService {
   private saveChain: Promise<void> = Promise.resolve();
   readonly emitter = new EventEmitter();
 
-  async extractFromText(input: { text: string; sessionKey: string; agentId?: string }): Promise<ToolRequestExtractResponse> {
+  async extractFromText(input: { text: string; sessionKey: string; agentId?: string; sourceMessageId?: string; sourceRunId?: string }): Promise<ToolRequestExtractResponse> {
     await this.load();
     const parsed = parseToolRequests(input.text);
     const requests = [];
@@ -77,6 +77,8 @@ class ToolBrokerService {
         agentId: input.agentId,
         reason: item.reason,
         source: "text-extract",
+        sourceMessageId: input.sourceMessageId,
+        sourceRunId: input.sourceRunId,
         payload: item.payload
       }));
     }

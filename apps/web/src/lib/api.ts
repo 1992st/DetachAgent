@@ -111,7 +111,7 @@ export async function fetchToolRequests(input: { sessionKey?: string | null; age
   return res.json();
 }
 
-export async function extractToolRequests(input: { text: string; sessionKey: string; agentId?: string | null }): Promise<ToolRequestExtractResponse> {
+export async function extractToolRequests(input: { text: string; sessionKey: string; agentId?: string | null; sourceMessageId?: string; sourceRunId?: string | null }): Promise<ToolRequestExtractResponse> {
   const res = await fetch("/api/tools/requests/extract", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

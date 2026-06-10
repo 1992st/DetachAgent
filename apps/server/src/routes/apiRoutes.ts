@@ -482,11 +482,13 @@ apiRoutes.post("/tools/requests/extract", async (req, res) => {
     const text = typeof req.body.text === "string" ? req.body.text : "";
     const sessionKey = typeof req.body.sessionKey === "string" ? req.body.sessionKey.trim() : "";
     const agentId = typeof req.body.agentId === "string" ? req.body.agentId.trim() : undefined;
+    const sourceMessageId = typeof req.body.sourceMessageId === "string" ? req.body.sourceMessageId.trim() : undefined;
+    const sourceRunId = typeof req.body.sourceRunId === "string" ? req.body.sourceRunId.trim() : undefined;
     if (!text || !sessionKey) {
       res.status(400).json({ error: "Missing text or sessionKey." });
       return;
     }
-    res.json(await toolBrokerService.extractFromText({ text, sessionKey, agentId }));
+    res.json(await toolBrokerService.extractFromText({ text, sessionKey, agentId, sourceMessageId, sourceRunId }));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }

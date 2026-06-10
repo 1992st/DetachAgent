@@ -45,14 +45,14 @@
 
 - 已有基础 Tool Broker 审计：
   - 记录每一次 agent 工具请求创建。
-  - 记录 target、sessionKey、agentId、审批、拒绝、失败原因、审批设备 actor、riskAccepted。
+  - 记录 target、sessionKey、agentId、sourceMessageId/sourceRunId、审批、拒绝、失败原因、审批设备 actor、riskAccepted。
   - 保存路径：`storage/logs/tool-broker-audit.jsonl`。
   - 当前状态快照保存到 `storage/cache/tool-broker-state.json`，服务重启后可恢复 request、execution 和结果回写状态。
 - 后续还需要补齐：
   - 命令真正写入 terminal 的时间已可通过 `tool.approve` 与 `terminalId` 追踪，UI 已显示基础执行/回写状态，后续需要更完整的执行详情抽屉。
   - terminal 输出快照已可通过 `/api/tools/requests/:requestId/result` 查询，并通过有状态 outbox 回写 agent；后续需要替换为 Gateway/OpenClaw 原生结构化 tool result，减少 `chat.send` 文本协议依赖。
   - 更强的用户身份与认证确认，而不仅是本机设备身份。
-  - 与聊天消息 id / runId 的关联。
+  - 更完整的聊天消息详情跳转和 run 详情视图。
 
 ### 命令风险提示
 
