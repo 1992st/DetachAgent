@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.turbo/
+.vite/
+.env
+.env.local
+.DS_Store
+storage/uploads/*
+storage/downloads/*
+storage/cache/*
+storage/logs/*
+storage-smoke/
+!storage/uploads/.gitkeep
+!storage/downloads/.gitkeep
+!storage/cache/.gitkeep
+!storage/logs/.gitkeep

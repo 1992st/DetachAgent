@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>detaches_agent v0.1 功能说明</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --ink: #1f2937;
+      --muted: #64748b;
+      --line: #d8dee8;
+      --accent: #0f766e;
+      --blue: #2563eb;
+      --warn: #b45309;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.65;
+    }
+    header {
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 40px 24px 30px;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1, h2, h3, p { margin: 0; letter-spacing: 0; }
+    h1 { font-size: 32px; }
+    h2 { margin-bottom: 14px; font-size: 22px; }
+    h3 { margin-bottom: 8px; font-size: 16px; }
+    header p {
+      margin-top: 10px;
+      max-width: 820px;
+      color: #cbd5e1;
+    }
+    section {
+      margin-top: 18px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: #e0f2fe;
+      color: #075985;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .item {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+    .item p, li { color: var(--muted); }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    pre {
+      overflow: auto;
+      padding: 14px;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #d1fae5;
+      white-space: pre-wrap;
+    }
+    ul {
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      align-items: stretch;
+    }
+    .node {
+      min-height: 72px;
+      padding: 12px;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      background: #eff6ff;
+      color: #1e3a8a;
+      font-weight: 700;
+      text-align: center;
+    }
+    .arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--blue);
+      font-weight: 700;
+    }
+    .note {
+      border-color: #fde68a;
+      background: #fffbeb;
+      color: #78350f;
+    }
+    footer {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 8px 24px 32px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 760px) {
+      h1 { font-size: 26px; }
+      .grid, .flow { grid-template-columns: 1fr; }
+      .arrow { min-height: 20px; transform: rotate(90deg); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>detaches_agent v0.1 功能说明</h1>
+    <p>当前版本实现了本地 Web UI 连接远端 OpenClaw Gateway，并为每个聊天会话绑定一个本机持久 Terminal。远端 agent 可以通过约定命令块请求控制用户电脑，用户审批后才会执行。</p>
+    <div class="meta">
+      <span class="pill">版本：v0.1 first commit</span>
+      <span class="pill">远端 Gateway：OpenClaw</span>
+      <span class="pill">本机控制：per-session Terminal</span>
+      <span class="pill">执行策略：用户审批</span>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>核心能力</h2>
+      <div class="grid">
+        <article class="item">
+          <h3>多 Agent 聊天</h3>
+          <p>本地 UI 通过本地 Node 后端连接 OpenClaw Gateway，读取远端 agent 列表，用户可选择不同 agent 进行聊天。</p>
+        </article>
+        <article class="item">
+          <h3>会话隔离</h3>
+          <p>默认使用 <code>agent:&lt;agentId&gt;:detaches:&lt;deviceId&gt;</code> 独立会话，避免污染远端 <code>main</code> 会话；UI 可手动切换主会话。</p>
+        </article>
+        <article class="item">
+          <h3>本机持久 Terminal</h3>
+          <p>每个聊天 sessionKey 绑定一个本机 terminal。切换会话时复用同一个 terminal；WebSocket 断开后后端仍保留该 terminal 进程和输出回放。</p>
+        </article>
+        <article class="item">
+          <h3>默认隐藏，可展开查看</h3>
+          <p>聊天框下方有 <code>Agent Terminal</code> 折叠条，默认隐藏；用户可随时展开查看该 agent 对应 terminal 的活动。</p>
+        </article>
+        <article class="item">
+          <h3>Agent 请求控制本机</h3>
+          <p>后端会把 detaches_agent 接入上下文附加到用户消息，让远端 agent 知道当前对话拥有可审批的本机 terminal。</p>
+        </article>
+        <article class="item">
+          <h3>审批后执行</h3>
+          <p>agent 不能直接执行命令，只能返回 <code>detaches-terminal</code> 命令块。UI 展示审批卡，用户点击 Run 后才写入对应 terminal。</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>当前链路</h2>
+      <div class="flow">
+        <div class="node">用户 Web UI</div>
+        <div class="arrow">→</div>
+        <div class="node">本地 Node Server</div>
+        <div class="arrow">→</div>
+        <div class="node">OpenClaw Gateway</div>
+      </div>
+      <p style="margin-top: 14px; color: var(--muted);">聊天走 Gateway；本机执行走本地 Node Server 的 per-session Terminal WebSocket。</p>
+    </section>
+
+    <section>
+      <h2>Agent 控制协议</h2>
+      <p>远端 agent 如需控制用户电脑，必须返回如下 fenced code block：</p>
+      <pre>```detaches-terminal
+{"command":"pwd","reason":"查看用户本机当前工作目录"}
+```</pre>
+      <ul>
+        <li><code>command</code>：要写入本机会话 terminal 的命令。</li>
+        <li><code>reason</code>：给用户看的执行原因。</li>
+        <li>UI 会把该块渲染成审批卡；用户点击 <code>Run</code> 后才执行。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>运行方式</h2>
+      <pre>cd /Users/zhangshutong/code/detaches_agent
+pnpm dev</pre>
+      <ul>
+        <li>默认后端：<code>http://127.0.0.1:38888</code></li>
+        <li>默认前端：<code>http://127.0.0.1:5173</code></li>
+        <li>如果端口被占用，Vite 会自动切换到下一个可用端口，例如 <code>5174</code>。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>已验证内容</h2>
+      <ul>
+        <li><code>pnpm typecheck</code> 通过。</li>
+        <li><code>pnpm build</code> 通过。</li>
+        <li>同一 session 的 terminal 断开后重连，terminalId 不变，历史输出仍在 replay 中。</li>
+        <li>本机 terminal 可接收 WebSocket 写入命令并返回输出。</li>
+      </ul>
+    </section>
+
+    <section class="note">
+      <h2>当前限制与下一步</h2>
+      <ul>
+        <li>当前环境中 <code>node-pty</code> 会 fallback 到 pipe shell；普通命令可用，全屏 TUI 体验后续可继续优化。</li>
+        <li>建议下一版加入执行审计日志、命令风险提示、workspace 权限边界和一键停止任务。</li>
+        <li>如果需要远端 terminal 模式，可在当前 per-session terminal 架构上增加目标类型：local / remote。</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    生成位置：<code>docs/detaches-agent-v0.1-feature-summary.html</code>
+  </footer>
+</body>
+</html>

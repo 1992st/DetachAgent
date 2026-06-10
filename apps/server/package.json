@@ -1,0 +1,34 @@
+{
+  "name": "@detaches/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "pnpm --filter @detaches/shared build && tsc -p tsconfig.json",
+    "typecheck": "pnpm --filter @detaches/shared build && tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "smoke": "pnpm build && node scripts/smoke-gateway.mjs"
+  },
+  "dependencies": {
+    "@detaches/shared": "workspace:*",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "multer": "1.4.5-lts.1",
+    "nanoid": "^5.1.5",
+    "node-pty": "^1.1.0",
+    "ssh2-sftp-client": "^11.0.0",
+    "ws": "^8.18.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.2",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.15.29",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "detaches-agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n server,web -c cyan,green \"pnpm --filter @detaches/server dev\" \"pnpm --filter @detaches/web dev\"",
+    "build": "pnpm --filter @detaches/shared build && pnpm --filter @detaches/server build && pnpm --filter @detaches/web build",
+    "typecheck": "pnpm --filter @detaches/shared build && pnpm --filter @detaches/server typecheck && pnpm --filter @detaches/web typecheck",
+    "lint": "pnpm -r lint",
+    "smoke": "pnpm --filter @detaches/server smoke"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.8.3"
+  },
+  "packageManager": "pnpm@9.15.9"
+}
