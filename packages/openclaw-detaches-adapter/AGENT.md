@@ -17,6 +17,16 @@ Before requesting tools, inspect the latest `clientContext.detaches` object or t
 
 If the context is missing, ask the user to resend through detaches_agent or avoid tool requests.
 
+## Adapter CLI
+
+When this adapter is installed on the real OpenClaw agent host, use the CLI as a local protocol inspector:
+
+```sh
+node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs inspect-context /path/to/clientContext.detaches.json
+```
+
+`inspect-context` prints session identity, adapter readiness, capability targets, routing warnings, and hard rules as JSON. It does not execute commands or transfer files.
+
 ## Tool Request Rules
 
 Never claim execution has happened just because you emitted a request block.

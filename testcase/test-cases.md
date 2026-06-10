@@ -37,22 +37,24 @@
 
 ## TC-002A OpenClaw detaches adapter
 
-目标：验证远端 agent-side adapter 资产可读取、可校验、可生成标准请求块。
+目标：验证远端 agent-side adapter 资产可读取、可校验、可诊断会话上下文、可生成标准请求块。
 
 步骤：
 
 1. 执行 `pnpm --filter @detaches/openclaw-detaches-adapter test`。
 2. 读取 adapter manifest。
 3. 校验一个合法 `clientContext.detaches`。
-4. 生成 `detaches-terminal` 请求块。
-5. 生成 `detaches-file-transfer` 请求块。
-6. 尝试未知 target。
+4. 用 `inspect-context` 输出 capability target 和路由告警。
+5. 生成 `detaches-terminal` 请求块。
+6. 生成 `detaches-file-transfer` 请求块。
+7. 尝试未知 target。
 
 期望：
 
 - manifest 声明 `local-user-machine` 为 supported。
 - manifest 声明 `remote-agent-host` / `gateway-managed` 为 reserved。
 - 合法 context 校验通过。
+- `inspect-context` 能识别 `local-user-machine` 可请求、`remote-agent-host` 不可请求。
 - 请求块必须包含 fenced code block、target 和 reason。
 - 未知 target 被拒绝。
 

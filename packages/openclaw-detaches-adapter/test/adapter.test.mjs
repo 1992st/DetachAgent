@@ -23,14 +23,31 @@ const parsedManifest = JSON.parse(manifest.stdout);
 assert.equal(parsedManifest.id, "detaches_agent.openclaw.adapter");
 assert.equal(parsedManifest.targets["local-user-machine"].status, "supported");
 assert.equal(parsedManifest.targets["remote-agent-host"].status, "reserved");
+assert.equal(parsedManifest.cliCommands["inspect-context"].includes("routing warnings"), true);
 
 const validContext = await run(["validate-context", "test/valid-context.json"]);
 assert.equal(validContext.code, 0);
 assert.deepEqual(JSON.parse(validContext.stdout), { ok: true });
 
+const inspectedContext = await run(["inspect-context", "test/valid-context.json"]);
+assert.equal(inspectedContext.code, 0);
+const parsedInspection = JSON.parse(inspectedContext.stdout);
+assert.equal(parsedInspection.ok, true);
+assert.equal(parsedInspection.adapterId, "detaches_agent.openclaw.adapter");
+assert.equal(parsedInspection.sessionKey, "agent:audio-process:main");
+assert.deepEqual(parsedInspection.targetSupport["local-user-machine"].supportedBy, ["terminal"]);
+assert.equal(parsedInspection.targetSupport["local-user-machine"].requestable, true);
+assert.deepEqual(parsedInspection.targetSupport["remote-agent-host"].unavailableBy, ["terminal"]);
+assert.equal(parsedInspection.targetSupport["remote-agent-host"].requestable, false);
+assert.equal(parsedInspection.warnings.some((warning) => /remote-agent-host is unavailable/.test(warning)), true);
+
 const invalidContext = await run(["validate-context", "adapter.manifest.json"]);
 assert.equal(invalidContext.code, 1);
 assert.match(invalidContext.stderr, /missing required fields/);
+
+const inspectedInvalidContext = await run(["inspect-context", "adapter.manifest.json"]);
+assert.equal(inspectedInvalidContext.code, 1);
+assert.equal(JSON.parse(inspectedInvalidContext.stdout).ok, false);
 
 const terminalRequest = await run([
   "terminal-request",

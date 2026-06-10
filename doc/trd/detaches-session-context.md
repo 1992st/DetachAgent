@@ -18,9 +18,11 @@
 
 - `adapter.manifest.json`：机器可读 capability、target、hard rules。
 - `AGENT.md`：给远端 OpenClaw agent/skill 使用的操作说明。
-- `bin/detaches-agent-adapter.mjs`：CLI，可打印 manifest、校验 `clientContext.detaches`、生成标准 `detaches-terminal` / `detaches-file-transfer` fenced request。
+- `bin/detaches-agent-adapter.mjs`：CLI，可打印 manifest、校验/诊断 `clientContext.detaches`、生成标准 `detaches-terminal` / `detaches-file-transfer` fenced request。
 
 它本身不执行命令、不传输文件，也不绕过 detaches_agent UI 审批。它的作用是让真实 agent 机器拥有稳定、可测试、可安装的协议入口，后续再按 OpenClaw 官方 skill/plugin 目录规范包装。
+
+`inspect-context` 是当前最小 agent-side skill 入口：远端 agent 可以把收到的 `clientContext.detaches` 保存为 JSON 后交给 CLI，得到 session identity、adapter readiness、capability target、requestable/unavailable 状态和 hard rules。它只输出机器可读诊断，不执行工具。
 
 本地 server 暴露 adapter 分发接口：
 

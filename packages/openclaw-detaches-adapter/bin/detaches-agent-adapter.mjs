@@ -13,6 +13,7 @@ function usage(exitCode = 0) {
     "Commands:",
     "  manifest",
     "  validate-context <context-json-file>",
+    "  inspect-context <context-json-file>",
     "  terminal-request --target <target> --command <command> --reason <reason>",
     "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason>",
     "",
@@ -64,6 +65,61 @@ function validateContext(context) {
   return errors;
 }
 
+function listCapabilities(context) {
+  return Array.isArray(context?.capabilities) ? context.capabilities : [];
+}
+
+function inspectContext(context) {
+  const manifest = readManifest();
+  const errors = validateContext(context);
+  const capabilities = listCapabilities(context).map((capability) => ({
+    name: capability?.name,
+    requestFence: capability?.requestFence,
+    supportedTargets: Array.isArray(capability?.supportedTargets) ? capability.supportedTargets : [],
+    unavailableTargets: Array.isArray(capability?.unavailableTargets) ? capability.unavailableTargets : [],
+    approvalRequired: Boolean(capability?.approvalRequired),
+    executionHost: capability?.executionHost
+  }));
+  const targetSupport = Object.fromEntries(Object.keys(manifest.targets).map((target) => {
+    const supportedBy = capabilities
+      .filter((capability) => capability.supportedTargets.includes(target))
+      .map((capability) => capability.name);
+    const unavailableBy = capabilities
+      .filter((capability) => capability.unavailableTargets.includes(target))
+      .map((capability) => capability.name);
+    return [target, {
+      manifestStatus: manifest.targets[target].status,
+      supportedBy,
+      unavailableBy,
+      requestable: supportedBy.length > 0 && unavailableBy.length === 0
+    }];
+  }));
+  const adapterStatus = context?.adapterStatus?.remoteAgentHost;
+  const warnings = [];
+  for (const [target, status] of Object.entries(targetSupport)) {
+    if (status.unavailableBy.length > 0) {
+      warnings.push(`${target} is unavailable for: ${status.unavailableBy.join(", ")}`);
+    }
+  }
+  if (adapterStatus?.state === "ready") {
+    warnings.push("remote-agent-host adapter assets are detected, but tool routing still depends on detaches_agent capability targets and approval.");
+  }
+  return {
+    ok: errors.length === 0,
+    errors,
+    adapterId: manifest.id,
+    app: context?.app,
+    sessionKey: context?.sessionKey,
+    agentId: context?.agentId ?? null,
+    userDevice: context?.userDevice ?? null,
+    adapterStatus: adapterStatus ?? null,
+    capabilities,
+    targetSupport,
+    warnings,
+    hardRules: manifest.hardRules
+  };
+}
+
 function requireOption(args, name) {
   const value = args[name];
   if (typeof value !== "string" || !value.trim()) fail(`Missing --${name}`);
@@ -102,6 +158,16 @@ function main() {
       process.exit(1);
     }
     console.log(JSON.stringify({ ok: true }, null, 2));
+    return;
+  }
+
+  if (command === "inspect-context") {
+    const file = rest[0];
+    if (!file) usage(1);
+    const context = JSON.parse(fs.readFileSync(file, "utf8"));
+    const result = inspectContext(context);
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exit(1);
     return;
   }
 
