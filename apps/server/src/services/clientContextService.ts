@@ -148,8 +148,6 @@ export async function buildChatClientContext(sessionMode: ChatSessionMode, sessi
 }
 
 export function renderDetachesSessionContext(context: DetachesSessionContext): string {
-  const terminal = context.capabilities.find((capability) => capability.name === "terminal");
-  const transfer = context.capabilities.find((capability) => capability.name === "file-transfer");
   const remoteAdapter = context.adapterStatus?.remoteAgentHost;
   return [
     "[detaches_agent 接入上下文]",
@@ -157,24 +155,11 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
     `sessionKey: ${context.sessionKey}`,
     context.agentId ? `agentId: ${context.agentId}` : "agentId: unknown",
     `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
-    `remoteAdapter: state=${remoteAdapter?.state || "unknown"}; installDir=${remoteAdapter?.installDir || "unknown"}; summary=${remoteAdapter?.summary || "not probed"}`,
-    `toolBroker: gatewayEventEndpoint=${context.broker?.gatewayEventEndpoint || "unknown"}; preferredFormat=broker-event; idempotency=${context.broker?.idempotencyField || "sourceEventId"}; submitTokenHeader=${context.broker?.submitTokenHeader || "Authorization"}`,
-    `contextExport: create=${context.contextExport?.createEndpoint || "unknown"}; consume=${context.contextExport?.consumeEndpointPattern || "unknown"}; oneTime=${context.contextExport?.oneTime ? "true" : "false"}; adapterCommand=${context.contextExport?.adapterCommand || "context-fetch"}`,
-    "agentSideAdapter: 若远端已安装 detaches-agent skill，请在真实 OpenClaw agent host 上运行 `node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --url <one-time-context-export-url> --output-context /tmp/detaches-client-context.json`，或对已保存 context 运行 `doctor --context <context-json>`，按 doctor 输出的 requestableTargets 和命令模板发起 broker-event。",
-    "当前用户这台电脑已经为本对话绑定了一个持久本机 terminal。这个 terminal 默认隐藏在用户界面里，用户可以点开查看活动。",
-    `terminal targets: supported=${terminal?.supportedTargets.join(",") || "none"}; unavailable=${terminal?.unavailableTargets.join(",") || "none"}`,
-    `file-transfer targets: supported=${transfer?.supportedTargets.join(",") || "none"}; unavailable=${transfer?.unavailableTargets.join(",") || "none"}`,
-    "关键约束：",
-    ...context.invariants.map((item) => `- ${item}`),
-    "如果你需要控制/检查用户这台电脑，请向 UI 发起待审批命令请求：",
-    "```detaches-terminal",
-    "{\"target\":\"local-user-machine\",\"command\":\"pwd\",\"reason\":\"查看用户本机当前工作目录\"}",
-    "```",
-    "如果你需要处理本次附带文件，请先决定目标路径，然后向 UI 发起待审批文件传输请求：",
-    "```detaches-file-transfer",
-    "{\"fileId\":\"文件 id\",\"target\":\"local-user-machine\",\"remotePath\":\"/absolute/or/relative/target-file\",\"reason\":\"说明为什么需要传输\"}",
-    "```",
-    "只有用户批准后，UI 才会把请求写入本会话绑定的本机 terminal。"
+    `remoteAdapter: state=${remoteAdapter?.state || "unknown"}`,
+    "完整机器可读上下文已随 chat.send.clientContext.detaches 发送；请优先读取结构化 context，不要只依赖本段文字。",
+    "若远端已安装 detaches-agent skill，请在真实 OpenClaw agent host 上运行 `node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --url <one-time-context-export-url> --output-context /tmp/detaches-client-context.json`，或对已保存 context 运行 `doctor --context <context-json>`。",
+    "工具请求必须经过 detaches_agent 审批；不要声称命令、文件读取、传输或归档已完成，除非已收到 approved tool output。",
+    "不要把 remote-agent-host/gateway-managed 请求退化成本机 local-user-machine。"
   ].join("\n");
 }
 

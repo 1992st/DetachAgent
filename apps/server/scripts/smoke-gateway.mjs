@@ -443,10 +443,9 @@ async function main() {
     assert.match(userChatSend.message, /detaches_agent 接入上下文/);
     assert.match(userChatSend.message, /agentId: agent-alpha/);
     assert.match(userChatSend.message, /remoteAdapter: state=error/);
-    assert.match(userChatSend.message, new RegExp(`toolBroker: gatewayEventEndpoint=${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/tools/events/gateway; preferredFormat=broker-event`));
-    assert.match(userChatSend.message, new RegExp(`contextExport: create=${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/context/exports; consume=`));
-    assert.match(userChatSend.message, /terminal targets: supported=local-user-machine; unavailable=remote-agent-host,gateway-managed/);
-    assert.match(userChatSend.message, /file-transfer targets: supported=local-user-machine; unavailable=remote-agent-host,gateway-managed/);
+    assert.match(userChatSend.message, /clientContext\.detaches/);
+    assert.match(userChatSend.message, /doctor --url/);
+    assert.doesNotMatch(userChatSend.message, new RegExp(`toolBroker: gatewayEventEndpoint=${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
     assert.equal(userChatSend.idempotencyKey, "smoke-idempotency");
     assert.equal(userChatSend.clientContext?.app, "detaches_agent");
     assert.equal(userChatSend.clientContext?.detaches?.app, "detaches_agent");
