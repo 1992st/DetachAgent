@@ -341,6 +341,14 @@ apiRoutes.get("/gateway/status", async (_req, res) => {
   }
 });
 
+apiRoutes.get("/gateway/capabilities", async (_req, res) => {
+  try {
+    res.json(await gatewayClient.capabilitySummary());
+  } catch (error) {
+    res.status(503).json({ connected: false, error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 apiRoutes.get("/agents", async (_req, res) => {
   try {
     res.json(await listAgents());

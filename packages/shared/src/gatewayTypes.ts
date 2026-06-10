@@ -65,3 +65,15 @@ export interface GatewayHello {
   auth?: Record<string, unknown>;
   policy?: Record<string, unknown>;
 }
+
+export interface GatewayCapabilitySummary {
+  connected: boolean;
+  methodCount: number;
+  hasToolsInvoke: boolean;
+  hasNodeInvoke: boolean;
+  hasAgentsFiles: boolean;
+  hasArtifacts: boolean;
+  hasEnvironments: boolean;
+  candidateAdapters: Array<"gateway-managed" | "remote-agent-host" | "local-user-machine">;
+  methods: string[];
+}

@@ -64,7 +64,24 @@ function createMockGateway() {
             type: "hello-ok",
             protocol: 3,
             server: { name: "mock-openclaw", version: "smoke" },
-            features: { methods: ["health", "sessions.list", "chat.history", "chat.send", "chat.abort"] },
+            features: {
+              methods: [
+                "health",
+                "sessions.list",
+                "chat.history",
+                "chat.send",
+                "chat.abort",
+                "tools.invoke",
+                "node.invoke",
+                "agents.files.list",
+                "agents.files.get",
+                "agents.files.set",
+                "artifacts.list",
+                "artifacts.download",
+                "environments.list",
+                "environments.status"
+              ]
+            },
             snapshot: {
               presence: [],
               health: {
@@ -238,6 +255,17 @@ async function main() {
     const diagnostics = await requestJson("/api/diagnostics");
     assert.equal(diagnostics.health.gateway.state, "ok");
     assert.equal(diagnostics.items.some((item) => item.id === "ssh-user-missing"), true);
+
+    const capabilities = await requestJson("/api/gateway/capabilities");
+    assert.equal(capabilities.connected, true);
+    assert.equal(capabilities.hasToolsInvoke, true);
+    assert.equal(capabilities.hasNodeInvoke, true);
+    assert.equal(capabilities.hasAgentsFiles, true);
+    assert.equal(capabilities.hasArtifacts, true);
+    assert.equal(capabilities.hasEnvironments, true);
+    assert.equal(capabilities.candidateAdapters.includes("gateway-managed"), true);
+    assert.equal(capabilities.candidateAdapters.includes("remote-agent-host"), true);
+    assert.equal(capabilities.candidateAdapters.includes("local-user-machine"), true);
 
     const agents = await requestJson("/api/agents");
     assert.equal(agents.agents.length, 2);

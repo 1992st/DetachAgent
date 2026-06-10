@@ -130,6 +130,20 @@ tool request
 
 路由层负责检查目标环境是否可用、生成审批卡、执行对应 adapter，并把结果回写给 agent。UI 审批卡必须展示 target，避免“归档到你的电脑”这类语义被误执行到本机 staging workspace。
 
+当前后端暴露 `/api/gateway/capabilities`，从 Gateway hello/features 中提炼可用能力。已观察到的候选能力包括：
+
+- `tools.invoke`
+- `node.invoke`
+- `agents.files.*`
+- `artifacts.*`
+- `environments.*`
+
+adapter 选择优先级应从 capability summary 推导：
+
+- `gateway-managed`：优先使用 `agents.files.*` / `artifacts.*` / `tools.invoke`。
+- `remote-agent-host`：优先评估 `node.invoke` / `environments.*`。
+- `local-user-machine`：作为本机 fallback，但不能承接声明为远端的请求。
+
 ### Agent 请求本机命令
 
 ````text

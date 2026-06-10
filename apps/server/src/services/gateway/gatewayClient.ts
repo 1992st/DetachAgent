@@ -4,6 +4,7 @@ import WebSocket from "ws";
 import type {
   GatewayConnectParams,
   GatewayEventFrame,
+  GatewayCapabilitySummary,
   GatewayHello,
   GatewayRequestFrame,
   GatewayResponseFrame
@@ -109,6 +110,30 @@ export class GatewayClient extends EventEmitter {
 
   getHello(): GatewayHello | null {
     return this.hello;
+  }
+
+  async capabilitySummary(): Promise<GatewayCapabilitySummary> {
+    await this.connect();
+    const methods = methodsFromHello(this.hello);
+    const hasToolsInvoke = methods.includes("tools.invoke");
+    const hasNodeInvoke = methods.includes("node.invoke");
+    const hasAgentsFiles = methods.some((method) => method.startsWith("agents.files."));
+    const hasArtifacts = methods.some((method) => method.startsWith("artifacts."));
+    const hasEnvironments = methods.some((method) => method.startsWith("environments."));
+    const candidateAdapters: GatewayCapabilitySummary["candidateAdapters"] = ["local-user-machine"];
+    if (hasToolsInvoke || hasAgentsFiles || hasArtifacts) candidateAdapters.unshift("gateway-managed");
+    if (hasNodeInvoke || hasEnvironments) candidateAdapters.unshift("remote-agent-host");
+    return {
+      connected: this.connected,
+      methodCount: methods.length,
+      hasToolsInvoke,
+      hasNodeInvoke,
+      hasAgentsFiles,
+      hasArtifacts,
+      hasEnvironments,
+      candidateAdapters: Array.from(new Set(candidateAdapters)),
+      methods
+    };
   }
 
   getLastError(): string | null {
@@ -342,3 +367,8 @@ export class GatewayClient extends EventEmitter {
 }
 
 export const gatewayClient = new GatewayClient();
+
+function methodsFromHello(hello: GatewayHello | null): string[] {
+  const rawMethods = (hello?.features as any)?.methods;
+  return Array.isArray(rawMethods) ? rawMethods.filter((method): method is string => typeof method === "string") : [];
+}
