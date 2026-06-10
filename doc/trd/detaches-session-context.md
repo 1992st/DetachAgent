@@ -27,8 +27,18 @@
 - `GET /api/adapters/openclaw-detaches`：返回 manifest、文件清单、sha256、bundle 元信息和安装提示。
 - `GET /api/adapters/openclaw-detaches/files/<path>`：下载白名单内的单个 adapter 文件。
 - `GET /api/adapters/openclaw-detaches/bundle`：下载 `openclaw-detaches-adapter.tar.gz`。
+- `GET /api/adapters/openclaw-detaches/install-plan?baseUrl=...&installDir=...`：生成给真实 agent host 执行的安装命令和验证命令。
 
 这让远端 agent host 可以从 detaches_agent 获取同一份协议资产。它仍不是最终的 OpenClaw 原生 skill 安装器，但已经把“agent 需要知道当前 detaches 场景”从聊天 prompt 推进为可分发、可校验的 adapter 包。
+
+安装计划只生成命令，不自动改远端机器。命令包含：
+
+- 下载 detaches adapter bundle。
+- 校验 sha256。
+- 解包到指定 installDir。
+- 运行 `detaches-agent-adapter manifest` 验证 adapter id。
+
+后续 UI 可以把 install-plan 作为待审批远端操作展示；真正自动 SSH 安装前必须先解决远端 target adapter、认证、审计和失败回滚。
 
 ### 结构化 manifest
 

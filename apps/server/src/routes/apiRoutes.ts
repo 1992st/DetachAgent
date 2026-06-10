@@ -370,6 +370,16 @@ apiRoutes.get("/adapters/openclaw-detaches/bundle", async (_req, res) => {
   }
 });
 
+apiRoutes.get("/adapters/openclaw-detaches/install-plan", async (req, res) => {
+  try {
+    const baseUrl = typeof req.query.baseUrl === "string" ? req.query.baseUrl : undefined;
+    const installDir = typeof req.query.installDir === "string" ? req.query.installDir : undefined;
+    res.json(await openclawDetachesAdapterService.installPlan({ baseUrl, installDir }));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 apiRoutes.get("/adapters/openclaw-detaches/files/*", async (req, res) => {
   try {
     const params = req.params as Record<string, string | string[] | undefined>;

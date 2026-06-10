@@ -43,6 +43,19 @@ export interface OpenClawAdapterInfo {
   };
 }
 
+export interface OpenClawAdapterInstallPlan {
+  target: "remote-agent-host";
+  adapterId: string;
+  version: string;
+  baseUrl: string;
+  installDir: string;
+  bundleUrl: string;
+  bundleSha256: string;
+  commands: string[];
+  verifyCommands: string[];
+  notes: string[];
+}
+
 function sha256(buffer: Buffer): string {
   return crypto.createHash("sha256").update(buffer).digest("hex");
 }
@@ -104,6 +117,20 @@ async function buildBundle(): Promise<Buffer> {
   return gzip(Buffer.concat([...entries, Buffer.alloc(1024, 0)]));
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function normalizeBaseUrl(value: string | undefined): string {
+  const trimmed = value?.trim().replace(/\/+$/, "");
+  return trimmed || "http://127.0.0.1:38888";
+}
+
+function normalizeInstallDir(value: string | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed || "~/.openclaw/detaches_agent";
+}
+
 export const openclawDetachesAdapterService = {
   async info(basePath = "/api/adapters/openclaw-detaches"): Promise<OpenClawAdapterInfo> {
     const manifestBuffer = await fs.readFile(path.join(adapterRoot, "adapter.manifest.json"));
@@ -147,6 +174,49 @@ export const openclawDetachesAdapterService = {
           "The adapter only emits/validates detaches_agent requests; it does not bypass UI approval."
         ]
       }
+    };
+  },
+
+  async installPlan(input: { baseUrl?: string; installDir?: string } = {}): Promise<OpenClawAdapterInstallPlan> {
+    const info = await this.info();
+    const baseUrl = normalizeBaseUrl(input.baseUrl);
+    const installDir = normalizeInstallDir(input.installDir);
+    const bundleUrl = `${baseUrl}/api/adapters/openclaw-detaches/bundle`;
+    const quotedInstallDir = shellQuote(installDir);
+    const quotedBundleUrl = shellQuote(bundleUrl);
+    return {
+      target: "remote-agent-host",
+      adapterId: info.id,
+      version: info.version,
+      baseUrl,
+      installDir,
+      bundleUrl,
+      bundleSha256: info.bundle.sha256,
+      commands: [
+        "set -euo pipefail",
+        `INSTALL_DIR=${quotedInstallDir}`,
+        `BUNDLE_URL=${quotedBundleUrl}`,
+        `BUNDLE_SHA256=${shellQuote(info.bundle.sha256)}`,
+        "TMP_BUNDLE=${TMPDIR:-/tmp}/openclaw-detaches-adapter.tar.gz",
+        "mkdir -p \"$INSTALL_DIR\"",
+        "curl -fL \"$BUNDLE_URL\" -o \"$TMP_BUNDLE\"",
+        "ACTUAL_SHA256=$(shasum -a 256 \"$TMP_BUNDLE\" | awk '{print $1}')",
+        "test \"$ACTUAL_SHA256\" = \"$BUNDLE_SHA256\"",
+        "tar -xzf \"$TMP_BUNDLE\" -C \"$INSTALL_DIR\" --strip-components=1",
+        "chmod +x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
+        "node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest"
+      ],
+      verifyCommands: [
+        `INSTALL_DIR=${quotedInstallDir}`,
+        "test -x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
+        "node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest | grep -q 'detaches_agent.openclaw.adapter'",
+        "node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" --help >/dev/null"
+      ],
+      notes: [
+        "Run these commands on the real OpenClaw agent host, not inside the user's local detaches_agent terminal.",
+        "The remote host must be able to reach the detaches_agent server baseUrl.",
+        "The adapter only validates/emits detaches_agent protocol requests; it does not bypass UI approval."
+      ]
     };
   },
 

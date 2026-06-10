@@ -337,6 +337,14 @@ async function main() {
     assert.equal(adapterBundle.status, 200);
     assert.equal(adapterBundle.headers.get("content-type"), "application/gzip");
     assert.equal((await adapterBundle.arrayBuffer()).byteLength, adapterInfo.bundle.size);
+    const adapterInstallPlan = await requestJson(`/api/adapters/openclaw-detaches/install-plan?baseUrl=${encodeURIComponent(`http://${host}:${serverPort}`)}&installDir=${encodeURIComponent("~/.openclaw/detaches_agent_smoke")}`);
+    assert.equal(adapterInstallPlan.target, "remote-agent-host");
+    assert.equal(adapterInstallPlan.adapterId, "detaches_agent.openclaw.adapter");
+    assert.equal(adapterInstallPlan.bundleUrl, `http://${host}:${serverPort}/api/adapters/openclaw-detaches/bundle`);
+    assert.equal(adapterInstallPlan.bundleSha256, adapterInfo.bundle.sha256);
+    assert.equal(adapterInstallPlan.commands.some((command) => /curl -fL/.test(command)), true);
+    assert.equal(adapterInstallPlan.commands.some((command) => /shasum -a 256/.test(command)), true);
+    assert.equal(adapterInstallPlan.verifyCommands.some((command) => /detaches_agent\.openclaw\.adapter/.test(command)), true);
 
     chat.send(JSON.stringify({
       type: "send",

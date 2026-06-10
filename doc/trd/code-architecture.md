@@ -102,6 +102,12 @@ detaches_agent/
   - `GET /api/adapters/openclaw-detaches`
   - `GET /api/adapters/openclaw-detaches/files/<path>`
   - `GET /api/adapters/openclaw-detaches/bundle`
+  - `GET /api/adapters/openclaw-detaches/install-plan`
+
+- Install plan：
+  - 生成给 `remote-agent-host` 执行的 shell 命令。
+  - 包含 bundle 下载、sha256 校验、解包、chmod 和 manifest 验证。
+  - 当前只返回计划，不直接 SSH 修改远端机器。
 
 ### 文件
 
