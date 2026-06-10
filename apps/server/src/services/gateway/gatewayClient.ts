@@ -102,7 +102,8 @@ export class GatewayClient extends EventEmitter {
         thinking: params.thinking ?? "",
         attachments: attachments?.length ? attachments : undefined,
         timeoutMs: 30000,
-        idempotencyKey: params.idempotencyKey ?? nanoid()
+        idempotencyKey: params.idempotencyKey ?? nanoid(),
+        clientContext: params.clientContext
       },
       35000
     );

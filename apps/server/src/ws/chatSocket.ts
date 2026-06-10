@@ -3,7 +3,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { ChatSessionMode, ChatSocketClientEvent, ChatSocketServerEvent, UploadedFileRef } from "@detaches/shared";
 import { gatewayClient } from "../services/gateway/gatewayClient.js";
 import { mapHistory } from "../services/gateway/chatMapper.js";
-import { buildChatClientContext } from "../services/clientContextService.js";
+import { buildChatClientContext, buildDetachesSessionContext, renderDetachesSessionContext } from "../services/clientContextService.js";
 
 function send(socket: WebSocket, event: ChatSocketServerEvent): void {
   if (socket.readyState === socket.OPEN) {
@@ -27,15 +27,17 @@ export function attachChatSocket(server: HttpServer): void {
     const sessionKey = decodeURIComponent(url.pathname.replace("/api/chat/", ""));
     const sessionMode: ChatSessionMode = url.searchParams.get("sessionMode") === "main" ? "main" : "device";
     const clientContext = buildChatClientContext(sessionMode, sessionKey);
+    const detachesContext = buildDetachesSessionContext(sessionMode, sessionKey);
+    const activeRunIds = new Set<string>();
     send(socket, { type: "ready", sessionKey });
 
     const forwardChat = (payload: unknown, frame?: unknown) => {
-      if (isGatewayEventForSession(sessionKey, payload, frame)) {
+      if (isGatewayEventForSession(sessionKey, activeRunIds, payload, frame)) {
         send(socket, { type: "chat", payload });
       }
     };
     const forwardAgent = (payload: unknown, frame?: unknown) => {
-      if (isGatewayEventForSession(sessionKey, payload, frame)) {
+      if (isGatewayEventForSession(sessionKey, activeRunIds, payload, frame)) {
         send(socket, { type: "agent", payload });
       }
     };
@@ -77,14 +79,17 @@ export function attachChatSocket(server: HttpServer): void {
         } else if (event.type === "send") {
           const response = await gatewayClient.sendChat({
             sessionKey,
-            message: buildOutboundMessage(event.message, sessionKey, event.attachments, event.attachmentContextOverride),
+            message: buildOutboundMessage(event.message, detachesContext, event.attachments, event.attachmentContextOverride),
             thinking: event.thinking,
             attachments: event.attachments,
             idempotencyKey: event.idempotencyKey,
             clientContext
           });
+          const runId = typeof (response as any)?.runId === "string" ? (response as any).runId : "";
+          if (runId) activeRunIds.add(runId);
           send(socket, { type: "sent", payload: { runId: (response as any)?.runId, raw: response } });
         } else if (event.type === "abort") {
+          activeRunIds.delete(event.runId);
           await gatewayClient.abortChat(sessionKey, event.runId);
         }
       } catch (error) {
@@ -102,14 +107,14 @@ export function attachChatSocket(server: HttpServer): void {
 
 function buildOutboundMessage(
   message: string,
-  sessionKey: string,
+  detachesContext: ReturnType<typeof buildDetachesSessionContext>,
   attachments?: UploadedFileRef[],
   attachmentContextOverride?: string
 ): string {
   const blocks = [message];
   const attachmentContext = buildAttachmentContext(attachments, attachmentContextOverride);
   if (attachmentContext) blocks.push("", attachmentContext);
-  blocks.push("", withTerminalControlHint(sessionKey));
+  blocks.push("", renderDetachesSessionContext(detachesContext));
   return blocks.join("\n");
 }
 
@@ -133,8 +138,8 @@ function buildAttachmentContext(attachments?: UploadedFileRef[], override?: stri
       ""
     ]),
     "这些文件目前只在用户本机，尚未自动上传到远端。",
-    "如果你需要读取或处理文件，请先决定远端目标文件路径，然后向 UI 发起 detaches-file-transfer 待审批请求。",
-    "请求必须声明 target。当前已支持 target: local-user-machine；remote-agent-host 和 gateway-managed 会显示为不可用，不能退化到本机执行。",
+    "如果你需要读取或处理文件，请先决定目标文件路径，然后向 UI 发起 detaches-file-transfer 待审批请求。",
+    "请求必须声明 target。当前可执行 target: local-user-machine；remote-agent-host 和 gateway-managed 仍需要服务端适配器，不能退化到本机执行。",
     "请求格式必须是唯一一个 fenced code block：",
     "```detaches-file-transfer",
     "{\"fileId\":\"上面的文件 id\",\"target\":\"local-user-machine\",\"remotePath\":\"/absolute/or/relative/target-file\",\"reason\":\"说明为什么需要传输\"}",
@@ -151,30 +156,17 @@ function formatFileSize(size: number): string {
   return `${(size / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function withTerminalControlHint(sessionKey: string): string {
-  return [
-    "[detaches_agent 接入上下文]",
-    "你正在通过 detaches_agent 本地 UI 与用户对话，不是普通 webchat。",
-    "当前用户这台电脑已经为本对话绑定了一个持久本机 terminal。",
-    `terminal sessionKey: ${sessionKey}`,
-    "这个 terminal 默认隐藏在用户界面里，用户可以点开查看活动。",
-    "命令请求必须声明 target。当前已支持 target: local-user-machine；remote-agent-host 和 gateway-managed 会显示为不可用，不能退化到本机执行。",
-    "如果你需要控制/检查用户这台电脑，请不要假装已经执行；请向 UI 发起一个待审批命令请求。",
-    "命令请求格式必须是唯一一个 fenced code block：",
-    "```detaches-terminal",
-    "{\"target\":\"local-user-machine\",\"command\":\"pwd\",\"reason\":\"查看用户本机当前工作目录\"}",
-    "```",
-    "UI 会展示审批卡。只有用户点击 Run 后，命令才会写入本对话对应的本机 terminal。",
-    "你可以根据 terminal 输出继续下一步；如果需要多个命令，请一次请求一个，等待用户批准和结果。"
-  ].join("\n");
-}
-
-function isGatewayEventForSession(sessionKey: string, payload: unknown, frame?: unknown): boolean {
+function isGatewayEventForSession(sessionKey: string, activeRunIds: Set<string>, payload: unknown, frame?: unknown): boolean {
   const keys = new Set<string>();
   collectSessionKeys(payload, keys);
   collectSessionKeys(frame, keys);
-  if (keys.size === 0) return true;
-  return keys.has(sessionKey);
+  if (keys.has(sessionKey)) return true;
+  if (keys.size > 0) return false;
+  const runIds = new Set<string>();
+  collectRunIds(payload, runIds);
+  collectRunIds(frame, runIds);
+  if (runIds.size === 0) return false;
+  return [...runIds].some((runId) => activeRunIds.has(runId));
 }
 
 function collectSessionKeys(value: unknown, keys: Set<string>, depth = 0): void {
@@ -191,5 +183,20 @@ function collectSessionKeys(value: unknown, keys: Set<string>, depth = 0): void 
   }
   for (const key of ["payload", "message", "data", "event", "delta", "item"]) {
     collectSessionKeys(record[key], keys, depth + 1);
+  }
+}
+
+function collectRunIds(value: unknown, runIds: Set<string>, depth = 0): void {
+  if (!value || depth > 4) return;
+  if (Array.isArray(value)) {
+    for (const item of value.slice(0, 20)) collectRunIds(item, runIds, depth + 1);
+    return;
+  }
+  if (typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  const runId = record.runId;
+  if (typeof runId === "string" && runId) runIds.add(runId);
+  for (const key of ["payload", "message", "data", "event", "delta", "item"]) {
+    collectRunIds(record[key], runIds, depth + 1);
   }
 }

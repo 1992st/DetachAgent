@@ -3,6 +3,7 @@ export * from "./gatewayTypes.js";
 export * from "./agentTypes.js";
 export * from "./chatTypes.js";
 export * from "./clientTypes.js";
+export * from "./detachesContextTypes.js";
 export * from "./fileTypes.js";
 export * from "./controlTypes.js";
 export * from "./settingsTypes.js";
