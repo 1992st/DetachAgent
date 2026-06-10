@@ -39,7 +39,13 @@
 - 解包到指定 installDir。
 - 运行 `detaches-agent-adapter manifest` 验证 adapter id。
 
-后续 UI 可以把 install-plan 作为待审批远端操作展示；真正自动 SSH 安装前必须先解决远端 target adapter、认证、审计和失败回滚。
+当前 UI 可以把 install-plan 创建为待审批远端操作。`adapter-install` 请求：
+
+- target 固定为 `remote-agent-host`。
+- 风险等级固定为 `elevated`，审批必须带 `riskAccepted: true`。
+- 审批后由 broker 在本机会话 terminal 写入 `curl local bundle | ssh remote shell` 命令。
+- bundle 从本地 detaches_agent server 读取，经 SSH stdin 传到远端，因此不要求远端能访问用户本机 HTTP 端口。
+- 整个流程复用 Tool Broker 审批、审计、terminal replay 和结果回写。
 
 readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 

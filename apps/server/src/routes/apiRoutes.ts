@@ -476,7 +476,7 @@ apiRoutes.post("/files/transfer/prepare", async (req, res) => {
 
 apiRoutes.post("/tools/requests", async (req, res) => {
   try {
-    const kind = req.body.kind === "file-transfer" ? "file-transfer" : req.body.kind === "terminal" ? "terminal" : null;
+    const kind = req.body.kind === "file-transfer" ? "file-transfer" : req.body.kind === "terminal" ? "terminal" : req.body.kind === "adapter-install" ? "adapter-install" : null;
     const target = parseToolTarget(req.body.target);
     const sessionKey = typeof req.body.sessionKey === "string" ? req.body.sessionKey.trim() : "";
     const agentId = typeof req.body.agentId === "string" ? req.body.agentId.trim() : undefined;
@@ -496,7 +496,7 @@ apiRoutes.post("/tools/requests", async (req, res) => {
 
 apiRoutes.post("/tools/events/gateway", async (req, res) => {
   try {
-    const kind = req.body.kind === "file-transfer" ? "file-transfer" : req.body.kind === "terminal" ? "terminal" : null;
+    const kind = req.body.kind === "file-transfer" ? "file-transfer" : req.body.kind === "terminal" ? "terminal" : req.body.kind === "adapter-install" ? "adapter-install" : null;
     const target = parseToolTarget(req.body.target);
     const sessionKey = typeof req.body.sessionKey === "string" ? req.body.sessionKey.trim() : "";
     const sourceEventId = typeof req.body.sourceEventId === "string" ? req.body.sourceEventId.trim() : "";

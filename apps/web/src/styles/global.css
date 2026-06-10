@@ -1200,9 +1200,17 @@ h3 { font-size: 14px; }
 
 .adapter-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-top: 10px;
+}
+
+.adapter-request-message {
+  margin-top: 8px;
+  color: var(--accent);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .adapter-command-box {

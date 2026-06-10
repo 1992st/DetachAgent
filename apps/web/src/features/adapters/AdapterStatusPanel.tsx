@@ -1,11 +1,11 @@
 import { CheckCircle2, Clipboard, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { OpenClawAdapterInstallPlan, OpenClawAdapterReadiness } from "@detaches/shared";
-import { fetchOpenClawAdapterInstallPlan, fetchOpenClawAdapterReadiness } from "../../lib/api.js";
+import { createToolRequest, fetchOpenClawAdapterInstallPlan, fetchOpenClawAdapterReadiness } from "../../lib/api.js";
 
 const defaultInstallDir = "~/.openclaw/detaches_agent";
 
-export function AdapterStatusPanel() {
+export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string | null; agentId: string | null }) {
   const [installDir, setInstallDir] = useState(defaultInstallDir);
   const [readiness, setReadiness] = useState<OpenClawAdapterReadiness | null>(null);
   const [installPlan, setInstallPlan] = useState<OpenClawAdapterInstallPlan | null>(null);
@@ -13,6 +13,7 @@ export function AdapterStatusPanel() {
   const [loading, setLoading] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [requestMessage, setRequestMessage] = useState<string | null>(null);
 
   const installCommands = useMemo(() => installPlan?.commands.join("\n") ?? "", [installPlan]);
   const remoteVerifyCommands = useMemo(() => installPlan?.verifyCommands.join("\n") ?? "", [installPlan]);
@@ -44,6 +45,32 @@ export function AdapterStatusPanel() {
   async function copy(text: string) {
     if (!text) return;
     await navigator.clipboard.writeText(text);
+  }
+
+  async function createInstallRequest() {
+    if (!sessionKey) {
+      setError("选择 Agent 后才能创建安装请求。");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setRequestMessage(null);
+    try {
+      const response = await createToolRequest({
+        kind: "adapter-install",
+        target: "remote-agent-host",
+        sessionKey,
+        agentId: agentId || undefined,
+        reason: "Install detaches_agent OpenClaw adapter on the remote agent host after user approval.",
+        source: "api",
+        payload: { installDir }
+      });
+      setRequestMessage(`已创建安装审批请求：${response.request.id}`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -95,6 +122,10 @@ export function AdapterStatusPanel() {
         </div>
       ) : null}
       <div className="adapter-actions">
+        <button type="button" className="secondary-button compact" onClick={() => void createInstallRequest()} disabled={!sessionKey || loading}>
+          <ShieldCheck size={14} />
+          创建安装审批
+        </button>
         <button type="button" className="secondary-button compact" onClick={() => setPlanOpen((current) => !current)}>
           <Terminal size={14} />
           {planOpen ? "隐藏命令" : "安装/验证命令"}
@@ -103,6 +134,7 @@ export function AdapterStatusPanel() {
           <Clipboard size={14} />
         </button>
       </div>
+      {requestMessage ? <p className="adapter-request-message">{requestMessage}</p> : null}
       {planOpen ? (
         <div className="adapter-command-box">
           <div>

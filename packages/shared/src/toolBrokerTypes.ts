@@ -1,6 +1,6 @@
 import type { ToolTarget } from "./fileTypes.js";
 
-export type ToolRequestKind = "terminal" | "file-transfer";
+export type ToolRequestKind = "terminal" | "file-transfer" | "adapter-install";
 export type ToolRequestStatus = "pending" | "approved" | "rejected" | "blocked" | "started" | "failed";
 export type ToolResultForwardStatus = "not-started" | "pending" | "sent" | "failed";
 export type ToolRequestSource = "text-extract" | "api" | "gateway-event";

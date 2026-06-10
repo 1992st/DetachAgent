@@ -120,7 +120,7 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
           return (
             <div className={`terminal-request-card ${request.kind === "file-transfer" ? "file-transfer-card" : ""}`} key={request.id}>
               <div>
-                <strong>{request.kind === "file-transfer" ? "File transfer" : "Terminal command"}</strong>
+                <strong>{request.kind === "file-transfer" ? "File transfer" : request.kind === "adapter-install" ? "Adapter install" : "Terminal command"}</strong>
                 <p className={`target-pill ${request.target}`}>Target: {targetLabels[request.target]}</p>
                 {request.risk ? <p className={`risk-pill ${request.risk.level}`}>Risk: {request.risk.level}{request.risk.reasons.length ? ` · ${request.risk.reasons.join("; ")}` : ""}</p> : null}
                 <small>{request.status} · {request.source || "unknown"}{request.sourceEventId ? ` · ${request.sourceEventId}` : ""}</small>
@@ -173,7 +173,7 @@ const targetLabels: Record<ToolTarget, string> = {
 };
 
 function targetIsSupported(target: ToolTarget): boolean {
-  return target === "local-user-machine";
+  return target === "local-user-machine" || target === "remote-agent-host";
 }
 
 function unsupportedTargetMessage(target: ToolTarget): string {
@@ -183,6 +183,12 @@ function unsupportedTargetMessage(target: ToolTarget): string {
 function toolRequestCode(request: ToolRequestRecord): string {
   if (request.kind === "terminal") {
     return typeof request.payload.command === "string" ? request.payload.command : JSON.stringify(request.payload, null, 2);
+  }
+  if (request.kind === "adapter-install") {
+    return [
+      `installDir: ${typeof request.payload.installDir === "string" ? request.payload.installDir : "~/.openclaw/detaches_agent"}`,
+      "action: install detaches adapter on remote-agent-host"
+    ].join("\n");
   }
   return [
     `fileId: ${typeof request.payload.fileId === "string" ? request.payload.fileId : ""}`,

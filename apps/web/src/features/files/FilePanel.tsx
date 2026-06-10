@@ -39,7 +39,7 @@ export function FilePanel({
   return (
     <aside className="file-panel">
       <DiagnosticsPanel items={diagnostics} loading={diagnosticsLoading} error={diagnosticsError} onRefresh={onDiagnosticsRefresh} />
-      <AdapterStatusPanel />
+      <AdapterStatusPanel sessionKey={sessionKey} agentId={agentId} />
       <ToolQueuePanel sessionKey={sessionKey} agentId={agentId} clientIdentity={clientIdentity} onRevealTerminal={onRevealTerminal} />
       <div className="panel-heading">
         <div>

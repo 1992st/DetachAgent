@@ -79,6 +79,7 @@ detaches_agent/
   - 记录 `source` / `sourceEventId`，对 Gateway/OpenClaw tool event 做幂等去重。
   - 记录 `sourceMessageId` / `sourceRunId`，让兼容文本解析出的工具请求能回溯到触发它的聊天消息。
   - 入队时执行基础风险分级：safe/elevated/destructive；destructive 会直接 blocked，elevated 在 UI 标记风险原因，审批 API 必须带 `riskAccepted: true`。
+  - `adapter-install` 是 `remote-agent-host` 专用请求，固定 elevated 风险；审批后由 broker 写入本机会话 terminal 执行 SSH 安装命令，并进入同一审计/结果回写链路。
   - 阻断不可用 target，禁止把 `remote-agent-host` / `gateway-managed` 退化成本机执行。
   - 审批本机 terminal 请求时直接调用 `terminalService.runCommand` 写入会话 terminal。
   - 审批/拒绝时记录 `lastDecision`，包含 actor、decidedAt 和 riskAccepted，并同步写入审计日志。
@@ -162,7 +163,7 @@ detaches_agent/
   - 调用 `/api/adapters/openclaw-detaches/readiness` 和 `/api/adapters/openclaw-detaches/install-plan`。
   - 展示本地 adapter distribution 的 ready/missing/invalid/error 状态，避免把本地文件系统检查误报成远端已安装状态。
   - 展示远端安装目录、安装命令和远端验证命令。
-  - 当前只展示和复制命令，不自动执行远端安装。
+  - 可创建 `adapter-install` Tool Broker 请求；真正安装必须在 Tool Queue 里审批并接受 elevated 风险。
 
 ### Terminal
 

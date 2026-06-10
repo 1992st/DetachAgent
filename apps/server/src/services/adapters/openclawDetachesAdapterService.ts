@@ -47,6 +47,15 @@ export interface OpenClawAdapterInfo {
   };
 }
 
+export interface OpenClawAdapterRemoteInstallCommand {
+  command: string;
+  installDir: string;
+  remoteHost: string;
+  remoteUser: string;
+  bundleUrl: string;
+  bundleSha256: string;
+}
+
 function sha256(buffer: Buffer): string {
   return crypto.createHash("sha256").update(buffer).digest("hex");
 }
@@ -211,6 +220,26 @@ function sshArgs(config: Awaited<ReturnType<typeof runtimeConfig>>, command: str
   if (config.remoteIdentityPath) args.push("-i", config.remoteIdentityPath);
   args.push(`${config.remoteUser}@${config.remoteHost}`, command);
   return args;
+}
+
+function shellJoin(command: string, args: string[]): string {
+  return [command, ...args.map(shellQuote)].join(" ");
+}
+
+function remoteInstallScript(plan: OpenClawAdapterInstallPlan): string {
+  return [
+    "set -euo pipefail",
+    `INSTALL_DIR=${shellQuote(plan.installDir)}`,
+    `BUNDLE_SHA256=${shellQuote(plan.bundleSha256)}`,
+    "TMP_BUNDLE=${TMPDIR:-/tmp}/openclaw-detaches-adapter.tar.gz",
+    "cat > \"$TMP_BUNDLE\"",
+    "ACTUAL_SHA256=$(shasum -a 256 \"$TMP_BUNDLE\" | awk '{print $1}')",
+    "test \"$ACTUAL_SHA256\" = \"$BUNDLE_SHA256\"",
+    "mkdir -p \"$INSTALL_DIR\"",
+    "tar -xzf \"$TMP_BUNDLE\" -C \"$INSTALL_DIR\" --strip-components=1",
+    "chmod +x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
+    "node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest"
+  ].join("\n");
 }
 
 export const openclawDetachesAdapterService = {
@@ -464,6 +493,23 @@ export const openclawDetachesAdapterService = {
         }]
       };
     }
+  },
+
+  async prepareRemoteInstallCommand(input: { installDir?: string } = {}): Promise<OpenClawAdapterRemoteInstallCommand> {
+    const config = await runtimeConfig();
+    if (!config.remoteUser) throw new Error("Remote SSH user is not configured.");
+    const baseUrl = `http://127.0.0.1:${config.serverPort}`;
+    const plan = await this.installPlan({ baseUrl, installDir: input.installDir });
+    const args = sshArgs(config, remoteInstallScript(plan));
+    const bundleUrl = `${baseUrl}/api/adapters/openclaw-detaches/bundle`;
+    return {
+      command: `curl -fL ${shellQuote(bundleUrl)} | ${shellJoin("ssh", args)}`,
+      installDir: plan.installDir,
+      remoteHost: config.remoteHost,
+      remoteUser: config.remoteUser,
+      bundleUrl,
+      bundleSha256: plan.bundleSha256
+    };
   },
 
   async file(filePath: string): Promise<{ buffer: Buffer; path: string; mimeType: string }> {

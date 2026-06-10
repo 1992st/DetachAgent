@@ -556,6 +556,36 @@ async function main() {
     assert.equal(confirmedElevatedApprove.request.status, "approved");
     assert.equal(confirmedElevatedApprove.request.lastDecision.riskAccepted, true);
 
+    const adapterInstallTool = await requestJson("/api/tools/requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "adapter-install",
+        target: "remote-agent-host",
+        sessionKey: chatSessionKey,
+        agentId: "agent-alpha",
+        reason: "smoke adapter install approval",
+        payload: { installDir: "~/.openclaw/detaches_agent_smoke" }
+      })
+    });
+    assert.equal(adapterInstallTool.request.status, "pending");
+    assert.equal(adapterInstallTool.request.risk.level, "elevated");
+    assert.match(adapterInstallTool.request.risk.reasons.join(" "), /远端 agent host/);
+    const adapterInstallWithoutConfirmation = await fetch(`http://${host}:${serverPort}/api/tools/requests/${adapterInstallTool.request.id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    });
+    assert.equal(adapterInstallWithoutConfirmation.status, 400);
+    assert.match(await adapterInstallWithoutConfirmation.text(), /requires explicit confirmation/);
+    const adapterInstallConfirmed = await requestJson(`/api/tools/requests/${adapterInstallTool.request.id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ riskAccepted: true, actor: decisionActor })
+    });
+    assert.equal(adapterInstallConfirmed.request.status, "failed");
+    assert.match(adapterInstallConfirmed.message, /Remote SSH user is not configured/);
+
     const destructiveTerminalTool = await requestJson("/api/tools/requests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -700,6 +730,8 @@ async function main() {
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.ingest" && event.sourceEventId === "gateway-tool-event-smoke-1" && event.duplicate === true), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.command === "printf 'smoke-complete\\n'" && typeof event.terminalId === "string"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.actor?.deviceIdShort === decisionActor.deviceIdShort), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "adapter-install" && event.request.target === "remote-agent-host" && event.request.risk?.level === "elevated"), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.requestId === adapterInstallTool.request.id && event.status === "failed"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.reject" && event.actor?.source === "detaches-ui"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && /detaches-note-via-broker\.txt/.test(event.command || "") && typeof event.terminalId === "string"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.result.forward" && event.status === "sent"), true);

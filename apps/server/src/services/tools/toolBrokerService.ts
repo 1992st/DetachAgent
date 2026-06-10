@@ -25,6 +25,7 @@ import { appConfig } from "../../config/appConfig.js";
 import { fileTransferService } from "../files/fileTransferService.js";
 import { gatewayClient } from "../gateway/gatewayClient.js";
 import { terminalService } from "../terminal/terminalService.js";
+import { openclawDetachesAdapterService } from "../adapters/openclawDetachesAdapterService.js";
 
 type AuditEvent =
   | { type: "tool.create"; request: ToolRequestRecord }
@@ -211,6 +212,31 @@ class ToolBrokerService {
         return this.fail(request, error instanceof Error ? error.message : String(error));
       }
     }
+    if (request.kind === "adapter-install") {
+      const installDir = stringPayload(request, "installDir") || "~/.openclaw/detaches_agent";
+      try {
+        const prepared = await openclawDetachesAdapterService.prepareRemoteInstallCommand({ installDir });
+        const execution = await this.runInTerminal(request, prepared.command);
+        const updated = this.update(request, "approved", undefined, decision("approved", input));
+        await this.save();
+        await this.audit({ type: "tool.approve", requestId, status: updated.status, command: prepared.command, terminalId: execution.terminalId, executionId: execution.executionId, actor: input.actor, riskAccepted: input.riskAccepted });
+        void this.forwardResultToAgent(updated.id);
+        return {
+          request: updated,
+          command: prepared.command,
+          execution: {
+            executionId: execution.executionId,
+            target: request.target,
+            terminalId: execution.terminalId,
+            sessionKey: execution.sessionKey,
+            wroteToTerminal: true
+          },
+          message: "Remote adapter installation command was written to the session terminal by the server broker."
+        };
+      } catch (error) {
+        return this.fail(request, error instanceof Error ? error.message : String(error));
+      }
+    }
     return this.fail(request, `Unsupported tool request kind: ${request.kind}`);
   }
 
@@ -277,6 +303,7 @@ class ToolBrokerService {
   }
 
   private targetSupported(kind: ToolRequestKind, target: ToolTarget): boolean {
+    if (kind === "adapter-install") return target === "remote-agent-host";
     return (kind === "terminal" || kind === "file-transfer") && target === "local-user-machine";
   }
 
@@ -511,7 +538,7 @@ function parseFileTransferRequests(text: string): ParsedToolRequest[] {
           : "";
       if (fileId && remotePath) {
         requests.push({
-          kind: "file-transfer",
+        kind: "file-transfer",
           target: parseToolTarget(parsed.target),
           reason: typeof parsed.reason === "string" ? parsed.reason.trim() : undefined,
           payload: { fileId, remotePath }
@@ -562,6 +589,7 @@ function unsupportedTargetMessage(kind: ToolRequestKind, target: ToolTarget): st
 }
 
 function assessRisk(input: Pick<ToolRequestRecord, "kind" | "payload">): ToolRiskAssessment {
+  if (input.kind === "adapter-install") return { level: "elevated", reasons: ["将在远端 agent host 安装 detaches adapter"] };
   if (input.kind !== "terminal") return { level: "safe", reasons: [] };
   const command = typeof input.payload.command === "string" ? input.payload.command : "";
   const normalized = command.toLowerCase();
@@ -602,7 +630,7 @@ function targetObject(value: unknown): value is { [key: string]: unknown } {
 function isToolRequestRecord(value: unknown): value is ToolRequestRecord {
   if (!targetObject(value)) return false;
   return typeof value.id === "string"
-    && (value.kind === "terminal" || value.kind === "file-transfer")
+    && (value.kind === "terminal" || value.kind === "file-transfer" || value.kind === "adapter-install")
     && typeof value.sessionKey === "string"
     && typeof value.createdAt === "string"
     && typeof value.updatedAt === "string"
