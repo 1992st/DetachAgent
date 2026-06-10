@@ -231,6 +231,7 @@ async function main() {
   const mock = createMockGateway();
   mock.server.listen(gatewayPort, host);
   await once(mock.server, "listening");
+  await fs.rm(new URL("../../../storage-smoke", import.meta.url), { recursive: true, force: true });
 
   const server = spawn("node", ["dist/index.js"], {
     cwd: new URL("..", import.meta.url),
@@ -425,6 +426,17 @@ async function main() {
     const approvedToolList = await requestJson(`/api/tools/requests?sessionKey=${encodeURIComponent(chatSessionKey)}&agentId=agent-alpha&status=approved&limit=10`);
     assert.equal(approvedToolList.requests.some((request) => request.id === terminalTool.request.id), true);
 
+    const toolStream = new WebSocket(`ws://${host}:${serverPort}/api/tools/stream?sessionKey=${encodeURIComponent(chatSessionKey)}&agentId=agent-alpha`);
+    const toolStreamMessages = [];
+    toolStream.on("message", (data) => {
+      toolStreamMessages.push(JSON.parse(data.toString("utf8")));
+    });
+    await once(toolStream, "open");
+    while (!toolStreamMessages.some((message) => message.type === "ready")) {
+      if (Date.now() - started > 12000) throw new Error("Timed out waiting for tool stream ready.");
+      await wait(50);
+    }
+
     const gatewayToolEvent = await requestJson("/api/tools/events/gateway", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -456,6 +468,15 @@ async function main() {
     assert.equal(duplicateGatewayToolEvent.request.id, gatewayToolEvent.request.id);
     const gatewayEventToolList = await requestJson(`/api/tools/requests?sessionKey=${encodeURIComponent(chatSessionKey)}&agentId=agent-alpha&status=pending&limit=50`);
     assert.equal(gatewayEventToolList.requests.filter((request) => request.sourceEventId === "gateway-tool-event-smoke-1").length, 1);
+    const hasToolStreamAction = (action) => toolStreamMessages.some((message) => message.type === "request" && message.action === action && message.request?.id === gatewayToolEvent.request.id);
+    while (!hasToolStreamAction("created") || !hasToolStreamAction("ingested") || !hasToolStreamAction("duplicate")) {
+      if (Date.now() - started > 12000) throw new Error(`Timed out waiting for tool stream request event: ${JSON.stringify(toolStreamMessages)}`);
+      await wait(50);
+    }
+    assert.equal(hasToolStreamAction("created"), true);
+    assert.equal(hasToolStreamAction("ingested"), true);
+    assert.equal(hasToolStreamAction("duplicate"), true);
+    toolStream.close();
 
     const blockedTerminalTool = await requestJson("/api/tools/requests", {
       method: "POST",

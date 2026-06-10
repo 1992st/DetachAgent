@@ -88,6 +88,12 @@ Broker 队列查询：
 - 支持 `sessionKey`、`agentId`、`status`、`limit` 过滤。
 - UI 可从 broker 队列恢复请求状态；后续 Gateway/OpenClaw 原生 tool event 也应写入同一个队列，而不是继续依赖 assistant 文本解析。
 
+Broker 事件订阅：
+
+- `WS /api/tools/stream?sessionKey=...&agentId=...`
+- 服务端在 request created/updated/ingested/duplicate 时推送 request event。
+- UI 收到事件后刷新 broker 队列，避免只靠轮询或重新渲染聊天消息发现待审批请求。
+
 审批后由 Tool Broker 在服务端调用会话 terminal 写入命令；前端不再直接把 approved command 写入 terminal，只负责展示 terminal 输出。
 
 执行结果查询：

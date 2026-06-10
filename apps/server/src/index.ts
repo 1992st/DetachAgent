@@ -7,6 +7,7 @@ import { appConfig } from "./config/appConfig.js";
 import { apiRoutes } from "./routes/apiRoutes.js";
 import { attachChatSocket } from "./ws/chatSocket.js";
 import { attachTerminalSocket } from "./ws/terminalSocket.js";
+import { attachToolBrokerSocket } from "./ws/toolBrokerSocket.js";
 
 async function ensureStorage(): Promise<void> {
   for (const dir of ["uploads", "downloads", "cache", "logs"]) {
@@ -25,6 +26,7 @@ async function main(): Promise<void> {
   const server = http.createServer(app);
   attachChatSocket(server);
   attachTerminalSocket(server);
+  attachToolBrokerSocket(server);
   let listenAttempts = 0;
   server.on("error", (error: NodeJS.ErrnoException) => {
     if (error.code === "EADDRINUSE" && listenAttempts < 5) {

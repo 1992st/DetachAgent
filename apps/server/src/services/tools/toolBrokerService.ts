@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { EventEmitter } from "node:events";
 import { nanoid } from "nanoid";
 import type {
   ToolGatewayEventInput,
@@ -28,6 +29,11 @@ type AuditEvent =
   | { type: "tool.result.forward"; requestId: string; executionId: string; status: ToolResultForwardStatus; ok: boolean; error?: string }
   | { type: "tool.reject"; requestId: string; status: ToolRequestStatus };
 
+export type ToolBrokerEvent = {
+  action: "created" | "updated" | "ingested" | "duplicate";
+  request: ToolRequestRecord;
+};
+
 interface ToolExecutionRecord {
   executionId: string;
   requestId: string;
@@ -53,6 +59,7 @@ class ToolBrokerService {
   private executions = new Map<string, ToolExecutionRecord>();
   private loaded = false;
   private saveChain: Promise<void> = Promise.resolve();
+  readonly emitter = new EventEmitter();
 
   async extractFromText(input: { text: string; sessionKey: string; agentId?: string }): Promise<ToolRequestExtractResponse> {
     await this.load();
@@ -90,6 +97,7 @@ class ToolBrokerService {
     this.requests.set(record.id, record);
     await this.save();
     await this.audit({ type: "tool.create", request: record });
+    this.emit("created", record);
     return record;
   }
 
@@ -98,10 +106,12 @@ class ToolBrokerService {
     const existing = this.findBySourceEventId(input.sourceEventId);
     if (existing) {
       await this.audit({ type: "tool.ingest", requestId: existing.id, sourceEventId: input.sourceEventId, duplicate: true });
+      this.emit("duplicate", existing);
       return { request: existing };
     }
     const request = await this.create(input);
     await this.audit({ type: "tool.ingest", requestId: request.id, sourceEventId: input.sourceEventId, duplicate: false });
+    this.emit("ingested", request);
     return { request };
   }
 
@@ -275,7 +285,12 @@ class ToolBrokerService {
     };
     this.requests.set(request.id, updated);
     void this.save();
+    this.emit("updated", updated);
     return updated;
+  }
+
+  private emit(action: ToolBrokerEvent["action"], request: ToolRequestRecord): void {
+    this.emitter.emit("request", { action, request } satisfies ToolBrokerEvent);
   }
 
   private async fail(request: ToolRequestRecord, error: string): Promise<ToolRequestDecisionResponse> {

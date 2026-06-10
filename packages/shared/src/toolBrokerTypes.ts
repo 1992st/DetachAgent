@@ -44,6 +44,11 @@ export interface ToolRequestListResponse {
   requests: ToolRequestRecord[];
 }
 
+export type ToolBrokerSocketEvent =
+  | { type: "ready"; filters: { sessionKey?: string; agentId?: string } }
+  | { type: "request"; action: "created" | "updated" | "ingested" | "duplicate"; request: ToolRequestRecord }
+  | { type: "error"; message: string };
+
 export interface ToolRequestDecisionResponse {
   request: ToolRequestRecord;
   command?: string;
