@@ -345,6 +345,15 @@ async function main() {
     assert.equal(adapterInstallPlan.commands.some((command) => /curl -fL/.test(command)), true);
     assert.equal(adapterInstallPlan.commands.some((command) => /shasum -a 256/.test(command)), true);
     assert.equal(adapterInstallPlan.verifyCommands.some((command) => /detaches_agent\.openclaw\.adapter/.test(command)), true);
+    const adapterReadiness = await requestJson("/api/adapters/openclaw-detaches/readiness");
+    assert.equal(adapterReadiness.target, "local-distribution");
+    assert.equal(adapterReadiness.state, "ready");
+    assert.equal(adapterReadiness.expectedAdapterId, "detaches_agent.openclaw.adapter");
+    assert.equal(adapterReadiness.checks.every((check) => check.state === "ready"), true);
+    const missingAdapterReadiness = await requestJson(`/api/adapters/openclaw-detaches/readiness?target=remote-agent-host&installDir=${encodeURIComponent("/tmp/detaches-agent-missing-adapter-smoke")}`);
+    assert.equal(missingAdapterReadiness.target, "remote-agent-host");
+    assert.equal(missingAdapterReadiness.state, "missing");
+    assert.equal(missingAdapterReadiness.checks.some((check) => check.id === "install-dir" && check.state === "missing"), true);
 
     chat.send(JSON.stringify({
       type: "send",

@@ -56,6 +56,25 @@ export interface OpenClawAdapterInstallPlan {
   notes: string[];
 }
 
+export type OpenClawAdapterReadinessState = "ready" | "missing" | "invalid" | "error";
+
+export interface OpenClawAdapterReadinessCheck {
+  id: string;
+  state: OpenClawAdapterReadinessState;
+  message: string;
+  details?: unknown;
+}
+
+export interface OpenClawAdapterReadiness {
+  target: "local-distribution" | "remote-agent-host";
+  installDir: string;
+  expectedAdapterId: string;
+  expectedVersion: string;
+  state: OpenClawAdapterReadinessState;
+  checks: OpenClawAdapterReadinessCheck[];
+  verifyCommands: string[];
+}
+
 function sha256(buffer: Buffer): string {
   return crypto.createHash("sha256").update(buffer).digest("hex");
 }
@@ -129,6 +148,23 @@ function normalizeBaseUrl(value: string | undefined): string {
 function normalizeInstallDir(value: string | undefined): string {
   const trimmed = value?.trim();
   return trimmed || "~/.openclaw/detaches_agent";
+}
+
+function expandHomeDir(value: string): string {
+  if (value === "~") return process.env.HOME || value;
+  if (value.startsWith("~/")) return path.join(process.env.HOME || "~", value.slice(2));
+  return value;
+}
+
+function aggregateReadiness(checks: OpenClawAdapterReadinessCheck[]): OpenClawAdapterReadinessState {
+  if (checks.some((check) => check.state === "error")) return "error";
+  if (checks.some((check) => check.state === "invalid")) return "invalid";
+  if (checks.some((check) => check.state === "missing")) return "missing";
+  return "ready";
+}
+
+async function readJsonFile(filePath: string): Promise<unknown> {
+  return JSON.parse(await fs.readFile(filePath, "utf8"));
 }
 
 export const openclawDetachesAdapterService = {
@@ -216,6 +252,112 @@ export const openclawDetachesAdapterService = {
         "Run these commands on the real OpenClaw agent host, not inside the user's local detaches_agent terminal.",
         "The remote host must be able to reach the detaches_agent server baseUrl.",
         "The adapter only validates/emits detaches_agent protocol requests; it does not bypass UI approval."
+      ]
+    };
+  },
+
+  async readiness(input: { installDir?: string; target?: "local-distribution" | "remote-agent-host" } = {}): Promise<OpenClawAdapterReadiness> {
+    const info = await this.info();
+    const target = input.target ?? (input.installDir ? "remote-agent-host" : "local-distribution");
+    const installDir = input.installDir ? normalizeInstallDir(input.installDir) : adapterRoot;
+    const absoluteInstallDir = input.installDir ? path.resolve(expandHomeDir(installDir)) : adapterRoot;
+    const manifestPath = path.join(absoluteInstallDir, "adapter.manifest.json");
+    const cliPath = path.join(absoluteInstallDir, "bin", "detaches-agent-adapter.mjs");
+    const checks: OpenClawAdapterReadinessCheck[] = [];
+
+    try {
+      const stats = await fs.stat(absoluteInstallDir);
+      checks.push({
+        id: "install-dir",
+        state: stats.isDirectory() ? "ready" : "invalid",
+        message: stats.isDirectory()
+          ? `Adapter install directory exists: ${installDir}`
+          : `Adapter install path exists but is not a directory: ${installDir}`
+      });
+    } catch (error: any) {
+      checks.push({
+        id: "install-dir",
+        state: error?.code === "ENOENT" ? "missing" : "error",
+        message: error?.code === "ENOENT"
+          ? `Adapter install directory does not exist: ${installDir}`
+          : error?.message || "Failed to inspect adapter install directory."
+      });
+    }
+
+    try {
+      const manifest = await readJsonFile(manifestPath) as Record<string, unknown>;
+      const id = manifest.id;
+      checks.push({
+        id: "manifest",
+        state: id === info.id ? "ready" : "invalid",
+        message: id === info.id
+          ? `Adapter manifest id is ${info.id}.`
+          : `Adapter manifest id mismatch: expected ${info.id}, got ${String(id || "missing")}.`,
+        details: { id }
+      });
+    } catch (error: any) {
+      checks.push({
+        id: "manifest",
+        state: error?.code === "ENOENT" ? "missing" : "error",
+        message: error?.code === "ENOENT"
+          ? `Adapter manifest is missing at ${path.join(installDir, "adapter.manifest.json")}.`
+          : error?.message || "Failed to read adapter manifest."
+      });
+    }
+
+    try {
+      const packageJson = await readJsonFile(path.join(absoluteInstallDir, "package.json")) as Record<string, unknown>;
+      const version = packageJson.version;
+      checks.push({
+        id: "version",
+        state: version === info.version ? "ready" : "invalid",
+        message: version === info.version
+          ? `Adapter package version is ${info.version}.`
+          : `Adapter package version mismatch: expected ${info.version}, got ${String(version || "missing")}.`,
+        details: { version }
+      });
+    } catch (error: any) {
+      checks.push({
+        id: "version",
+        state: error?.code === "ENOENT" ? "missing" : "error",
+        message: error?.code === "ENOENT"
+          ? `Adapter package metadata is missing at ${path.join(installDir, "package.json")}.`
+          : error?.message || "Failed to read adapter package metadata."
+      });
+    }
+
+    try {
+      const stats = await fs.stat(cliPath);
+      checks.push({
+        id: "cli",
+        state: stats.isFile() ? "ready" : "invalid",
+        message: stats.isFile()
+          ? `Adapter CLI exists at ${path.join(installDir, "bin", "detaches-agent-adapter.mjs")}.`
+          : "Adapter CLI path exists but is not a file."
+      });
+    } catch (error: any) {
+      checks.push({
+        id: "cli",
+        state: error?.code === "ENOENT" ? "missing" : "error",
+        message: error?.code === "ENOENT"
+          ? `Adapter CLI is missing at ${path.join(installDir, "bin", "detaches-agent-adapter.mjs")}.`
+          : error?.message || "Failed to inspect adapter CLI."
+      });
+    }
+
+    return {
+      target,
+      installDir,
+      expectedAdapterId: info.id,
+      expectedVersion: info.version,
+      state: aggregateReadiness(checks),
+      checks,
+      verifyCommands: [
+        `INSTALL_DIR=${shellQuote(installDir)}`,
+        "test -d \"$INSTALL_DIR\"",
+        "test -f \"$INSTALL_DIR/adapter.manifest.json\"",
+        "test -x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" || test -f \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
+        "node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest | grep -q 'detaches_agent.openclaw.adapter'"
       ]
     };
   },

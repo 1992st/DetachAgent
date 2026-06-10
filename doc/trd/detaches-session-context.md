@@ -28,6 +28,7 @@
 - `GET /api/adapters/openclaw-detaches/files/<path>`：下载白名单内的单个 adapter 文件。
 - `GET /api/adapters/openclaw-detaches/bundle`：下载 `openclaw-detaches-adapter.tar.gz`。
 - `GET /api/adapters/openclaw-detaches/install-plan?baseUrl=...&installDir=...`：生成给真实 agent host 执行的安装命令和验证命令。
+- `GET /api/adapters/openclaw-detaches/readiness?target=...&installDir=...`：检查 adapter distribution 或指定安装目录是否完整。
 
 这让远端 agent host 可以从 detaches_agent 获取同一份协议资产。它仍不是最终的 OpenClaw 原生 skill 安装器，但已经把“agent 需要知道当前 detaches 场景”从聊天 prompt 推进为可分发、可校验的 adapter 包。
 
@@ -39,6 +40,12 @@
 - 运行 `detaches-agent-adapter manifest` 验证 adapter id。
 
 后续 UI 可以把 install-plan 作为待审批远端操作展示；真正自动 SSH 安装前必须先解决远端 target adapter、认证、审计和失败回滚。
+
+readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
+
+- 默认不传 `installDir` 时，检查本仓库内 adapter distribution 是否完整。
+- 传入 `installDir` 时，检查该目录中的 `adapter.manifest.json`、`package.json` 和 CLI 文件。
+- 返回 verify commands，可作为后续远端 SSH/agent-side skill 的健康检查脚本。
 
 ### 结构化 manifest
 

@@ -103,11 +103,17 @@ detaches_agent/
   - `GET /api/adapters/openclaw-detaches/files/<path>`
   - `GET /api/adapters/openclaw-detaches/bundle`
   - `GET /api/adapters/openclaw-detaches/install-plan`
+  - `GET /api/adapters/openclaw-detaches/readiness`
 
 - Install plan：
   - 生成给 `remote-agent-host` 执行的 shell 命令。
   - 包含 bundle 下载、sha256 校验、解包、chmod 和 manifest 验证。
   - 当前只返回计划，不直接 SSH 修改远端机器。
+
+- Readiness：
+  - 默认检查仓库内 adapter distribution 是否完整。
+  - 传入 `installDir` 时检查目标目录中的 manifest、package version 和 CLI 文件。
+  - 返回 ready/missing/invalid/error 与可在远端执行的 verify commands。
 
 ### 文件
 
