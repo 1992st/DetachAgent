@@ -22,11 +22,15 @@ export interface FileTransferPrepareRequest {
   fileId: string;
   target: ToolTarget;
   remotePath: string;
+  agentId?: string;
+  sessionKey?: string;
 }
 
 export interface FileTransferPrepareResponse {
   fileId: string;
   target: ToolTarget;
+  agentId?: string;
+  workspace?: string;
   fileName: string;
   remotePath: string;
   downloadUrl: string;

@@ -152,6 +152,20 @@ function createMockGateway() {
         return;
       }
 
+      if (frame.method === "agents.files.list") {
+        socket.send(JSON.stringify({
+          type: "res",
+          id: frame.id,
+          ok: true,
+          payload: {
+            agentId: frame.params.agentId,
+            workspace: `/tmp/openclaw/workspace/${frame.params.agentId}`,
+            files: []
+          }
+        }));
+        return;
+      }
+
       if (frame.method === "chat.history") {
         socket.send(JSON.stringify({
           type: "res",
@@ -342,6 +356,22 @@ async function main() {
     assert.match(preparedTransfer.command, /curl -fL/);
     assert.match(preparedTransfer.command, /detaches-note\.txt/);
 
+    const validRemoteTransfer = await fetch(`http://${host}:${serverPort}/api/files/transfer/prepare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId: upload.file.id, target: "remote-agent-host", agentId: "agent-alpha", remotePath: "docs/detaches-note.txt" })
+    });
+    assert.equal(validRemoteTransfer.status, 400);
+    assert.match(await validRemoteTransfer.text(), /remote-agent-host path is valid under \/tmp\/openclaw\/workspace\/agent-alpha/);
+
+    const escapedRemoteTransfer = await fetch(`http://${host}:${serverPort}/api/files/transfer/prepare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId: upload.file.id, target: "remote-agent-host", agentId: "agent-alpha", remotePath: "/etc/passwd" })
+    });
+    assert.equal(escapedRemoteTransfer.status, 400);
+    assert.match(await escapedRemoteTransfer.text(), /outside the remote agent workspace/);
+
     const stagedDownload = await fetch(preparedTransfer.downloadUrl);
     assert.equal(stagedDownload.status, 200);
     assert.equal(await stagedDownload.text(), "hello");
@@ -357,14 +387,7 @@ async function main() {
     assert.equal(auditEvents.some((event) => event.type === "transfer.prepare" && event.fileId === upload.file.id && event.target === "local-user-machine" && event.remotePath === "/tmp/detaches-note.txt"), true);
     assert.equal(auditEvents.some((event) => event.type === "transfer.download.start" && event.fileId === upload.file.id && event.target === "local-user-machine"), true);
     assert.equal(auditEvents.some((event) => event.type === "transfer.download.cleanup" && event.fileId === upload.file.id && event.target === "local-user-machine" && event.deleted === true), true);
-
-    const unsupportedTransfer = await fetch(`http://${host}:${serverPort}/api/files/transfer/prepare`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileId: upload.file.id, target: "remote-agent-host", remotePath: "/tmp/remote.txt" })
-    });
-    assert.equal(unsupportedTransfer.status, 400);
-    assert.match(await unsupportedTransfer.text(), /Unsupported transfer target/);
+    assert.equal(auditEvents.some((event) => event.type === "transfer.error" && event.fileId === upload.file.id && event.target === "remote-agent-host" && event.agentId === "agent-alpha" && event.workspace === "/tmp/openclaw/workspace/agent-alpha"), true);
 
     chat.send(JSON.stringify({ type: "abort", runId: "run-smoke-1" }));
     while (!observed.abort) {

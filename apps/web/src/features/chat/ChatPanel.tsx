@@ -6,6 +6,7 @@ import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPan
 
 interface Props {
   sessionKey: string | null;
+  agentId: string | null;
   sessionMode: ChatSessionMode;
   clientIdentity: ClientIdentity | null;
   attachments: UploadedFileRef[];
@@ -16,6 +17,7 @@ interface Props {
 
 export function ChatPanel({
   sessionKey,
+  agentId,
   sessionMode,
   clientIdentity,
   attachments,
@@ -130,7 +132,7 @@ export function ChatPanel({
   }
 
   async function prepareAndRunFileTransfer(request: FileTransferRequest) {
-    const response = await prepareFileTransfer(request.fileId, request.target, request.remotePath);
+    const response = await prepareFileTransfer(request.fileId, request.target, request.remotePath, { agentId, sessionKey });
     const ok = terminalRef.current?.runCommand(response.command) ?? false;
     terminalRef.current?.reveal();
     if (!ok) {

@@ -64,6 +64,11 @@ export class GatewayClient extends EventEmitter {
     return this.request("agents.list", {}, 15000);
   }
 
+  async listAgentFiles(agentId: string): Promise<unknown> {
+    await this.connect();
+    return this.request("agents.files.list", { agentId }, 15000);
+  }
+
   async chatHistory(sessionKey: string): Promise<unknown> {
     await this.connect();
     return this.request("chat.history", { sessionKey, limit: 100 }, 6000);

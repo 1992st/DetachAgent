@@ -382,11 +382,13 @@ apiRoutes.post("/files/transfer/prepare", async (req, res) => {
     const fileId = String(req.body.fileId || "");
     const remotePath = String(req.body.remotePath || "");
     const target = parseToolTarget(req.body.target);
+    const agentId = typeof req.body.agentId === "string" ? req.body.agentId.trim() : undefined;
+    const sessionKey = typeof req.body.sessionKey === "string" ? req.body.sessionKey.trim() : undefined;
     if (!fileId || !remotePath) {
       res.status(400).json({ error: "Missing fileId or remotePath." });
       return;
     }
-    res.json(await fileTransferService.prepareTransfer(fileId, target, remotePath));
+    res.json(await fileTransferService.prepareTransfer({ fileId, target, remotePath, agentId, sessionKey }));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }

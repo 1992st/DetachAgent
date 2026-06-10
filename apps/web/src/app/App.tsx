@@ -129,6 +129,7 @@ export function App() {
           />
           <ChatPanel
             sessionKey={selectedSession}
+            agentId={selectedAgent?.id ?? null}
             sessionMode={sessionMode}
             clientIdentity={clientIdentity}
             attachments={attachments}
