@@ -54,6 +54,14 @@
       "unavailableTargets": ["remote-agent-host", "gateway-managed"],
       "approvalRequired": true,
       "executionHost": "user-local-machine"
+    },
+    {
+      "name": "file-transfer",
+      "requestFence": "detaches-file-transfer",
+      "supportedTargets": ["local-user-machine"],
+      "unavailableTargets": ["remote-agent-host", "gateway-managed"],
+      "approvalRequired": true,
+      "executionHost": "user-local-machine"
     }
   ],
   "invariants": [

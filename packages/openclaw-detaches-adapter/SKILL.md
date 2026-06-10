@@ -19,13 +19,19 @@ detaches_agent is a local UI and approval broker running on the user's computer.
 node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs context-fetch "$DETACHES_CONTEXT_EXPORT_URL" --output /tmp/detaches-client-context.json
 ```
 
-3. Inspect before requesting tools:
+3. Run the agent-side doctor before requesting tools:
+
+```sh
+node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --context /tmp/detaches-client-context.json
+```
+
+4. If you need raw diagnostics, inspect the context:
 
 ```sh
 node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs inspect-context /tmp/detaches-client-context.json
 ```
 
-4. Prefer structured broker events over fenced text:
+5. Prefer structured broker events over fenced text:
 
 ```sh
 node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs terminal-request \

@@ -37,6 +37,12 @@ The export URL should be consumed once. Treat the saved file as sensitive becaus
 When this adapter is installed on the real OpenClaw agent host, use the CLI as a local protocol inspector:
 
 ```sh
+node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --context /path/to/clientContext.detaches.json
+```
+
+`doctor` is the preferred first command. It prints the current session identity, requestable targets, blocked targets, staged files, hard rules, and exact broker-event command templates. It does not execute commands or transfer files.
+
+```sh
 node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs inspect-context /path/to/clientContext.detaches.json
 ```
 

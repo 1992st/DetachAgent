@@ -22,13 +22,19 @@ It does not execute commands or move files by itself. It validates session conte
 node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs context-fetch "$DETACHES_CONTEXT_EXPORT_URL" --output /tmp/detaches-client-context.json
 ```
 
-4. Inspect the context before requesting tools:
+4. Run the agent-side doctor before requesting tools:
+
+```sh
+node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --context /tmp/detaches-client-context.json
+```
+
+5. Inspect the raw context diagnostics when needed:
 
 ```sh
 node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs inspect-context /tmp/detaches-client-context.json
 ```
 
-5. Submit a structured broker request only when the context says the target is supported:
+6. Submit a structured broker request only when the doctor/context says the target is supported:
 
 ```sh
 node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs terminal-request \

@@ -28,6 +28,7 @@ assert.equal(parsedManifest.id, "detaches_agent.openclaw.adapter");
 assert.equal(parsedManifest.targets["local-user-machine"].status, "supported");
 assert.equal(parsedManifest.targets["remote-agent-host"].status, "reserved");
 assert.equal(parsedManifest.cliCommands["inspect-context"].includes("routing warnings"), true);
+assert.equal(parsedManifest.cliCommands["doctor"].includes("runbook"), true);
 assert.equal(parsedManifest.cliCommands["context-fetch"].includes("one-time"), true);
 assert.equal(parsedManifest.skill.manifest, "skill.manifest.json");
 
@@ -39,10 +40,12 @@ assert.equal(parsedSkillManifest.safety.executesToolsDirectly, false);
 
 const readme = await fs.readFile(path.join(adapterDir, "README.md"), "utf8");
 assert.match(readme, /context-fetch/);
+assert.match(readme, /doctor --context/);
 assert.match(readme, /require user approval/i);
 const skillMd = await fs.readFile(path.join(adapterDir, "SKILL.md"), "utf8");
 assert.match(skillMd, /^name:\s*detaches-agent/m);
 assert.match(skillMd, /metadata:.*openclaw/);
+assert.match(skillMd, /doctor --context/);
 
 const validContext = await run(["validate-context", "test/valid-context.json"]);
 assert.equal(validContext.code, 0);
@@ -73,9 +76,9 @@ assert.equal(parsedInspection.broker.submitTokenHeader, "Authorization");
 assert.equal(parsedInspection.broker.requestFormats.includes("broker-event"), true);
 assert.equal(parsedInspection.contextExport.oneTime, true);
 assert.equal(parsedInspection.contextExport.adapterCommand, "context-fetch");
-assert.deepEqual(parsedInspection.targetSupport["local-user-machine"].supportedBy, ["terminal"]);
+assert.deepEqual(parsedInspection.targetSupport["local-user-machine"].supportedBy, ["terminal", "file-transfer"]);
 assert.equal(parsedInspection.targetSupport["local-user-machine"].requestable, true);
-assert.deepEqual(parsedInspection.targetSupport["remote-agent-host"].unavailableBy, ["terminal"]);
+assert.deepEqual(parsedInspection.targetSupport["remote-agent-host"].unavailableBy, ["terminal", "file-transfer"]);
 assert.equal(parsedInspection.targetSupport["remote-agent-host"].requestable, false);
 assert.equal(parsedInspection.warnings.some((warning) => /remote-agent-host is unavailable/.test(warning)), true);
 
@@ -88,6 +91,23 @@ assert.equal(parsedClientContextInspection.broker.submitToken, "client-context-s
 const inspectedStdinClientContext = await run(["inspect-context", "-"], validClientContextJson);
 assert.equal(inspectedStdinClientContext.code, 0);
 assert.equal(JSON.parse(inspectedStdinClientContext.stdout).broker.submitToken, "client-context-submit-token");
+
+const doctor = await run(["doctor", "--context", "test/valid-context.json"]);
+assert.equal(doctor.code, 0);
+const parsedDoctor = JSON.parse(doctor.stdout);
+assert.equal(parsedDoctor.ok, true);
+assert.equal(parsedDoctor.mode, "detaches-agent-doctor");
+assert.equal(parsedDoctor.session.sessionKey, "agent:audio-process:main");
+assert.equal(parsedDoctor.preferredRequestFormat, "broker-event");
+assert.equal(parsedDoctor.broker.endpoint, "http://127.0.0.1:38888/api/tools/events/gateway");
+assert.equal(parsedDoctor.broker.submitTokenAvailable, true);
+assert.deepEqual(parsedDoctor.requestableTargets["local-user-machine"], ["terminal", "file-transfer"]);
+assert.equal(parsedDoctor.blockedTargets["remote-agent-host"].manifestStatus, "reserved");
+assert.equal(parsedDoctor.stagedFiles[0].fileId, "file-123");
+assert.match(parsedDoctor.commands.terminalBrokerEvent, /terminal-request/);
+assert.match(parsedDoctor.commands.terminalBrokerEvent, /--submit/);
+assert.match(parsedDoctor.commands.fileTransferBrokerEvent, /file-transfer-request/);
+assert.equal(parsedDoctor.nextActions.some((action) => /detaches_agent mediated/.test(action)), true);
 
 const contextFetchServer = http.createServer((_req, res) => {
   res.setHeader("Content-Type", "application/json");

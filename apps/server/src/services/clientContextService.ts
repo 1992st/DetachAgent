@@ -160,6 +160,7 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}; installDir=${remoteAdapter?.installDir || "unknown"}; summary=${remoteAdapter?.summary || "not probed"}`,
     `toolBroker: gatewayEventEndpoint=${context.broker?.gatewayEventEndpoint || "unknown"}; preferredFormat=broker-event; idempotency=${context.broker?.idempotencyField || "sourceEventId"}; submitTokenHeader=${context.broker?.submitTokenHeader || "Authorization"}`,
     `contextExport: create=${context.contextExport?.createEndpoint || "unknown"}; consume=${context.contextExport?.consumeEndpointPattern || "unknown"}; oneTime=${context.contextExport?.oneTime ? "true" : "false"}; adapterCommand=${context.contextExport?.adapterCommand || "context-fetch"}`,
+    "agentSideAdapter: 若远端已安装 detaches-agent skill，请在真实 OpenClaw agent host 上保存/获取完整 detaches context 后运行 `node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --context <context-json>`，按 doctor 输出的 requestableTargets 和命令模板发起 broker-event。",
     "当前用户这台电脑已经为本对话绑定了一个持久本机 terminal。这个 terminal 默认隐藏在用户界面里，用户可以点开查看活动。",
     `terminal targets: supported=${terminal?.supportedTargets.join(",") || "none"}; unavailable=${terminal?.unavailableTargets.join(",") || "none"}`,
     `file-transfer targets: supported=${transfer?.supportedTargets.join(",") || "none"}; unavailable=${transfer?.unavailableTargets.join(",") || "none"}`,

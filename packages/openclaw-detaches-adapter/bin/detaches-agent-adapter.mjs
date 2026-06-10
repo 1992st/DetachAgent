@@ -14,6 +14,7 @@ function usage(exitCode = 0) {
     "  manifest",
     "  validate-context <context-json-file>",
     "  inspect-context <context-json-file>",
+    "  doctor --context <context-json-file>",
     "  context-fetch <one-time-context-export-url> [--output <file> --print client-context|detaches|export]",
     "  broker-probe <detaches-agent-base-url-or-capabilities-url>",
     "  terminal-request --target <target> --command <command> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
@@ -156,6 +157,111 @@ function inspectContext(context) {
     targetSupport,
     warnings,
     hardRules: manifest.hardRules
+  };
+}
+
+function commandQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function sourceEventIdHint(context, suffix) {
+  const agentId = context?.agentId || "agent";
+  const sessionKey = String(context?.sessionKey || "session").replace(/[^a-zA-Z0-9_.:-]/g, "-");
+  return `${agentId}:${sessionKey}:${suffix}:$(date +%s)`;
+}
+
+function adapterCliPathHint() {
+  return "~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs";
+}
+
+function doctorContext(context) {
+  const inspection = inspectContext(context);
+  const terminalCapability = inspection.capabilities.find((capability) => capability.name === "terminal");
+  const fileCapability = inspection.capabilities.find((capability) => capability.name === "file-transfer");
+  const brokerEndpoint = inspection.broker?.gatewayEventEndpoint;
+  const submitTokenAvailable = typeof inspection.broker?.submitToken === "string" && inspection.broker.submitToken.length > 0;
+  const preferredFormat = inspection.broker?.requestFormats?.includes("broker-event") && brokerEndpoint && submitTokenAvailable
+    ? "broker-event"
+    : "fence";
+  const localTerminalRequestable = terminalCapability?.supportedTargets?.includes("local-user-machine")
+    && !terminalCapability?.unavailableTargets?.includes("local-user-machine");
+  const localFileRequestable = fileCapability?.supportedTargets?.includes("local-user-machine")
+    && !fileCapability?.unavailableTargets?.includes("local-user-machine");
+  const cli = adapterCliPathHint();
+  const nextActions = [
+    "Treat this as a detaches_agent mediated session, not plain webchat.",
+    "Use the supported target list from this context; do not invent or fallback targets.",
+    "Submit broker-event requests when possible; otherwise emit exactly one fenced request block.",
+    "Wait for detaches_agent approved tool output before claiming execution or file handling completed."
+  ];
+  if (!inspection.ok) {
+    nextActions.unshift("Fix or refresh the detaches context before requesting any tool.");
+  }
+  if (!brokerEndpoint || !submitTokenAvailable) {
+    nextActions.push("Broker endpoint or submit token is missing; ask the user to generate a fresh one-time context export from the Adapter panel.");
+  }
+  const commands = {
+    inspect: `node ${cli} inspect-context ${commandQuote("<context-json-file>")}`,
+    terminalBrokerEvent: localTerminalRequestable
+      ? [
+          `node ${cli} terminal-request`,
+          `  --context ${commandQuote("<context-json-file>")}`,
+          "  --target local-user-machine",
+          `  --command ${commandQuote("pwd")}`,
+          `  --reason ${commandQuote("check the user's local working directory")}`,
+          "  --format broker-event",
+          `  --source-event-id ${commandQuote(sourceEventIdHint(context, "terminal"))}`,
+          "  --submit"
+        ].join(" \\\n")
+      : null,
+    fileTransferBrokerEvent: localFileRequestable && inspection.files.staged.length > 0
+      ? [
+          `node ${cli} file-transfer-request`,
+          `  --context ${commandQuote("<context-json-file>")}`,
+          `  --file-id ${commandQuote(inspection.files.staged[0].fileId || "file-id")}`,
+          "  --target local-user-machine",
+          `  --remote-path ${commandQuote("/tmp/input-file")}`,
+          `  --reason ${commandQuote("copy the staged file before reading or archiving it")}`,
+          "  --format broker-event",
+          `  --source-event-id ${commandQuote(sourceEventIdHint(context, "file"))}`,
+          "  --submit"
+        ].join(" \\\n")
+      : null
+  };
+  const blockedTargets = Object.fromEntries(Object.entries(inspection.targetSupport)
+    .filter(([, status]) => status.requestable !== true)
+    .map(([target, status]) => [target, {
+      manifestStatus: status.manifestStatus,
+      unavailableBy: status.unavailableBy,
+      reason: status.unavailableBy.length > 0
+        ? `Unavailable for ${status.unavailableBy.join(", ")} in this detaches context.`
+        : "No capability currently marks this target requestable."
+    }]));
+  return {
+    ok: inspection.ok,
+    adapterId: inspection.adapterId,
+    mode: "detaches-agent-doctor",
+    session: {
+      sessionKey: inspection.sessionKey,
+      agentId: inspection.agentId,
+      userDevice: inspection.userDevice
+    },
+    preferredRequestFormat: preferredFormat,
+    broker: {
+      endpoint: brokerEndpoint ?? null,
+      submitTokenAvailable,
+      submitTokenHeader: inspection.broker?.submitTokenHeader ?? null,
+      idempotencyField: inspection.broker?.idempotencyField ?? null
+    },
+    requestableTargets: Object.fromEntries(Object.entries(inspection.targetSupport)
+      .filter(([, status]) => status.requestable === true)
+      .map(([target, status]) => [target, status.supportedBy])),
+    blockedTargets,
+    stagedFiles: inspection.files.staged,
+    warnings: inspection.warnings,
+    hardRules: inspection.hardRules,
+    nextActions,
+    commands
   };
 }
 
@@ -331,6 +437,16 @@ async function main() {
     if (!file) usage(1);
     const context = readContextFile(file);
     const result = inspectContext(context);
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exit(1);
+    return;
+  }
+
+  if (command === "doctor") {
+    const args = parseArgs(rest);
+    const context = readContextOption(args);
+    if (!context) fail("Missing --context");
+    const result = doctorContext(context);
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exit(1);
     return;
