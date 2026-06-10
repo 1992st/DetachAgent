@@ -2,7 +2,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import type {
+  ToolGatewayEventInput,
   ToolRequestCreateInput,
+  ToolRequestCreateResponse,
   ToolRequestDecisionResponse,
   ToolResultForwardStatus,
   ToolRequestExtractResponse,
@@ -21,6 +23,7 @@ import { terminalService } from "../terminal/terminalService.js";
 
 type AuditEvent =
   | { type: "tool.create"; request: ToolRequestRecord }
+  | { type: "tool.ingest"; requestId: string; sourceEventId: string; duplicate: boolean }
   | { type: "tool.approve"; requestId: string; status: ToolRequestStatus; command?: string; terminalId?: string; executionId?: string; error?: string }
   | { type: "tool.result.forward"; requestId: string; executionId: string; status: ToolResultForwardStatus; ok: boolean; error?: string }
   | { type: "tool.reject"; requestId: string; status: ToolRequestStatus };
@@ -62,6 +65,7 @@ class ToolBrokerService {
         sessionKey: input.sessionKey,
         agentId: input.agentId,
         reason: item.reason,
+        source: "text-extract",
         payload: item.payload
       }));
     }
@@ -70,6 +74,10 @@ class ToolBrokerService {
 
   async create(input: ToolRequestCreateInput): Promise<ToolRequestRecord> {
     await this.load();
+    if (input.sourceEventId) {
+      const existing = this.findBySourceEventId(input.sourceEventId);
+      if (existing) return existing;
+    }
     const now = new Date().toISOString();
     const record: ToolRequestRecord = {
       ...input,
@@ -83,6 +91,18 @@ class ToolBrokerService {
     await this.save();
     await this.audit({ type: "tool.create", request: record });
     return record;
+  }
+
+  async ingestGatewayEvent(input: ToolGatewayEventInput): Promise<ToolRequestCreateResponse> {
+    await this.load();
+    const existing = this.findBySourceEventId(input.sourceEventId);
+    if (existing) {
+      await this.audit({ type: "tool.ingest", requestId: existing.id, sourceEventId: input.sourceEventId, duplicate: true });
+      return { request: existing };
+    }
+    const request = await this.create(input);
+    await this.audit({ type: "tool.ingest", requestId: request.id, sourceEventId: input.sourceEventId, duplicate: false });
+    return { request };
   }
 
   async list(input: ToolRequestListInput = {}): Promise<ToolRequestListResponse> {
@@ -238,6 +258,12 @@ class ToolBrokerService {
     const request = this.requests.get(requestId);
     if (!request) throw new Error("Tool request not found.");
     return request;
+  }
+
+  private findBySourceEventId(sourceEventId: string): ToolRequestRecord | null {
+    const normalized = sourceEventId.trim();
+    if (!normalized) return null;
+    return [...this.requests.values()].find((request) => request.sourceEventId === normalized) ?? null;
   }
 
   private update(request: ToolRequestRecord, status: ToolRequestStatus, error?: string): ToolRequestRecord {

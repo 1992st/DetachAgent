@@ -418,7 +418,37 @@ apiRoutes.post("/tools/requests", async (req, res) => {
       res.status(400).json({ error: "Missing kind or sessionKey." });
       return;
     }
-    res.json({ request: await toolBrokerService.create({ kind, target, sessionKey, agentId, reason, payload }) });
+    res.json({ request: await toolBrokerService.create({ kind, target, sessionKey, agentId, reason, source: "api", payload }) });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/tools/events/gateway", async (req, res) => {
+  try {
+    const kind = req.body.kind === "file-transfer" ? "file-transfer" : req.body.kind === "terminal" ? "terminal" : null;
+    const target = parseToolTarget(req.body.target);
+    const sessionKey = typeof req.body.sessionKey === "string" ? req.body.sessionKey.trim() : "";
+    const sourceEventId = typeof req.body.sourceEventId === "string" ? req.body.sourceEventId.trim() : "";
+    const agentId = typeof req.body.agentId === "string" ? req.body.agentId.trim() : undefined;
+    const reason = typeof req.body.reason === "string" ? req.body.reason.trim() : undefined;
+    const payload = req.body.payload && typeof req.body.payload === "object" && !Array.isArray(req.body.payload)
+      ? req.body.payload
+      : {};
+    if (!kind || !sessionKey || !sourceEventId) {
+      res.status(400).json({ error: "Missing kind, sessionKey, or sourceEventId." });
+      return;
+    }
+    res.json(await toolBrokerService.ingestGatewayEvent({
+      kind,
+      target,
+      sessionKey,
+      agentId,
+      reason,
+      source: "gateway-event",
+      sourceEventId,
+      payload
+    }));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }

@@ -3,6 +3,7 @@ import type { ToolTarget } from "./fileTypes.js";
 export type ToolRequestKind = "terminal" | "file-transfer";
 export type ToolRequestStatus = "pending" | "approved" | "rejected" | "blocked" | "started" | "failed";
 export type ToolResultForwardStatus = "not-started" | "pending" | "sent" | "failed";
+export type ToolRequestSource = "text-extract" | "api" | "gateway-event";
 
 export interface ToolRequestCreateInput {
   kind: ToolRequestKind;
@@ -10,6 +11,8 @@ export interface ToolRequestCreateInput {
   sessionKey: string;
   agentId?: string;
   reason?: string;
+  source?: ToolRequestSource;
+  sourceEventId?: string;
   payload: Record<string, unknown>;
 }
 
@@ -23,6 +26,11 @@ export interface ToolRequestRecord extends ToolRequestCreateInput {
 
 export interface ToolRequestCreateResponse {
   request: ToolRequestRecord;
+}
+
+export interface ToolGatewayEventInput extends ToolRequestCreateInput {
+  source: "gateway-event";
+  sourceEventId: string;
 }
 
 export interface ToolRequestListInput {

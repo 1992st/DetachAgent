@@ -75,6 +75,13 @@ gateway-managed      预留，需 Gateway 原生文件/工具/artifact adapter
 
 服务端 `/api/tools/requests/extract` 负责解析 assistant 文本中的 `detaches-terminal` / `detaches-file-transfer` fenced block，并生成 `ToolRequestRecord`。前端只渲染 broker 返回的请求状态，不再维护自己的协议解析器。
 
+结构化 Gateway 事件入口：
+
+- `POST /api/tools/events/gateway`
+- 输入字段与 `ToolRequestCreateInput` 一致，额外要求 `source: "gateway-event"` 和 `sourceEventId`。
+- `sourceEventId` 用于幂等，同一 Gateway/OpenClaw tool event 重放时不会生成重复审批卡。
+- 这是替代文本 fenced block 的目标入口；`/extract` 只保留为兼容旧 agent 输出的过渡路径。
+
 Broker 队列查询：
 
 - `GET /api/tools/requests`

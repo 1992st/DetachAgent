@@ -70,8 +70,9 @@ detaches_agent/
 
 - `apps/server/src/services/tools/toolBrokerService.ts`
   - 记录 agent 请求的 `detaches-terminal` / `detaches-file-transfer` 工具调用。
-  - 从 assistant 文本中解析 fenced request，生成服务端 `ToolRequestRecord`。
+  - 从 assistant 文本中解析 fenced request，生成服务端 `ToolRequestRecord`；也支持 `POST /api/tools/events/gateway` 写入结构化 Gateway tool event。
   - 分配服务端 `requestId`。
+  - 记录 `source` / `sourceEventId`，对 Gateway/OpenClaw tool event 做幂等去重。
   - 阻断不可用 target，禁止把 `remote-agent-host` / `gateway-managed` 退化成本机执行。
   - 审批本机 terminal 请求时直接调用 `terminalService.runCommand` 写入会话 terminal。
   - 审批文件传输请求时复用 `fileTransferService.prepareTransfer` 生成一次性 curl 命令，并由 Broker 写入会话 terminal。

@@ -425,6 +425,38 @@ async function main() {
     const approvedToolList = await requestJson(`/api/tools/requests?sessionKey=${encodeURIComponent(chatSessionKey)}&agentId=agent-alpha&status=approved&limit=10`);
     assert.equal(approvedToolList.requests.some((request) => request.id === terminalTool.request.id), true);
 
+    const gatewayToolEvent = await requestJson("/api/tools/events/gateway", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "terminal",
+        target: "local-user-machine",
+        sessionKey: chatSessionKey,
+        agentId: "agent-alpha",
+        sourceEventId: "gateway-tool-event-smoke-1",
+        reason: "structured gateway tool event",
+        payload: { command: "echo gateway-event" }
+      })
+    });
+    assert.equal(gatewayToolEvent.request.source, "gateway-event");
+    assert.equal(gatewayToolEvent.request.sourceEventId, "gateway-tool-event-smoke-1");
+    const duplicateGatewayToolEvent = await requestJson("/api/tools/events/gateway", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "terminal",
+        target: "local-user-machine",
+        sessionKey: chatSessionKey,
+        agentId: "agent-alpha",
+        sourceEventId: "gateway-tool-event-smoke-1",
+        reason: "duplicate structured gateway tool event",
+        payload: { command: "echo gateway-event-again" }
+      })
+    });
+    assert.equal(duplicateGatewayToolEvent.request.id, gatewayToolEvent.request.id);
+    const gatewayEventToolList = await requestJson(`/api/tools/requests?sessionKey=${encodeURIComponent(chatSessionKey)}&agentId=agent-alpha&status=pending&limit=50`);
+    assert.equal(gatewayEventToolList.requests.filter((request) => request.sourceEventId === "gateway-tool-event-smoke-1").length, 1);
+
     const blockedTerminalTool = await requestJson("/api/tools/requests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -539,6 +571,8 @@ async function main() {
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "terminal" && event.request.target === "local-user-machine"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "terminal" && event.request.target === "remote-agent-host" && event.request.status === "blocked"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.payload?.command === "echo broker-parse"), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.ingest" && event.sourceEventId === "gateway-tool-event-smoke-1" && event.duplicate === false), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.ingest" && event.sourceEventId === "gateway-tool-event-smoke-1" && event.duplicate === true), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.command === "printf 'smoke-complete\\n'" && typeof event.terminalId === "string"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && /detaches-note-via-broker\.txt/.test(event.command || "") && typeof event.terminalId === "string"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.result.forward" && event.status === "sent"), true);

@@ -8,6 +8,7 @@ import type {
   NetworkTestResponse,
   PublicSettings,
   SettingsUpdate,
+  ToolGatewayEventInput,
   ToolRequestCreateInput,
   ToolRequestCreateResponse,
   ToolRequestDecisionResponse,
@@ -78,6 +79,16 @@ export async function prepareFileTransfer(
 
 export async function createToolRequest(input: ToolRequestCreateInput): Promise<ToolRequestCreateResponse> {
   const res = await fetch("/api/tools/requests", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function ingestGatewayToolEvent(input: ToolGatewayEventInput): Promise<ToolRequestCreateResponse> {
+  const res = await fetch("/api/tools/events/gateway", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input)
