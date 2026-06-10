@@ -12,6 +12,16 @@
 
 ## 当前实现
 
+### Agent-side adapter 资产
+
+`packages/openclaw-detaches-adapter` 提供第一版可放到远端 agent host 的协议资产：
+
+- `adapter.manifest.json`：机器可读 capability、target、hard rules。
+- `AGENT.md`：给远端 OpenClaw agent/skill 使用的操作说明。
+- `bin/detaches-agent-adapter.mjs`：CLI，可打印 manifest、校验 `clientContext.detaches`、生成标准 `detaches-terminal` / `detaches-file-transfer` fenced request。
+
+它本身不执行命令、不传输文件，也不绕过 detaches_agent UI 审批。它的作用是让真实 agent 机器拥有稳定、可测试、可安装的协议入口，后续再按 OpenClaw 官方 skill/plugin 目录规范包装。
+
 ### 结构化 manifest
 
 服务端通过 `apps/server/src/services/clientContextService.ts` 生成 `DetachesSessionContext`：
@@ -65,7 +75,7 @@ gateway-managed      预留，需 Gateway 原生文件/工具/artifact adapter
 
 ### 远端 agent-side skill
 
-更合理的最终形态是在真实 agent 机器上提供 detaches/openclaw skill 或 adapter，让 agent runtime 原生知道：
+更合理的最终形态是在真实 agent 机器上提供 detaches/openclaw skill 或 adapter。当前仓库已提供 `packages/openclaw-detaches-adapter` 作为最小协议包，下一步需要按真实 OpenClaw skill/plugin 规范安装，让 agent runtime 原生知道：
 
 - 当前对话来自 detaches_agent。
 - 当前用户设备是谁。

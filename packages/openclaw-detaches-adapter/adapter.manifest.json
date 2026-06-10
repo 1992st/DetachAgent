@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "detaches_agent.openclaw.adapter",
+  "name": "detaches_agent OpenClaw Adapter",
+  "description": "Agent-side protocol assets for OpenClaw agents connected through detaches_agent.",
+  "runtime": {
+    "host": "remote-agent-host",
+    "requiresApprovalBroker": true,
+    "approvalBroker": "detaches_agent local UI"
+  },
+  "targets": {
+    "local-user-machine": {
+      "status": "supported",
+      "execution": "detaches_agent writes approved requests into the user's local session terminal"
+    },
+    "remote-agent-host": {
+      "status": "reserved",
+      "execution": "requires Gateway adapter or OpenClaw agent-side execution adapter"
+    },
+    "gateway-managed": {
+      "status": "reserved",
+      "execution": "requires Gateway files/artifacts/tools adapter"
+    }
+  },
+  "requestFences": {
+    "terminal": "detaches-terminal",
+    "fileTransfer": "detaches-file-transfer"
+  },
+  "requiredContextFields": [
+    "app",
+    "version",
+    "sessionKey",
+    "userDevice",
+    "capabilities",
+    "invariants"
+  ],
+  "hardRules": [
+    "Never claim a command, file read, file transfer, download, archive, or modification has happened until approved tool output proves it.",
+    "Never change a target from remote-agent-host or gateway-managed to local-user-machine as a fallback.",
+    "Every tool request must be a single fenced code block using the declared request fence.",
+    "Every tool request must include target and reason.",
+    "Files attached by detaches_agent start in the user's local staging area and are not available on the remote agent host until an approved transfer succeeds."
+  ]
+}

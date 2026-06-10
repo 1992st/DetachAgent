@@ -43,6 +43,7 @@ For OpenClaw Gateway builds that enforce pairing/auth, provide the Gateway token
 ```bash
 pnpm typecheck
 pnpm build
+pnpm --filter @detaches/openclaw-detaches-adapter test
 pnpm smoke
 curl -fsS http://127.0.0.1:38888/api/health
 ```
@@ -57,3 +58,4 @@ If `OPENCLAW_REMOTE_USER` is missing, `/api/health` intentionally reports SSH as
 - Gateway RPC: `health`, `sessions.list`, `chat.history`, `chat.send`, `chat.abort`.
 - Files: local upload cache, inline Gateway chat attachments using base64 payloads, plus best-effort SFTP to the remote OpenClaw workspace.
 - Remote control: UI and service modules are reserved, but real control is not enabled until approval/audit/timeout boundaries are implemented.
+- Agent-side adapter assets: `packages/openclaw-detaches-adapter` provides a manifest, agent instructions, and a CLI for validating detaches context and emitting approved-request blocks. It does not execute tools by itself.

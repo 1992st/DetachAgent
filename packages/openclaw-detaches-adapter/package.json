@@ -1,0 +1,13 @@
+{
+  "name": "@detaches/openclaw-detaches-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "detaches-agent-adapter": "./bin/detaches-agent-adapter.mjs"
+  },
+  "scripts": {
+    "test": "node test/adapter.test.mjs",
+    "lint": "node test/adapter.test.mjs"
+  }
+}

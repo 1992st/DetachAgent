@@ -1,0 +1,26 @@
+{
+  "app": "detaches_agent",
+  "version": 1,
+  "sessionMode": "main",
+  "sessionKey": "agent:audio-process:main",
+  "agentId": "audio-process",
+  "userDevice": {
+    "deviceId": "detaches-test-device",
+    "deviceIdShort": "detaches",
+    "displayName": "detaches test machine",
+    "sessionNamespace": "detaches:detaches"
+  },
+  "capabilities": [
+    {
+      "name": "terminal",
+      "requestFence": "detaches-terminal",
+      "supportedTargets": ["local-user-machine"],
+      "unavailableTargets": ["remote-agent-host", "gateway-managed"],
+      "approvalRequired": true,
+      "executionHost": "user-local-machine"
+    }
+  ],
+  "invariants": [
+    "Tools are never executed by assistant text alone."
+  ]
+}

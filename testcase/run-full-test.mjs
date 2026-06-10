@@ -159,6 +159,7 @@ async function main() {
 
   tests.push(await runCommand("typecheck", "pnpm", ["typecheck"]));
   tests.push(await runCommand("build", "pnpm", ["build"]));
+  tests.push(await runCommand("adapter:openclaw-detaches", "pnpm", ["--filter", "@detaches/openclaw-detaches-adapter", "test"]));
   tests.push(await runCommand("smoke:gateway", "pnpm", ["smoke"]));
   tests.push(await terminalPersistenceTest());
 

@@ -5,6 +5,7 @@
 ```bash
 pnpm typecheck
 pnpm build
+pnpm --filter @detaches/openclaw-detaches-adapter test
 pnpm smoke
 node testcase/run-full-test.mjs
 ```
