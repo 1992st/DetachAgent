@@ -112,9 +112,15 @@ detaches_agent/
   - 渲染历史、用户消息、assistant 流式消息。
   - 合并流式响应，避免重复打印。
   - 把 assistant 文本交给 Tool Broker 解析，按返回的 `ToolRequestRecord` 渲染审批卡。
-  - 通过 broker 队列查询刷新请求状态，避免审批卡只依赖单条聊天消息的临时解析结果。
-  - 订阅 `/api/tools/stream`，收到 broker request 事件后刷新审批卡。
+  - 保留消息内审批卡作为 fenced block 兼容入口。
   - 用户 Run/Transfer 后调用 Tool Broker 审批；Broker 在服务端写入 terminal，前端只展开 terminal 查看结果。
+
+### Tool Queue
+
+- `apps/web/src/features/tools/ToolQueuePanel.tsx`
+  - 右侧独立工具队列，按当前 sessionKey/agentId 查询 `GET /api/tools/requests`。
+  - 订阅 `/api/tools/stream`，收到 broker request 事件后刷新队列。
+  - 承担主要审批、拒绝、结果回写重试和打开 terminal 操作，不依赖某条聊天消息存在。
 
 ### Terminal
 

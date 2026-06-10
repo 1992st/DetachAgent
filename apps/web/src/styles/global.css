@@ -121,6 +121,32 @@ button, input, textarea {
   border-left: 1px solid var(--line);
 }
 
+.tool-queue {
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.tool-queue-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.panel-heading.compact {
+  min-height: 60px;
+  padding: 12px;
+}
+
+.control-reserve.slim {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 12px 12px;
+  padding: 10px;
+}
+
 .panel-heading,
 .chat-header {
   min-height: 72px;

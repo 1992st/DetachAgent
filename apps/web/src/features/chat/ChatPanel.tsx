@@ -1,6 +1,6 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, FileText, Paperclip, Send, Square, X } from "lucide-react";
-import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, ToolBrokerSocketEvent, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
+import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
 import { approveToolRequest, extractToolRequests, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward } from "../../lib/api.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
 
@@ -15,7 +15,11 @@ interface Props {
   onNeedUpload: (files: FileList) => void;
 }
 
-export function ChatPanel({
+export interface ChatPanelHandle {
+  revealTerminal: () => void;
+}
+
+export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   sessionKey,
   agentId,
   sessionMode,
@@ -24,7 +28,7 @@ export function ChatPanel({
   onSessionModeChange,
   onClearAttachments,
   onNeedUpload
-}: Props) {
+}: Props, ref) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [socketState, setSocketState] = useState("idle");
@@ -35,6 +39,10 @@ export function ChatPanel({
   const fileRef = useRef<HTMLInputElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<TerminalPanelHandle | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    revealTerminal: () => terminalRef.current?.reveal()
+  }), []);
 
   useEffect(() => {
     setMessages([]);
@@ -230,7 +238,7 @@ export function ChatPanel({
       </form>
     </main>
   );
-}
+});
 
 const targetLabels: Record<ToolTarget, string> = {
   "local-user-machine": "用户本机",
@@ -294,21 +302,6 @@ function ToolRequests({
       })
       .catch((error) => setErrors({ 0: error instanceof Error ? error.message : String(error) }));
     void loadRequests();
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const params = new URLSearchParams({ sessionKey });
-    if (agentId) params.set("agentId", agentId);
-    const ws = new WebSocket(`${protocol}://${window.location.host}/api/tools/stream?${params}`);
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data) as ToolBrokerSocketEvent;
-      if (data.type === "request") {
-        setRequests((current) => upsertToolRequest(current, data.request));
-        void loadRequests();
-      }
-    };
-    ws.onerror = () => {
-      ws.close();
-    };
-    return () => ws.close();
   }, [text, sessionKey, agentId]);
   if (!requests.length && !errors[0]) return null;
 
@@ -398,12 +391,6 @@ function ToolRequests({
 function mergeToolRequests(primary: ToolRequestRecord[], updates: ToolRequestRecord[]): ToolRequestRecord[] {
   const byId = new Map(updates.map((request) => [request.id, request]));
   return primary.map((request) => byId.get(request.id) ?? request);
-}
-
-function upsertToolRequest(current: ToolRequestRecord[], next: ToolRequestRecord): ToolRequestRecord[] {
-  const index = current.findIndex((request) => request.id === next.id);
-  if (index === -1) return [next, ...current];
-  return current.map((request, itemIndex) => itemIndex === index ? next : request);
 }
 
 function toolResultSummary(response: ToolExecutionResultResponse): string {

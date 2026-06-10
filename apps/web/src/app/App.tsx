@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentSummary, AppHealth, ChatSessionMode, ClientIdentity, DiagnosticItem, UploadedFileRef } from "@detaches/shared";
 import { fetchAgents, fetchClientIdentity, fetchDiagnostics, fetchHealth, uploadFile } from "../lib/api.js";
 import { ConnectionBar } from "../features/connection/ConnectionBar.js";
 import { AgentList } from "../features/agents/AgentList.js";
-import { ChatPanel } from "../features/chat/ChatPanel.js";
+import { ChatPanel, type ChatPanelHandle } from "../features/chat/ChatPanel.js";
 import { FilePanel } from "../features/files/FilePanel.js";
 import { SettingsPanel } from "../features/settings/SettingsPanel.js";
 
@@ -28,6 +28,7 @@ export function App() {
   const [uploading, setUploading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [remotePath, setRemotePath] = useState("");
+  const chatPanelRef = useRef<ChatPanelHandle | null>(null);
 
   const refreshHealth = useCallback(async () => {
     setHealthLoading(true);
@@ -128,6 +129,7 @@ export function App() {
             onRefresh={refreshAgents}
           />
           <ChatPanel
+            ref={chatPanelRef}
             sessionKey={selectedSession}
             agentId={selectedAgent?.id ?? null}
             sessionMode={sessionMode}
@@ -141,6 +143,8 @@ export function App() {
             onNeedUpload={handleUpload}
           />
           <FilePanel
+            sessionKey={selectedSession}
+            agentId={selectedAgent?.id ?? null}
             files={attachments}
             uploading={uploading}
             error={fileError}
@@ -150,6 +154,7 @@ export function App() {
             diagnosticsError={diagnosticsError}
             onRemotePathChange={setRemotePath}
             onDiagnosticsRefresh={refreshDiagnostics}
+            onRevealTerminal={() => chatPanelRef.current?.revealTerminal()}
           />
         </div>
       ) : (
