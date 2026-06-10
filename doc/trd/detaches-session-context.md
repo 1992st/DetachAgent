@@ -24,6 +24,8 @@
 
 `inspect-context` 是当前最小 agent-side skill 入口：远端 agent 可以把收到的 `clientContext.detaches` 保存为 JSON 后交给 CLI，得到 session identity、adapter readiness、capability target、requestable/unavailable 状态和 hard rules。它只输出机器可读诊断，不执行工具。
 
+`terminal-request` / `file-transfer-request` 默认仍能输出 fenced block，兼容旧聊天文本解析；同时支持 `--format broker-event` 输出 Tool Broker `gateway-event` JSON envelope，可直接 POST 到 `/api/tools/events/gateway`。这是当前替代文本 fenced block 的优先路径。
+
 本地 server 暴露 adapter 分发接口：
 
 - `GET /api/adapters/openclaw-detaches`：返回 manifest、文件清单、sha256、bundle 元信息和安装提示。
@@ -123,7 +125,7 @@ gateway-managed      预留，需 Gateway 原生文件/工具/artifact adapter
 - `POST /api/tools/events/gateway`
 - 输入字段与 `ToolRequestCreateInput` 一致，额外要求 `source: "gateway-event"` 和 `sourceEventId`。
 - `sourceEventId` 用于幂等，同一 Gateway/OpenClaw tool event 重放时不会生成重复审批卡。
-- 这是替代文本 fenced block 的目标入口；`/extract` 只保留为兼容旧 agent 输出的过渡路径。
+- 这是替代文本 fenced block 的目标入口；adapter CLI 的 `--format broker-event` 会生成该入口需要的 JSON；`/extract` 只保留为兼容旧 agent 输出的过渡路径。
 
 Broker 队列查询：
 

@@ -30,9 +30,13 @@
     "manifest": "Print this adapter manifest.",
     "validate-context": "Validate a clientContext.detaches JSON object.",
     "inspect-context": "Summarize session identity, adapter readiness, capability targets, and routing warnings without executing tools.",
-    "terminal-request": "Emit a detaches-terminal fenced request block.",
-    "file-transfer-request": "Emit a detaches-file-transfer fenced request block."
+    "terminal-request": "Emit a detaches-terminal fenced request block or Tool Broker gateway-event envelope.",
+    "file-transfer-request": "Emit a detaches-file-transfer fenced request block or Tool Broker gateway-event envelope."
   },
+  "requestFormats": [
+    "fence",
+    "broker-event"
+  ],
   "requiredContextFields": [
     "app",
     "version",

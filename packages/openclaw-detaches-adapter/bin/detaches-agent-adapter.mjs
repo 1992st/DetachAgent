@@ -14,8 +14,8 @@ function usage(exitCode = 0) {
     "  manifest",
     "  validate-context <context-json-file>",
     "  inspect-context <context-json-file>",
-    "  terminal-request --target <target> --command <command> --reason <reason>",
-    "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason>",
+    "  terminal-request --target <target> --command <command> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id>]",
+    "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id>]",
     "",
     "This CLI does not execute tools. It only validates context and emits detaches_agent request blocks."
   ].join("\n");
@@ -145,6 +145,28 @@ function emitFence(fence, payload) {
   console.log("```");
 }
 
+function emitRequest(args, kind, target, reason, payload, fence) {
+  const format = typeof args.format === "string" ? args.format : "fence";
+  if (format === "fence") {
+    emitFence(fence, { target, ...payload, reason });
+    return;
+  }
+  if (format !== "broker-event") fail(`Unknown --format: ${format}`);
+  const sessionKey = requireOption(args, "session-key");
+  const sourceEventId = requireOption(args, "source-event-id");
+  const agentId = typeof args["agent-id"] === "string" && args["agent-id"].trim() ? args["agent-id"].trim() : undefined;
+  console.log(JSON.stringify({
+    kind,
+    target,
+    sessionKey,
+    agentId,
+    reason,
+    source: "gateway-event",
+    sourceEventId,
+    payload
+  }, null, 2));
+}
+
 function assertKnownTarget(target) {
   const manifest = readManifest();
   if (!Object.prototype.hasOwnProperty.call(manifest.targets, target)) {
@@ -188,23 +210,19 @@ function main() {
   if (command === "terminal-request") {
     const target = requireOption(args, "target");
     assertKnownTarget(target);
-    emitFence("detaches-terminal", {
-      target,
-      command: requireOption(args, "command"),
-      reason: requireOption(args, "reason")
-    });
+    emitRequest(args, "terminal", target, requireOption(args, "reason"), {
+      command: requireOption(args, "command")
+    }, "detaches-terminal");
     return;
   }
 
   if (command === "file-transfer-request") {
     const target = requireOption(args, "target");
     assertKnownTarget(target);
-    emitFence("detaches-file-transfer", {
+    emitRequest(args, "file-transfer", target, requireOption(args, "reason"), {
       fileId: requireOption(args, "file-id"),
-      target,
-      remotePath: requireOption(args, "remote-path"),
-      reason: requireOption(args, "reason")
-    });
+      remotePath: requireOption(args, "remote-path")
+    }, "detaches-file-transfer");
     return;
   }
 

@@ -66,6 +66,31 @@ assert.match(terminalRequest.stdout, /^```detaches-terminal/);
 assert.match(terminalRequest.stdout, /"target":"local-user-machine"/);
 assert.match(terminalRequest.stdout, /"command":"pwd"/);
 
+const terminalBrokerEvent = await run([
+  "terminal-request",
+  "--target",
+  "local-user-machine",
+  "--command",
+  "pwd",
+  "--reason",
+  "check current directory",
+  "--format",
+  "broker-event",
+  "--session-key",
+  "agent:audio-process:main",
+  "--agent-id",
+  "audio-process",
+  "--source-event-id",
+  "adapter-test-terminal-1"
+]);
+assert.equal(terminalBrokerEvent.code, 0);
+const parsedTerminalBrokerEvent = JSON.parse(terminalBrokerEvent.stdout);
+assert.equal(parsedTerminalBrokerEvent.kind, "terminal");
+assert.equal(parsedTerminalBrokerEvent.source, "gateway-event");
+assert.equal(parsedTerminalBrokerEvent.sourceEventId, "adapter-test-terminal-1");
+assert.equal(parsedTerminalBrokerEvent.sessionKey, "agent:audio-process:main");
+assert.equal(parsedTerminalBrokerEvent.payload.command, "pwd");
+
 const fileRequest = await run([
   "file-transfer-request",
   "--file-id",
@@ -81,6 +106,31 @@ assert.equal(fileRequest.code, 0);
 assert.match(fileRequest.stdout, /^```detaches-file-transfer/);
 assert.match(fileRequest.stdout, /"target":"remote-agent-host"/);
 assert.match(fileRequest.stdout, /"remotePath":"docs\/input.pdf"/);
+
+const fileBrokerEvent = await run([
+  "file-transfer-request",
+  "--file-id",
+  "file-123",
+  "--target",
+  "local-user-machine",
+  "--remote-path",
+  "/tmp/input.pdf",
+  "--reason",
+  "request local transfer",
+  "--format",
+  "broker-event",
+  "--session-key",
+  "agent:audio-process:main",
+  "--source-event-id",
+  "adapter-test-file-1"
+]);
+assert.equal(fileBrokerEvent.code, 0);
+const parsedFileBrokerEvent = JSON.parse(fileBrokerEvent.stdout);
+assert.equal(parsedFileBrokerEvent.kind, "file-transfer");
+assert.equal(parsedFileBrokerEvent.target, "local-user-machine");
+assert.equal(parsedFileBrokerEvent.sourceEventId, "adapter-test-file-1");
+assert.equal(parsedFileBrokerEvent.payload.fileId, "file-123");
+assert.equal(parsedFileBrokerEvent.payload.remotePath, "/tmp/input.pdf");
 
 const unknownTarget = await run([
   "terminal-request",

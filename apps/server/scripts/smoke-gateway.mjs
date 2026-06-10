@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { once } from "node:events";
+import { promisify } from "node:util";
 import WebSocket, { WebSocketServer } from "ws";
 import { DEFAULT_OPENCLAW_REMOTE_HOST } from "../dist/config/appConfig.js";
+
+const execFileAsync = promisify(execFile);
 
 const gatewayPort = Number(process.env.SMOKE_GATEWAY_PORT ?? 19879);
 const serverPort = Number(process.env.SMOKE_SERVER_PORT ?? 39888);
@@ -523,8 +526,36 @@ async function main() {
       })
     });
     assert.equal(duplicateGatewayToolEvent.request.id, gatewayToolEvent.request.id);
+    const adapterCli = path.resolve(new URL("../../../packages/openclaw-detaches-adapter/bin/detaches-agent-adapter.mjs", import.meta.url).pathname);
+    const adapterEventOutput = await execFileAsync(process.execPath, [
+      adapterCli,
+      "terminal-request",
+      "--target",
+      "local-user-machine",
+      "--command",
+      "echo adapter-event",
+      "--reason",
+      "adapter-generated structured event",
+      "--format",
+      "broker-event",
+      "--session-key",
+      chatSessionKey,
+      "--agent-id",
+      "agent-alpha",
+      "--source-event-id",
+      "adapter-tool-event-smoke-1"
+    ]);
+    const adapterGeneratedToolEvent = await requestJson("/api/tools/events/gateway", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: adapterEventOutput.stdout
+    });
+    assert.equal(adapterGeneratedToolEvent.request.source, "gateway-event");
+    assert.equal(adapterGeneratedToolEvent.request.sourceEventId, "adapter-tool-event-smoke-1");
+    assert.equal(adapterGeneratedToolEvent.request.payload.command, "echo adapter-event");
     const gatewayEventToolList = await requestJson(`/api/tools/requests?sessionKey=${encodeURIComponent(chatSessionKey)}&agentId=agent-alpha&status=pending&limit=50`);
     assert.equal(gatewayEventToolList.requests.filter((request) => request.sourceEventId === "gateway-tool-event-smoke-1").length, 1);
+    assert.equal(gatewayEventToolList.requests.filter((request) => request.sourceEventId === "adapter-tool-event-smoke-1").length, 1);
     const hasToolStreamAction = (action) => toolStreamMessages.some((message) => message.type === "request" && message.action === action && message.request?.id === gatewayToolEvent.request.id);
     while (!hasToolStreamAction("created") || !hasToolStreamAction("ingested") || !hasToolStreamAction("duplicate")) {
       if (Date.now() - started > 12000) throw new Error(`Timed out waiting for tool stream request event: ${JSON.stringify(toolStreamMessages)}`);
