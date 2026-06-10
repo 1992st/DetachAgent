@@ -189,6 +189,18 @@ function createMockGateway() {
       if (frame.method === "chat.send") {
         observed.chatSend = frame.params;
         observed.chatSends.push(frame.params);
+        if (frame.params.message?.includes("client-context-compat smoke") && frame.params.clientContext) {
+          socket.send(JSON.stringify({
+            type: "res",
+            id: frame.id,
+            ok: false,
+            error: {
+              code: "invalid_params",
+              message: "invalid chat.send params: at root: unexpected property 'clientContext'"
+            }
+          }));
+          return;
+        }
         socket.send(JSON.stringify({ type: "res", id: frame.id, ok: true, payload: { runId: "run-smoke-1" } }));
         socket.send(JSON.stringify({
           type: "event",
@@ -881,6 +893,44 @@ async function main() {
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.reject" && event.actor?.source === "detaches-ui"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && /detaches-note-via-broker\.txt/.test(event.command || "") && typeof event.terminalId === "string"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.result.forward" && event.status === "sent"), true);
+
+    const compatMessageCountBefore = messages.filter((message) => message.type === "sent").length;
+    chat.send(JSON.stringify({
+      type: "send",
+      message: "client-context-compat smoke",
+      idempotencyKey: "smoke-client-context-compat"
+    }));
+    while (
+      messages.filter((message) => message.type === "sent").length <= compatMessageCountBefore ||
+      !observed.chatSends.some((item) => item.idempotencyKey === "smoke-client-context-compat" && !item.clientContext)
+    ) {
+      if (Date.now() - started > 12000) throw new Error("Timed out waiting for clientContext compatibility retry.");
+      await wait(50);
+    }
+    const compatAttempts = observed.chatSends.filter((item) => item.idempotencyKey === "smoke-client-context-compat");
+    assert.equal(compatAttempts.length, 2);
+    assert.equal(compatAttempts[0].clientContext?.app, "detaches_agent");
+    assert.equal(compatAttempts[1].clientContext, undefined);
+    assert.match(compatAttempts[1].message, /detaches_agent 兼容上下文/);
+    assert.match(compatAttempts[1].message, /contextExport\.consumeUrl: http:\/\/127\.0\.0\.1:39888\/api\/context\/exports\//);
+    assert.match(compatAttempts[1].message, /doctor --url/);
+    const fallbackUrl = /contextExport\.consumeUrl: (http:\/\/[^\s]+)/.exec(compatAttempts[1].message)?.[1];
+    assert.equal(typeof fallbackUrl, "string");
+    const fallbackDoctorContextPath = path.resolve(new URL("../../..", import.meta.url).pathname, "storage-smoke/cache/fallback-doctor-context.json");
+    const fallbackDoctor = await execFileAsync(process.execPath, [
+      adapterCli,
+      "doctor",
+      "--url",
+      fallbackUrl,
+      "--output-context",
+      fallbackDoctorContextPath
+    ]);
+    const parsedFallbackDoctor = JSON.parse(fallbackDoctor.stdout);
+    assert.equal(parsedFallbackDoctor.ok, true);
+    assert.equal(parsedFallbackDoctor.contextSource.type, "one-time-url");
+    assert.equal(parsedFallbackDoctor.session.sessionKey, chatSessionKey);
+    const repeatedFallbackContextExport = await fetch(fallbackUrl);
+    assert.equal(repeatedFallbackContextExport.status, 404);
 
     chat.send(JSON.stringify({ type: "abort", runId: "run-smoke-1" }));
     while (!observed.abort) {

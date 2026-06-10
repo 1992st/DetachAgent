@@ -3,7 +3,12 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { ChatSessionMode, ChatSocketClientEvent, ChatSocketServerEvent, DetachesSessionContext, UploadedFileRef } from "@detaches/shared";
 import { gatewayClient } from "../services/gateway/gatewayClient.js";
 import { mapHistory } from "../services/gateway/chatMapper.js";
-import { buildChatClientContext, buildDetachesSessionContext, renderDetachesSessionContext } from "../services/clientContextService.js";
+import {
+  buildChatClientContext,
+  buildDetachesSessionContext,
+  renderDetachesClientContextFallback,
+  renderDetachesSessionContext
+} from "../services/clientContextService.js";
 
 function send(socket: WebSocket, event: ChatSocketServerEvent): void {
   if (socket.readyState === socket.OPEN) {
@@ -83,7 +88,8 @@ export function attachChatSocket(server: HttpServer): void {
             thinking: event.thinking,
             attachments: event.attachments,
             idempotencyKey: event.idempotencyKey,
-            clientContext
+            clientContext,
+            clientContextFallbackMessage: renderDetachesClientContextFallback(detachesContext)
           });
           const runId = typeof (response as any)?.runId === "string" ? (response as any).runId : "";
           if (runId) activeRunIds.add(runId);

@@ -189,6 +189,24 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
   ].join("\n");
 }
 
+export function renderDetachesClientContextFallback(context: DetachesSessionContext): string {
+  const consumeUrl = context.contextExport?.consumeUrl;
+  const remoteAdapter = context.adapterStatus?.remoteAgentHost;
+  return [
+    "[detaches_agent 兼容上下文]",
+    "当前 OpenClaw Gateway 不支持 chat.send.clientContext，detaches_agent 已降级为可见文本上下文。",
+    `sessionKey: ${context.sessionKey}`,
+    context.agentId ? `agentId: ${context.agentId}` : "agentId: unknown",
+    `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
+    `remoteAdapter: state=${remoteAdapter?.state || "unknown"}`,
+    consumeUrl ? `contextExport.consumeUrl: ${consumeUrl}` : "contextExport.consumeUrl: unavailable",
+    "如果需要本机控制、文件传输或完整机器可读上下文，请在真实 OpenClaw agent host 上运行：",
+    "node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --url \"$CONSUME_URL\" --output-context /tmp/detaches-client-context.json",
+    "这个 consumeUrl 是一次性的，包含本会话工具 broker 能力；只在本次任务需要时消费，不要泄露或重复使用。",
+    "工具请求仍必须经过 detaches_agent UI 审批；不要声称命令、文件读取、传输或归档已完成，除非已收到 approved tool output。"
+  ].join("\n");
+}
+
 function agentIdFromSessionKey(sessionKey: string): string {
   const match = /^agent:([^:]+):/.exec(sessionKey);
   return match?.[1] || "";

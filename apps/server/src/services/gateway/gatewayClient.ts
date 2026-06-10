@@ -31,6 +31,7 @@ export class GatewayClient extends EventEmitter {
   private hello: GatewayHello | null = null;
   private connected = false;
   private lastError: string | null = null;
+  private chatSendClientContextSupported: boolean | null = null;
 
   async connect(): Promise<void> {
     if (this.connected && this.socket?.readyState === WebSocket.OPEN) return;
@@ -81,6 +82,7 @@ export class GatewayClient extends EventEmitter {
     attachments?: unknown[];
     idempotencyKey?: string;
     clientContext?: Record<string, unknown>;
+    clientContextFallbackMessage?: string;
   }): Promise<unknown> {
     await this.connect();
     const attachments = params.attachments
@@ -94,19 +96,31 @@ export class GatewayClient extends EventEmitter {
         };
       })
       .filter(Boolean);
-    return this.request(
-      "chat.send",
-      {
+    const buildPayload = (includeClientContext: boolean) => {
+      const fallbackMessage = includeClientContext ? "" : params.clientContextFallbackMessage?.trim();
+      return {
         sessionKey: params.sessionKey,
-        message: params.message,
+        message: fallbackMessage ? `${params.message}\n\n${fallbackMessage}` : params.message,
         thinking: params.thinking ?? "",
         attachments: attachments?.length ? attachments : undefined,
         timeoutMs: 30000,
         idempotencyKey: params.idempotencyKey ?? nanoid(),
-        clientContext: params.clientContext
-      },
-      35000
-    );
+        clientContext: includeClientContext ? params.clientContext : undefined
+      };
+    };
+    const includeClientContext = Boolean(params.clientContext) && this.chatSendClientContextSupported !== false;
+    if (!includeClientContext) {
+      return this.request("chat.send", buildPayload(false), 35000);
+    }
+    try {
+      const response = await this.request("chat.send", buildPayload(true), 35000);
+      this.chatSendClientContextSupported = true;
+      return response;
+    } catch (error) {
+      if (!isClientContextUnsupportedError(error)) throw error;
+      this.chatSendClientContextSupported = false;
+      return this.request("chat.send", buildPayload(false), 35000);
+    }
   }
 
   async abortChat(sessionKey: string, runId: string): Promise<unknown> {
@@ -370,6 +384,11 @@ export class GatewayClient extends EventEmitter {
       this.pending.delete(id);
     }
   }
+}
+
+function isClientContextUnsupportedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /invalid\s+chat\.send\s+params/i.test(message) && /unexpected\s+property\s+['"]?clientContext['"]?/i.test(message);
 }
 
 export const gatewayClient = new GatewayClient();
