@@ -29,3 +29,13 @@ export interface ToolRequestDecisionResponse {
   command?: string;
   message?: string;
 }
+
+export interface ToolRequestExtractInput {
+  text: string;
+  sessionKey: string;
+  agentId?: string;
+}
+
+export interface ToolRequestExtractResponse {
+  requests: ToolRequestRecord[];
+}

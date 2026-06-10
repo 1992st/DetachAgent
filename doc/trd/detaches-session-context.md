@@ -71,6 +71,19 @@ gateway-managed      预留，需 Gateway 原生文件/工具/artifact adapter
 - 校验目标路径不能越出 workspace。
 - 在真实传输 adapter 完成前拒绝执行，并写入审计日志。
 
+### Tool request broker
+
+服务端 `/api/tools/requests/extract` 负责解析 assistant 文本中的 `detaches-terminal` / `detaches-file-transfer` fenced block，并生成 `ToolRequestRecord`。前端只渲染 broker 返回的请求状态，不再维护自己的协议解析器。
+
+审批入口：
+
+- `POST /api/tools/requests/:requestId/approve`
+- `POST /api/tools/requests/:requestId/reject`
+
+审计文件：
+
+- `storage/logs/tool-broker-audit.jsonl`
+
 ## 下一步目标
 
 ### 远端 agent-side skill

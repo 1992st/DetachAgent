@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, FileText, Paperclip, Send, Square, X } from "lucide-react";
-import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, ToolTarget, UploadedFileRef } from "@detaches/shared";
-import { approveToolRequest, createToolRequest, rejectToolRequest } from "../../lib/api.js";
+import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
+import { approveToolRequest, extractToolRequests, rejectToolRequest } from "../../lib/api.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
 
 interface Props {
@@ -173,8 +173,7 @@ export function ChatPanel({
               </button>
             </div>
             <p>{messageText(message)}</p>
-            <FileTransferRequests text={messageText(message)} sessionKey={sessionKey} agentId={agentId} onRunCommand={runBrokerCommand} onReveal={() => terminalRef.current?.reveal()} />
-            <TerminalCommandRequests text={messageText(message)} sessionKey={sessionKey} agentId={agentId} onRunCommand={runBrokerCommand} onReveal={() => terminalRef.current?.reveal()} />
+            <ToolRequests text={messageText(message)} sessionKey={sessionKey} agentId={agentId} onRunCommand={runBrokerCommand} onReveal={() => terminalRef.current?.reveal()} />
             {message.attachments?.map((attachment) => (
               <small className="attachment-chip" key={`${message.id}-${attachment.name}`}>{attachment.name}</small>
             ))}
@@ -244,19 +243,6 @@ export function ChatPanel({
   );
 }
 
-interface TerminalCommandRequest {
-  command: string;
-  target: ToolTarget;
-  reason?: string;
-}
-
-interface FileTransferRequest {
-  fileId: string;
-  remotePath: string;
-  target: ToolTarget;
-  reason?: string;
-}
-
 const targetLabels: Record<ToolTarget, string> = {
   "local-user-machine": "用户本机",
   "remote-agent-host": "远端 Agent 机器",
@@ -271,7 +257,7 @@ function unsupportedTargetMessage(target: ToolTarget): string {
   return `${targetLabels[target]} 当前还没有执行 adapter，不能把请求退化到用户本机执行。`;
 }
 
-function FileTransferRequests({
+function ToolRequests({
   text,
   sessionKey,
   agentId,
@@ -284,49 +270,50 @@ function FileTransferRequests({
   onRunCommand: (command: string) => void;
   onReveal: () => void;
 }) {
-  const requests = parseFileTransferRequests(text);
-  const [brokerIds, setBrokerIds] = useState<Record<number, string>>({});
+  const [requests, setRequests] = useState<ToolRequestRecord[]>([]);
   const [handled, setHandled] = useState<Record<number, "approved" | "rejected" | "running" | "error" | "blocked">>({});
   const [errors, setErrors] = useState<Record<number, string>>({});
   useEffect(() => {
-    if (!sessionKey) return;
+    if (!sessionKey || !text) {
+      setRequests([]);
+      return;
+    }
     setHandled({});
     setErrors({});
-    setBrokerIds({});
-    requests.forEach((request, index) => {
-      void createToolRequest({
-        kind: "file-transfer",
-        target: request.target,
-        sessionKey,
-        agentId: agentId ?? undefined,
-        reason: request.reason,
-        payload: { fileId: request.fileId, remotePath: request.remotePath }
-      })
-        .then((response) => {
-          setBrokerIds((current) => ({ ...current, [index]: response.request.id }));
-          if (response.request.status === "blocked") {
-            setHandled((current) => ({ ...current, [index]: "blocked" }));
-            setErrors((current) => ({ ...current, [index]: response.request.error || "Tool request is blocked." }));
+    setRequests([]);
+    void extractToolRequests({ text, sessionKey, agentId })
+      .then((response) => {
+        setRequests(response.requests);
+        const nextHandled: Record<number, "blocked"> = {};
+        const nextErrors: Record<number, string> = {};
+        response.requests.forEach((request, index) => {
+          if (request.status === "blocked") {
+            nextHandled[index] = "blocked";
+            nextErrors[index] = request.error || "Tool request is blocked.";
           }
-        })
-        .catch((error) => setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) })));
-    });
+        });
+        setHandled(nextHandled);
+        setErrors(nextErrors);
+      })
+      .catch((error) => setErrors({ 0: error instanceof Error ? error.message : String(error) }));
   }, [text, sessionKey, agentId]);
-  if (!requests.length) return null;
+  if (!requests.length && !errors[0]) return null;
 
   return (
     <div className="terminal-requests">
+      {errors[0] && !requests.length ? <p className="request-error">{errors[0]}</p> : null}
       {requests.map((request, index) => {
         const state = handled[index];
         const unsupported = !targetIsSupported(request.target);
+        const actionLabel = request.kind === "file-transfer" ? "Transfer" : "Run";
         return (
-          <div className="terminal-request-card file-transfer-card" key={`${index}-${request.fileId}-${request.remotePath}`}>
+          <div className={`terminal-request-card ${request.kind === "file-transfer" ? "file-transfer-card" : ""}`} key={request.id}>
             <div>
-              <strong>File transfer request</strong>
+              <strong>{request.kind === "file-transfer" ? "File transfer request" : "Terminal command request"}</strong>
               <p className={`target-pill ${request.target}`}>Target: {targetLabels[request.target]}</p>
               {request.reason ? <p>{request.reason}</p> : null}
-              <code>{`fileId: ${request.fileId}\nremotePath: ${request.remotePath}`}</code>
-              {brokerIds[index] ? <small>requestId: {brokerIds[index]}</small> : null}
+              <code>{toolRequestCode(request)}</code>
+              <small>requestId: {request.id}</small>
               {unsupported ? <p className="request-error">{unsupportedTargetMessage(request.target)}</p> : null}
               {errors[index] ? <p className="request-error">{errors[index]}</p> : null}
             </div>
@@ -337,13 +324,7 @@ function FileTransferRequests({
                 disabled={unsupported || Boolean(state && state !== "error")}
                 onClick={() => {
                   setHandled((current) => ({ ...current, [index]: "running" }));
-                  const brokerId = brokerIds[index];
-                  if (!brokerId) {
-                    setHandled((current) => ({ ...current, [index]: "error" }));
-                    setErrors((current) => ({ ...current, [index]: "Tool request is not registered yet." }));
-                    return;
-                  }
-                  approveToolRequest(brokerId)
+                  approveToolRequest(request.id)
                     .then((response) => {
                       if (!response.command) throw new Error(response.message || "Broker did not return a command.");
                       onRunCommand(response.command);
@@ -356,15 +337,14 @@ function FileTransferRequests({
                 }}
               >
                 <Check size={15} />
-                {state === "approved" ? "Started" : state === "running" ? "Starting" : "Transfer"}
+                {state === "approved" ? "Approved" : state === "running" ? "Approving" : actionLabel}
               </button>
               <button
                 type="button"
                 className="secondary-button"
                 disabled={Boolean(state && state !== "error")}
                 onClick={() => {
-                  const brokerId = brokerIds[index];
-                  if (brokerId) void rejectToolRequest(brokerId);
+                  void rejectToolRequest(request.id);
                   setHandled((current) => ({ ...current, [index]: "rejected" }));
                 }}
               >
@@ -382,193 +362,14 @@ function FileTransferRequests({
   );
 }
 
-function TerminalCommandRequests({
-  text,
-  sessionKey,
-  agentId,
-  onRunCommand,
-  onReveal
-}: {
-  text: string;
-  sessionKey: string | null;
-  agentId: string | null;
-  onRunCommand: (command: string) => void;
-  onReveal: () => void;
-}) {
-  const requests = parseTerminalCommandRequests(text);
-  const [brokerIds, setBrokerIds] = useState<Record<number, string>>({});
-  const [handled, setHandled] = useState<Record<number, "approved" | "rejected" | "running" | "error" | "blocked">>({});
-  const [errors, setErrors] = useState<Record<number, string>>({});
-  useEffect(() => {
-    if (!sessionKey) return;
-    setHandled({});
-    setErrors({});
-    setBrokerIds({});
-    requests.forEach((request, index) => {
-      void createToolRequest({
-        kind: "terminal",
-        target: request.target,
-        sessionKey,
-        agentId: agentId ?? undefined,
-        reason: request.reason,
-        payload: { command: request.command }
-      })
-        .then((response) => {
-          setBrokerIds((current) => ({ ...current, [index]: response.request.id }));
-          if (response.request.status === "blocked") {
-            setHandled((current) => ({ ...current, [index]: "blocked" }));
-            setErrors((current) => ({ ...current, [index]: response.request.error || "Tool request is blocked." }));
-          }
-        })
-        .catch((error) => setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) })));
-    });
-  }, [text, sessionKey, agentId]);
-  if (!requests.length) return null;
-
-  return (
-    <div className="terminal-requests">
-      {requests.map((request, index) => {
-        const state = handled[index];
-        const unsupported = !targetIsSupported(request.target);
-        return (
-          <div className="terminal-request-card" key={`${index}-${request.command}`}>
-            <div>
-              <strong>Terminal command request</strong>
-              <p className={`target-pill ${request.target}`}>Target: {targetLabels[request.target]}</p>
-              {request.reason ? <p>{request.reason}</p> : null}
-              <code>{request.command}</code>
-              {brokerIds[index] ? <small>requestId: {brokerIds[index]}</small> : null}
-              {unsupported ? <p className="request-error">{unsupportedTargetMessage(request.target)}</p> : null}
-              {errors[index] ? <p className="request-error">{errors[index]}</p> : null}
-            </div>
-            <div className="terminal-request-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={unsupported || Boolean(state)}
-                onClick={() => {
-                  const brokerId = brokerIds[index];
-                  if (!brokerId) {
-                    setHandled((current) => ({ ...current, [index]: "error" }));
-                    setErrors((current) => ({ ...current, [index]: "Tool request is not registered yet." }));
-                    return;
-                  }
-                  setHandled((current) => ({ ...current, [index]: "running" }));
-                  approveToolRequest(brokerId)
-                    .then((response) => {
-                      if (!response.command) throw new Error(response.message || "Broker did not return a command.");
-                      onRunCommand(response.command);
-                      setHandled((current) => ({ ...current, [index]: "approved" }));
-                    })
-                    .catch((error) => {
-                      setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
-                      setHandled((current) => ({ ...current, [index]: "error" }));
-                    });
-                }}
-              >
-                <Check size={15} />
-                {state === "approved" ? "Approved" : state === "running" ? "Approving" : "Run"}
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={Boolean(state)}
-                onClick={() => {
-                  const brokerId = brokerIds[index];
-                  if (brokerId) void rejectToolRequest(brokerId);
-                  setHandled((current) => ({ ...current, [index]: "rejected" }));
-                }}
-              >
-                <X size={15} />
-                {state === "rejected" ? "Rejected" : "Reject"}
-              </button>
-              <button type="button" className="icon-button" title="Show terminal" onClick={onReveal}>
-                <Eye size={15} />
-              </button>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function parseTerminalCommandRequests(text: string): TerminalCommandRequest[] {
-  const requests: TerminalCommandRequest[] = [];
-  const fencePattern = /```(?:detaches-terminal|terminal-command|terminal-run|shell-run)\s*\n([\s\S]*?)```/gi;
-  let match: RegExpExecArray | null;
-  while ((match = fencePattern.exec(text))) {
-    const body = match[1].trim();
-    const parsed = parseTerminalCommandBody(body);
-    if (parsed) requests.push(parsed);
+function toolRequestCode(request: ToolRequestRecord): string {
+  if (request.kind === "terminal") {
+    return typeof request.payload.command === "string" ? request.payload.command : JSON.stringify(request.payload, null, 2);
   }
-  return requests;
-}
-
-function parseFileTransferRequests(text: string): FileTransferRequest[] {
-  const requests: FileTransferRequest[] = [];
-  const fencePattern = /```(?:detaches-file-transfer|file-transfer)\s*\n([\s\S]*?)```/gi;
-  let match: RegExpExecArray | null;
-  while ((match = fencePattern.exec(text))) {
-    const body = match[1].trim();
-    if (!body) continue;
-    try {
-      const parsed = JSON.parse(body) as {
-        fileId?: unknown;
-        remotePath?: unknown;
-        target?: unknown;
-        reason?: unknown;
-      };
-      const fileId = typeof parsed.fileId === "string" ? parsed.fileId.trim() : "";
-      const remotePath = typeof parsed.remotePath === "string"
-        ? parsed.remotePath.trim()
-        : targetObject(parsed.target) && typeof parsed.target.remotePath === "string"
-          ? parsed.target.remotePath.trim()
-          : "";
-      if (fileId && remotePath) {
-        requests.push({
-          fileId,
-          remotePath,
-          target: parseToolTarget(parsed.target),
-          reason: typeof parsed.reason === "string" ? parsed.reason.trim() : undefined
-        });
-      }
-    } catch {
-      // Ignore malformed requests; the agent can resend a valid JSON block.
-    }
-  }
-  return requests;
-}
-
-function parseTerminalCommandBody(body: string): TerminalCommandRequest | null {
-  if (!body) return null;
-  try {
-    const parsed = JSON.parse(body) as { command?: unknown; cmd?: unknown; target?: unknown; reason?: unknown };
-    const command = typeof parsed.command === "string" ? parsed.command : typeof parsed.cmd === "string" ? parsed.cmd : "";
-    if (command.trim()) {
-      return {
-        command: command.trim(),
-        target: parseToolTarget(parsed.target),
-        reason: typeof parsed.reason === "string" ? parsed.reason.trim() : undefined
-      };
-    }
-  } catch {
-    // Plain shell command block.
-  }
-  const lines = body.split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean);
-  const command = lines.join("\n").trim();
-  return command ? { command, target: "local-user-machine" } : null;
-}
-
-function parseToolTarget(value: unknown): ToolTarget {
-  const raw = targetObject(value) ? value.environment ?? value.type ?? value.id : value;
-  if (raw === "remote-agent-host" || raw === "remote" || raw === "agent-host") return "remote-agent-host";
-  if (raw === "gateway-managed" || raw === "gateway") return "gateway-managed";
-  return "local-user-machine";
-}
-
-function targetObject(value: unknown): value is { [key: string]: unknown } {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  return [
+    `fileId: ${typeof request.payload.fileId === "string" ? request.payload.fileId : ""}`,
+    `remotePath: ${typeof request.payload.remotePath === "string" ? request.payload.remotePath : ""}`
+  ].join("\n");
 }
 
 function buildDefaultAttachmentContext(attachments: UploadedFileRef[]): string {

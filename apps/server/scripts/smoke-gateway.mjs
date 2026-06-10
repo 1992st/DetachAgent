@@ -417,6 +417,30 @@ async function main() {
     assert.match(approvedBrokerTransfer.command, /curl -fL/);
     assert.match(approvedBrokerTransfer.command, /detaches-note-via-broker\.txt/);
 
+    const extractedTools = await requestJson("/api/tools/requests/extract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionKey: chatSessionKey,
+        agentId: "agent-alpha",
+        text: [
+          "please run",
+          "```detaches-terminal",
+          "{\"target\":\"local-user-machine\",\"command\":\"echo broker-parse\",\"reason\":\"parse terminal\"}",
+          "```",
+          "```detaches-terminal",
+          "{\"target\":\"remote-agent-host\",\"command\":\"pwd\",\"reason\":\"parse blocked remote\"}",
+          "```"
+        ].join("\n")
+      })
+    });
+    assert.equal(extractedTools.requests.length, 2);
+    assert.equal(extractedTools.requests[0].kind, "terminal");
+    assert.equal(extractedTools.requests[0].status, "pending");
+    assert.equal(extractedTools.requests[0].payload.command, "echo broker-parse");
+    assert.equal(extractedTools.requests[1].target, "remote-agent-host");
+    assert.equal(extractedTools.requests[1].status, "blocked");
+
     const validRemoteTransfer = await fetch(`http://${host}:${serverPort}/api/files/transfer/prepare`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -457,6 +481,7 @@ async function main() {
       .map((line) => JSON.parse(line));
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "terminal" && event.request.target === "local-user-machine"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "terminal" && event.request.target === "remote-agent-host" && event.request.status === "blocked"), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.payload?.command === "echo broker-parse"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.command === "pwd"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && /detaches-note-via-broker\.txt/.test(event.command || "")), true);
 

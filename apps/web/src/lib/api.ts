@@ -11,6 +11,7 @@ import type {
   ToolRequestCreateInput,
   ToolRequestCreateResponse,
   ToolRequestDecisionResponse,
+  ToolRequestExtractResponse,
   ToolRequestRecord,
   ToolTarget
 } from "@detaches/shared";
@@ -75,6 +76,16 @@ export async function prepareFileTransfer(
 
 export async function createToolRequest(input: ToolRequestCreateInput): Promise<ToolRequestCreateResponse> {
   const res = await fetch("/api/tools/requests", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function extractToolRequests(input: { text: string; sessionKey: string; agentId?: string | null }): Promise<ToolRequestExtractResponse> {
+  const res = await fetch("/api/tools/requests/extract", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input)

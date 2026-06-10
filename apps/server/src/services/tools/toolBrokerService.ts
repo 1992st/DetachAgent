@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import type {
   ToolRequestCreateInput,
   ToolRequestDecisionResponse,
+  ToolRequestExtractResponse,
   ToolRequestKind,
   ToolRequestRecord,
   ToolRequestStatus,
@@ -19,6 +20,22 @@ type AuditEvent =
 
 class ToolBrokerService {
   private requests = new Map<string, ToolRequestRecord>();
+
+  async extractFromText(input: { text: string; sessionKey: string; agentId?: string }): Promise<ToolRequestExtractResponse> {
+    const parsed = parseToolRequests(input.text);
+    const requests = [];
+    for (const item of parsed) {
+      requests.push(await this.create({
+        kind: item.kind,
+        target: item.target,
+        sessionKey: input.sessionKey,
+        agentId: input.agentId,
+        reason: item.reason,
+        payload: item.payload
+      }));
+    }
+    return { requests };
+  }
 
   async create(input: ToolRequestCreateInput): Promise<ToolRequestRecord> {
     const now = new Date().toISOString();
@@ -121,6 +138,94 @@ class ToolBrokerService {
 
 export const toolBrokerService = new ToolBrokerService();
 
+interface ParsedToolRequest {
+  kind: ToolRequestKind;
+  target: ToolTarget;
+  reason?: string;
+  payload: Record<string, unknown>;
+}
+
+function parseToolRequests(text: string): ParsedToolRequest[] {
+  return [
+    ...parseTerminalCommandRequests(text),
+    ...parseFileTransferRequests(text)
+  ];
+}
+
+function parseTerminalCommandRequests(text: string): ParsedToolRequest[] {
+  const requests: ParsedToolRequest[] = [];
+  const fencePattern = /```(?:detaches-terminal|terminal-command|terminal-run|shell-run)\s*\n([\s\S]*?)```/gi;
+  let match: RegExpExecArray | null;
+  while ((match = fencePattern.exec(text))) {
+    const parsed = parseTerminalCommandBody(match[1].trim());
+    if (parsed) requests.push(parsed);
+  }
+  return requests;
+}
+
+function parseFileTransferRequests(text: string): ParsedToolRequest[] {
+  const requests: ParsedToolRequest[] = [];
+  const fencePattern = /```(?:detaches-file-transfer|file-transfer)\s*\n([\s\S]*?)```/gi;
+  let match: RegExpExecArray | null;
+  while ((match = fencePattern.exec(text))) {
+    const body = match[1].trim();
+    if (!body) continue;
+    try {
+      const parsed = JSON.parse(body) as {
+        fileId?: unknown;
+        remotePath?: unknown;
+        target?: unknown;
+        reason?: unknown;
+      };
+      const fileId = typeof parsed.fileId === "string" ? parsed.fileId.trim() : "";
+      const remotePath = typeof parsed.remotePath === "string"
+        ? parsed.remotePath.trim()
+        : targetObject(parsed.target) && typeof parsed.target.remotePath === "string"
+          ? parsed.target.remotePath.trim()
+          : "";
+      if (fileId && remotePath) {
+        requests.push({
+          kind: "file-transfer",
+          target: parseToolTarget(parsed.target),
+          reason: typeof parsed.reason === "string" ? parsed.reason.trim() : undefined,
+          payload: { fileId, remotePath }
+        });
+      }
+    } catch {
+      // Ignore malformed requests; the agent can resend a valid JSON block.
+    }
+  }
+  return requests;
+}
+
+function parseTerminalCommandBody(body: string): ParsedToolRequest | null {
+  if (!body) return null;
+  try {
+    const parsed = JSON.parse(body) as { command?: unknown; cmd?: unknown; target?: unknown; reason?: unknown };
+    const command = typeof parsed.command === "string" ? parsed.command : typeof parsed.cmd === "string" ? parsed.cmd : "";
+    if (command.trim()) {
+      return {
+        kind: "terminal",
+        target: parseToolTarget(parsed.target),
+        reason: typeof parsed.reason === "string" ? parsed.reason.trim() : undefined,
+        payload: { command: command.trim() }
+      };
+    }
+  } catch {
+    // Plain shell command block.
+  }
+  const lines = body.split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean);
+  const command = lines.join("\n").trim();
+  return command ? { kind: "terminal", target: "local-user-machine", payload: { command } } : null;
+}
+
+function parseToolTarget(value: unknown): ToolTarget {
+  const raw = targetObject(value) ? value.environment ?? value.type ?? value.id : value;
+  if (raw === "remote-agent-host" || raw === "remote" || raw === "agent-host") return "remote-agent-host";
+  if (raw === "gateway-managed" || raw === "gateway") return "gateway-managed";
+  return "local-user-machine";
+}
+
 function stringPayload(request: ToolRequestRecord, key: string): string {
   const value = request.payload[key];
   return typeof value === "string" ? value.trim() : "";
@@ -128,4 +233,8 @@ function stringPayload(request: ToolRequestRecord, key: string): string {
 
 function unsupportedTargetMessage(kind: ToolRequestKind, target: ToolTarget): string {
   return `${kind} target ${target} is not available. The request cannot fallback to local-user-machine.`;
+}
+
+function targetObject(value: unknown): value is { [key: string]: unknown } {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

@@ -415,6 +415,21 @@ apiRoutes.post("/tools/requests", async (req, res) => {
   }
 });
 
+apiRoutes.post("/tools/requests/extract", async (req, res) => {
+  try {
+    const text = typeof req.body.text === "string" ? req.body.text : "";
+    const sessionKey = typeof req.body.sessionKey === "string" ? req.body.sessionKey.trim() : "";
+    const agentId = typeof req.body.agentId === "string" ? req.body.agentId.trim() : undefined;
+    if (!text || !sessionKey) {
+      res.status(400).json({ error: "Missing text or sessionKey." });
+      return;
+    }
+    res.json(await toolBrokerService.extractFromText({ text, sessionKey, agentId }));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 apiRoutes.post("/tools/requests/:requestId/approve", async (req, res) => {
   try {
     res.json(await toolBrokerService.approve(req.params.requestId));
