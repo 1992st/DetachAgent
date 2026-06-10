@@ -48,6 +48,19 @@ node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs terminal-request 
 
 POST the JSON output to detaches_agent `/api/tools/events/gateway`. This keeps fenced blocks as compatibility only.
 
+If detaches_agent is reachable from the agent host, the CLI can submit the event itself:
+
+```sh
+node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs terminal-request \
+  --target local-user-machine \
+  --command pwd \
+  --reason "check the user's local working directory" \
+  --format broker-event \
+  --session-key "$DETACHES_SESSION_KEY" \
+  --source-event-id "$UNIQUE_EVENT_ID" \
+  --submit-url "$DETACHES_AGENT_BASE_URL/api/tools/events/gateway"
+```
+
 Terminal request:
 
 ```detaches-terminal

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import http from "node:http";
 import path from "node:path";
+import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 
 const adapterDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -131,6 +133,42 @@ assert.equal(parsedFileBrokerEvent.target, "local-user-machine");
 assert.equal(parsedFileBrokerEvent.sourceEventId, "adapter-test-file-1");
 assert.equal(parsedFileBrokerEvent.payload.fileId, "file-123");
 assert.equal(parsedFileBrokerEvent.payload.remotePath, "/tmp/input.pdf");
+
+let submittedBody = null;
+const submitServer = http.createServer((req, res) => {
+  let body = "";
+  req.on("data", (chunk) => { body += chunk.toString("utf8"); });
+  req.on("end", () => {
+    submittedBody = JSON.parse(body);
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ request: { id: "submitted-request", ...submittedBody } }));
+  });
+});
+submitServer.listen(0, "127.0.0.1");
+await once(submitServer, "listening");
+const submitPort = submitServer.address().port;
+const submittedBrokerEvent = await run([
+  "terminal-request",
+  "--target",
+  "local-user-machine",
+  "--command",
+  "pwd",
+  "--reason",
+  "submit structured event",
+  "--format",
+  "broker-event",
+  "--session-key",
+  "agent:audio-process:main",
+  "--source-event-id",
+  "adapter-test-submit-1",
+  "--submit-url",
+  `http://127.0.0.1:${submitPort}/api/tools/events/gateway`
+]);
+submitServer.close();
+assert.equal(submittedBrokerEvent.code, 0);
+assert.equal(submittedBody.sourceEventId, "adapter-test-submit-1");
+assert.equal(submittedBody.payload.command, "pwd");
+assert.equal(JSON.parse(submittedBrokerEvent.stdout).request.id, "submitted-request");
 
 const unknownTarget = await run([
   "terminal-request",

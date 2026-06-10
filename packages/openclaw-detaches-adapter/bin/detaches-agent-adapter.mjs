@@ -14,8 +14,8 @@ function usage(exitCode = 0) {
     "  manifest",
     "  validate-context <context-json-file>",
     "  inspect-context <context-json-file>",
-    "  terminal-request --target <target> --command <command> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id>]",
-    "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id>]",
+    "  terminal-request --target <target> --command <command> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-url <url>]",
+    "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-url <url>]",
     "",
     "This CLI does not execute tools. It only validates context and emits detaches_agent request blocks."
   ].join("\n");
@@ -145,9 +145,11 @@ function emitFence(fence, payload) {
   console.log("```");
 }
 
-function emitRequest(args, kind, target, reason, payload, fence) {
+async function emitRequest(args, kind, target, reason, payload, fence) {
   const format = typeof args.format === "string" ? args.format : "fence";
+  const submitUrl = typeof args["submit-url"] === "string" && args["submit-url"].trim() ? args["submit-url"].trim() : "";
   if (format === "fence") {
+    if (submitUrl) fail("--submit-url requires --format broker-event");
     emitFence(fence, { target, ...payload, reason });
     return;
   }
@@ -155,7 +157,7 @@ function emitRequest(args, kind, target, reason, payload, fence) {
   const sessionKey = requireOption(args, "session-key");
   const sourceEventId = requireOption(args, "source-event-id");
   const agentId = typeof args["agent-id"] === "string" && args["agent-id"].trim() ? args["agent-id"].trim() : undefined;
-  console.log(JSON.stringify({
+  const event = {
     kind,
     target,
     sessionKey,
@@ -164,7 +166,22 @@ function emitRequest(args, kind, target, reason, payload, fence) {
     source: "gateway-event",
     sourceEventId,
     payload
-  }, null, 2));
+  };
+  if (!submitUrl) {
+    console.log(JSON.stringify(event, null, 2));
+    return;
+  }
+  const response = await fetch(submitUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(event)
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    console.error(text || `HTTP ${response.status}`);
+    process.exit(1);
+  }
+  console.log(text || JSON.stringify({ ok: true }));
 }
 
 function assertKnownTarget(target) {
@@ -174,7 +191,7 @@ function assertKnownTarget(target) {
   }
 }
 
-function main() {
+async function main() {
   const [command, ...rest] = process.argv.slice(2);
   if (!command || command === "--help" || command === "-h") usage(0);
 
@@ -210,7 +227,7 @@ function main() {
   if (command === "terminal-request") {
     const target = requireOption(args, "target");
     assertKnownTarget(target);
-    emitRequest(args, "terminal", target, requireOption(args, "reason"), {
+    await emitRequest(args, "terminal", target, requireOption(args, "reason"), {
       command: requireOption(args, "command")
     }, "detaches-terminal");
     return;
@@ -219,7 +236,7 @@ function main() {
   if (command === "file-transfer-request") {
     const target = requireOption(args, "target");
     assertKnownTarget(target);
-    emitRequest(args, "file-transfer", target, requireOption(args, "reason"), {
+    await emitRequest(args, "file-transfer", target, requireOption(args, "reason"), {
       fileId: requireOption(args, "file-id"),
       remotePath: requireOption(args, "remote-path")
     }, "detaches-file-transfer");
@@ -229,4 +246,4 @@ function main() {
   usage(1);
 }
 
-main();
+main().catch((error) => fail(error instanceof Error ? error.message : String(error)));

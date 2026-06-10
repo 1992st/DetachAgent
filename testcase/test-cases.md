@@ -37,7 +37,7 @@
 
 ## TC-002A OpenClaw detaches adapter
 
-目标：验证远端 agent-side adapter 资产可读取、可校验、可诊断会话上下文、可生成标准请求块和结构化 Tool Broker event。
+目标：验证远端 agent-side adapter 资产可读取、可校验、可诊断会话上下文、可生成标准请求块、结构化 Tool Broker event，并可直接提交 event。
 
 步骤：
 
@@ -48,7 +48,8 @@
 5. 生成 `detaches-terminal` 请求块。
 6. 生成 `detaches-file-transfer` 请求块。
 7. 生成 `--format broker-event` JSON。
-8. 尝试未知 target。
+8. 用 `--submit-url` 向 mock detaches_agent endpoint 提交 broker-event。
+9. 尝试未知 target。
 
 期望：
 
@@ -58,6 +59,7 @@
 - `inspect-context` 能识别 `local-user-machine` 可请求、`remote-agent-host` 不可请求。
 - 请求块必须包含 fenced code block、target 和 reason。
 - broker-event JSON 必须包含 `source: gateway-event`、`sourceEventId`、`sessionKey` 和 `payload`。
+- `--submit-url` 必须 POST 同一份 broker-event，并输出服务端响应。
 - 未知 target 被拒绝。
 
 ## TC-003 Terminal 持久性

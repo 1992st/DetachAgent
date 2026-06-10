@@ -24,7 +24,7 @@
 
 `inspect-context` 是当前最小 agent-side skill 入口：远端 agent 可以把收到的 `clientContext.detaches` 保存为 JSON 后交给 CLI，得到 session identity、adapter readiness、capability target、requestable/unavailable 状态和 hard rules。它只输出机器可读诊断，不执行工具。
 
-`terminal-request` / `file-transfer-request` 默认仍能输出 fenced block，兼容旧聊天文本解析；同时支持 `--format broker-event` 输出 Tool Broker `gateway-event` JSON envelope，可直接 POST 到 `/api/tools/events/gateway`。这是当前替代文本 fenced block 的优先路径。
+`terminal-request` / `file-transfer-request` 默认仍能输出 fenced block，兼容旧聊天文本解析；同时支持 `--format broker-event` 输出 Tool Broker `gateway-event` JSON envelope，也可以通过 `--submit-url <detaches_agent>/api/tools/events/gateway` 由 CLI 直接提交。结构化提交是当前替代文本 fenced block 的优先路径。
 
 本地 server 暴露 adapter 分发接口：
 
