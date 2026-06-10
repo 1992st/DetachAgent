@@ -384,6 +384,7 @@ async function main() {
       })
     });
     assert.equal(terminalTool.request.status, "pending");
+    assert.equal(terminalTool.request.risk.level, "safe");
     const pendingToolList = await requestJson(`/api/tools/requests?sessionKey=${encodeURIComponent(chatSessionKey)}&agentId=agent-alpha&status=pending&limit=10`);
     assert.equal(pendingToolList.requests.some((request) => request.id === terminalTool.request.id), true);
     const approvedTerminalTool = await requestJson(`/api/tools/requests/${terminalTool.request.id}/approve`, { method: "POST" });
@@ -477,6 +478,38 @@ async function main() {
     assert.equal(hasToolStreamAction("ingested"), true);
     assert.equal(hasToolStreamAction("duplicate"), true);
     toolStream.close();
+
+    const elevatedTerminalTool = await requestJson("/api/tools/requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "terminal",
+        target: "local-user-machine",
+        sessionKey: chatSessionKey,
+        agentId: "agent-alpha",
+        reason: "smoke elevated terminal risk",
+        payload: { command: "sudo ls /var" }
+      })
+    });
+    assert.equal(elevatedTerminalTool.request.status, "pending");
+    assert.equal(elevatedTerminalTool.request.risk.level, "elevated");
+    assert.match(elevatedTerminalTool.request.risk.reasons.join(" "), /sudo/);
+
+    const destructiveTerminalTool = await requestJson("/api/tools/requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "terminal",
+        target: "local-user-machine",
+        sessionKey: chatSessionKey,
+        agentId: "agent-alpha",
+        reason: "smoke destructive terminal risk",
+        payload: { command: "rm -rf /" }
+      })
+    });
+    assert.equal(destructiveTerminalTool.request.status, "blocked");
+    assert.equal(destructiveTerminalTool.request.risk.level, "destructive");
+    assert.match(destructiveTerminalTool.request.error, /risk policy/);
 
     const blockedTerminalTool = await requestJson("/api/tools/requests", {
       method: "POST",

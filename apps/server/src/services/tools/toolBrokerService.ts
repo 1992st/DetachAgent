@@ -14,6 +14,7 @@ import type {
   ToolRequestListResponse,
   ToolRequestRecord,
   ToolRequestStatus,
+  ToolRiskAssessment,
   ToolExecutionResultResponse,
   ToolTarget
 } from "@detaches/shared";
@@ -86,13 +87,19 @@ class ToolBrokerService {
       if (existing) return existing;
     }
     const now = new Date().toISOString();
+    const risk = assessRisk(input);
+    const supported = this.targetSupported(input.kind, input.target);
+    const blockedReason = supported
+      ? risk.level === "destructive" ? `Tool request blocked by risk policy: ${risk.reasons.join("; ")}` : undefined
+      : unsupportedTargetMessage(input.kind, input.target);
     const record: ToolRequestRecord = {
       ...input,
       id: nanoid(),
-      status: this.targetSupported(input.kind, input.target) ? "pending" : "blocked",
+      risk,
+      status: blockedReason ? "blocked" : "pending",
       createdAt: now,
       updatedAt: now,
-      error: this.targetSupported(input.kind, input.target) ? undefined : unsupportedTargetMessage(input.kind, input.target)
+      error: blockedReason
     };
     this.requests.set(record.id, record);
     await this.save();
@@ -542,6 +549,31 @@ function stringPayload(request: ToolRequestRecord, key: string): string {
 
 function unsupportedTargetMessage(kind: ToolRequestKind, target: ToolTarget): string {
   return `${kind} target ${target} is not available. The request cannot fallback to local-user-machine.`;
+}
+
+function assessRisk(input: Pick<ToolRequestRecord, "kind" | "payload">): ToolRiskAssessment {
+  if (input.kind !== "terminal") return { level: "safe", reasons: [] };
+  const command = typeof input.payload.command === "string" ? input.payload.command : "";
+  const normalized = command.toLowerCase();
+  const destructive = [
+    /\brm\s+(-[a-z]*r[a-z]*f|-rf|-fr)\s+(\/|\$home\b|~\b|\.\.?\b)/i,
+    /\bsudo\s+rm\s+(-[a-z]*r[a-z]*f|-rf|-fr)\b/i,
+    /\bmkfs(\.[a-z0-9]+)?\b/i,
+    /\bdd\s+.*\bof=\/dev\//i,
+    />\s*\/(?:etc|bin|sbin|usr|var|system|library)\b/i,
+    /\b(curl|wget)\b[\s\S]*\|\s*(sh|bash|zsh)\b/i
+  ].filter((pattern) => pattern.test(command));
+  if (destructive.length) {
+    return { level: "destructive", reasons: ["可能删除/覆盖关键路径、格式化磁盘，或下载后直接执行脚本"] };
+  }
+  const reasons: string[] = [];
+  if (/\bsudo\b/.test(normalized)) reasons.push("需要 sudo 权限");
+  if (/\b(chmod|chown)\b/.test(normalized)) reasons.push("修改文件权限或归属");
+  if (/\b(npm|pnpm|yarn|pip|brew)\s+(install|add|remove|uninstall)\b/.test(normalized)) reasons.push("安装或移除依赖");
+  if (/(^|\s)(rm|mv|cp)\s+/.test(normalized) && /(?:\/etc|\/usr|\/var|\/bin|\/sbin|~\/\.|\.ssh|\.zshrc|\.bashrc|\.profile)/.test(normalized)) {
+    reasons.push("修改 shell/profile、SSH 或系统相关路径");
+  }
+  return reasons.length ? { level: "elevated", reasons } : { level: "safe", reasons: [] };
 }
 
 function targetObject(value: unknown): value is { [key: string]: unknown } {

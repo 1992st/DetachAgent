@@ -317,6 +317,7 @@ function ToolRequests({
             <div>
               <strong>{request.kind === "file-transfer" ? "File transfer request" : "Terminal command request"}</strong>
               <p className={`target-pill ${request.target}`}>Target: {targetLabels[request.target]}</p>
+              {request.risk ? <p className={`risk-pill ${request.risk.level}`}>Risk: {request.risk.level}{request.risk.reasons.length ? ` · ${request.risk.reasons.join("; ")}` : ""}</p> : null}
               {request.reason ? <p>{request.reason}</p> : null}
               <code>{toolRequestCode(request)}</code>
               <small>requestId: {request.id}</small>

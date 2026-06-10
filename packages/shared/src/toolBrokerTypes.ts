@@ -4,6 +4,12 @@ export type ToolRequestKind = "terminal" | "file-transfer";
 export type ToolRequestStatus = "pending" | "approved" | "rejected" | "blocked" | "started" | "failed";
 export type ToolResultForwardStatus = "not-started" | "pending" | "sent" | "failed";
 export type ToolRequestSource = "text-extract" | "api" | "gateway-event";
+export type ToolRiskLevel = "safe" | "elevated" | "destructive";
+
+export interface ToolRiskAssessment {
+  level: ToolRiskLevel;
+  reasons: string[];
+}
 
 export interface ToolRequestCreateInput {
   kind: ToolRequestKind;
@@ -19,6 +25,7 @@ export interface ToolRequestCreateInput {
 export interface ToolRequestRecord extends ToolRequestCreateInput {
   id: string;
   status: ToolRequestStatus;
+  risk?: ToolRiskAssessment;
   createdAt: string;
   updatedAt: string;
   error?: string;
