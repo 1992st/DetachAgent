@@ -64,3 +64,13 @@ export interface DetachesSessionContext {
   capabilities: DetachesToolCapability[];
   invariants: string[];
 }
+
+export interface DetachesContextExportResponse {
+  sessionKey: string;
+  sessionMode: ChatSessionMode;
+  clientContext: Record<string, unknown>;
+  detaches: DetachesSessionContext;
+  redacted: {
+    brokerSubmitToken: boolean;
+  };
+}

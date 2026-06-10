@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import express from "express";
 import multer from "multer";
-import type { AppHealth, DiagnosticItem, DiagnosticsResponse, NetworkTestResponse, NetworkTestStep, ToolDecisionActor, ToolTarget } from "@detaches/shared";
+import type { AppHealth, DetachesContextExportResponse, DiagnosticItem, DiagnosticsResponse, NetworkTestResponse, NetworkTestStep, ToolDecisionActor, ToolTarget } from "@detaches/shared";
 import { appConfig, publicServerBaseUrl } from "../config/appConfig.js";
 import { settingsStore, runtimeConfig } from "../config/settingsStore.js";
 import { sshTunnelService } from "../services/tunnel/sshTunnelService.js";
@@ -13,7 +13,7 @@ import { gatewayClient } from "../services/gateway/gatewayClient.js";
 import { loadOrCreateDeviceIdentity } from "../services/gateway/deviceIdentityService.js";
 import { listAgents } from "../services/gateway/agentDirectoryService.js";
 import { fileTransferService } from "../services/files/fileTransferService.js";
-import { publicClientIdentity } from "../services/clientContextService.js";
+import { buildChatClientContext, publicClientIdentity } from "../services/clientContextService.js";
 import { toolBrokerService } from "../services/tools/toolBrokerService.js";
 import { brokerTokenService } from "../services/tools/brokerTokenService.js";
 import { openclawDetachesAdapterService } from "../services/adapters/openclawDetachesAdapterService.js";
@@ -26,6 +26,26 @@ const upload = multer({
 export const apiRoutes = express.Router();
 
 const execFileAsync = promisify(execFile);
+
+function isLoopbackRequest(req: express.Request): boolean {
+  const address = req.socket.remoteAddress || "";
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function redactBrokerSubmitToken(clientContext: Record<string, unknown>): { clientContext: Record<string, unknown>; brokerSubmitTokenRedacted: boolean } {
+  const cloned = cloneJson(clientContext);
+  const detaches = cloned.detaches as { broker?: { submitToken?: string; submitTokenRedacted?: boolean } } | undefined;
+  if (detaches?.broker?.submitToken) {
+    delete detaches.broker.submitToken;
+    detaches.broker.submitTokenRedacted = true;
+    return { clientContext: cloned, brokerSubmitTokenRedacted: true };
+  }
+  return { clientContext: cloned, brokerSubmitTokenRedacted: false };
+}
 
 function tcpProbe(host: string, port: number, timeoutMs = 2500): Promise<{ ok: boolean; message: string; durationMs: number }> {
   const startedAt = Date.now();
@@ -326,6 +346,41 @@ apiRoutes.get("/settings", async (_req, res) => {
 
 apiRoutes.get("/client", (_req, res) => {
   res.json(publicClientIdentity());
+});
+
+apiRoutes.get("/context/:sessionKey", async (req, res) => {
+  const sessionKey = String(req.params.sessionKey || "").trim();
+  const sessionMode = req.query.sessionMode === "main" ? "main" : "device";
+  const includeSubmitToken = req.query.includeSubmitToken === "true" || req.query.includeSubmitToken === "1";
+  if (!sessionKey) {
+    res.status(400).json({ error: "sessionKey is required." });
+    return;
+  }
+  if (includeSubmitToken && !isLoopbackRequest(req)) {
+    res.status(403).json({ error: "includeSubmitToken is only allowed from loopback requests." });
+    return;
+  }
+
+  const rawClientContext = await buildChatClientContext(sessionMode, sessionKey);
+  const exported = includeSubmitToken
+    ? { clientContext: cloneJson(rawClientContext), brokerSubmitTokenRedacted: false }
+    : redactBrokerSubmitToken(rawClientContext);
+  const detaches = exported.clientContext.detaches;
+  if (!detaches || typeof detaches !== "object") {
+    res.status(500).json({ error: "detaches context was not generated." });
+    return;
+  }
+
+  const body: DetachesContextExportResponse = {
+    sessionKey,
+    sessionMode,
+    clientContext: exported.clientContext,
+    detaches: detaches as DetachesContextExportResponse["detaches"],
+    redacted: {
+      brokerSubmitToken: exported.brokerSubmitTokenRedacted
+    }
+  };
+  res.json(body);
 });
 
 apiRoutes.put("/settings", async (req, res) => {

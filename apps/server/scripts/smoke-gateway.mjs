@@ -323,6 +323,21 @@ async function main() {
     assert.match(await rejectedDownload.text(), /outside the configured workspace/);
 
     const chatSessionKey = "agent:agent-alpha:main";
+    const exportedContext = await requestJson(`/api/context/${encodeURIComponent(chatSessionKey)}?sessionMode=main`);
+    assert.equal(exportedContext.sessionKey, chatSessionKey);
+    assert.equal(exportedContext.sessionMode, "main");
+    assert.equal(exportedContext.detaches.app, "detaches_agent");
+    assert.equal(exportedContext.detaches.sessionKey, chatSessionKey);
+    assert.equal(exportedContext.detaches.agentId, "agent-alpha");
+    assert.equal(exportedContext.detaches.broker.submitToken, undefined);
+    assert.equal(exportedContext.detaches.broker.submitTokenRedacted, true);
+    assert.equal(exportedContext.redacted.brokerSubmitToken, true);
+    const exportedContextWithToken = await requestJson(`/api/context/${encodeURIComponent(chatSessionKey)}?sessionMode=main&includeSubmitToken=true`);
+    assert.equal(exportedContextWithToken.sessionKey, chatSessionKey);
+    assert.equal(exportedContextWithToken.redacted.brokerSubmitToken, false);
+    assert.equal(typeof exportedContextWithToken.detaches.broker.submitToken, "string");
+    assert.equal(exportedContextWithToken.detaches.broker.submitTokenHeader, "Authorization");
+
     const chat = new WebSocket(`ws://${host}:${serverPort}/api/chat/${encodeURIComponent(chatSessionKey)}`);
     const messages = [];
     chat.on("message", (data) => {
@@ -417,6 +432,7 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.requestFence, "detaches-file-transfer");
     assert.equal(userChatSend.clientContext?.detaches?.broker?.gatewayEventEndpoint, `${publicBaseUrl}/api/tools/events/gateway`);
     assert.equal(typeof userChatSend.clientContext?.detaches?.broker?.submitToken, "string");
+    assert.equal(userChatSend.clientContext?.detaches?.broker?.submitToken, exportedContextWithToken.detaches.broker.submitToken);
     assert.equal(userChatSend.clientContext?.detaches?.broker?.submitTokenHeader, "Authorization");
     assert.equal(userChatSend.clientContext?.detaches?.broker?.requestFormats?.includes("broker-event"), true);
     assert.equal(userChatSend.clientContext?.detaches?.capabilities?.some((capability) => capability.name === "terminal" && capability.supportedTargets.includes("local-user-machine")), true);
