@@ -12,10 +12,11 @@ import type {
 } from "@detaches/shared";
 import { appConfig } from "../../config/appConfig.js";
 import { fileTransferService } from "../files/fileTransferService.js";
+import { terminalService } from "../terminal/terminalService.js";
 
 type AuditEvent =
   | { type: "tool.create"; request: ToolRequestRecord }
-  | { type: "tool.approve"; requestId: string; status: ToolRequestStatus; command?: string; error?: string }
+  | { type: "tool.approve"; requestId: string; status: ToolRequestStatus; command?: string; terminalId?: string; error?: string }
   | { type: "tool.reject"; requestId: string; status: ToolRequestStatus };
 
 class ToolBrokerService {
@@ -66,9 +67,20 @@ class ToolBrokerService {
       if (!command) {
         return this.fail(request, "Terminal request payload.command is required.");
       }
+      const terminal = await terminalService.runCommand(request.sessionKey, command);
       const updated = this.update(request, "approved");
-      await this.audit({ type: "tool.approve", requestId, status: updated.status, command });
-      return { request: updated, command };
+      await this.audit({ type: "tool.approve", requestId, status: updated.status, command, terminalId: terminal.terminalId });
+      return {
+        request: updated,
+        command,
+        execution: {
+          target: request.target,
+          terminalId: terminal.terminalId,
+          sessionKey: terminal.sessionKey,
+          wroteToTerminal: true
+        },
+        message: "Command was written to the session terminal by the server broker."
+      };
     }
     if (request.kind === "file-transfer") {
       const fileId = stringPayload(request, "fileId");
@@ -84,9 +96,20 @@ class ToolBrokerService {
           agentId: request.agentId,
           sessionKey: request.sessionKey
         });
+        const terminal = await terminalService.runCommand(request.sessionKey, prepared.command);
         const updated = this.update(request, "approved");
-        await this.audit({ type: "tool.approve", requestId, status: updated.status, command: prepared.command });
-        return { request: updated, command: prepared.command };
+        await this.audit({ type: "tool.approve", requestId, status: updated.status, command: prepared.command, terminalId: terminal.terminalId });
+        return {
+          request: updated,
+          command: prepared.command,
+          execution: {
+            target: request.target,
+            terminalId: terminal.terminalId,
+            sessionKey: terminal.sessionKey,
+            wroteToTerminal: true
+          },
+          message: "File transfer command was written to the session terminal by the server broker."
+        };
       } catch (error) {
         return this.fail(request, error instanceof Error ? error.message : String(error));
       }

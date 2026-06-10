@@ -48,7 +48,7 @@
   - 记录 target、sessionKey、agentId、审批、拒绝、失败原因。
   - 保存路径：`storage/logs/tool-broker-audit.jsonl`。
 - 后续还需要补齐：
-  - 命令真正写入 terminal 的时间和 terminalId。
+  - 命令真正写入 terminal 的时间已可通过 `tool.approve` 与 `terminalId` 追踪，后续需要 UI 展示。
   - terminal 输出摘要。
   - 用户审批 UI 的操作者身份。
   - 与聊天消息 id / runId 的关联。

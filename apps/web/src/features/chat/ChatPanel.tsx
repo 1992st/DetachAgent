@@ -120,17 +120,6 @@ export function ChatPanel({
     await navigator.clipboard.writeText(messageText(message));
   }
 
-  function runBrokerCommand(command: string) {
-    const ok = terminalRef.current?.runCommand(command) ?? false;
-    terminalRef.current?.reveal();
-    if (!ok) {
-      setMessages((current) => [
-        ...current,
-        { id: crypto.randomUUID(), role: "system", text: "Terminal is not connected yet. Open Agent Terminal and try again.", timestamp: new Date().toISOString() }
-      ]);
-    }
-  }
-
   return (
     <main className="chat-panel">
       <div className="chat-header">
@@ -173,7 +162,7 @@ export function ChatPanel({
               </button>
             </div>
             <p>{messageText(message)}</p>
-            <ToolRequests text={messageText(message)} sessionKey={sessionKey} agentId={agentId} onRunCommand={runBrokerCommand} onReveal={() => terminalRef.current?.reveal()} />
+            <ToolRequests text={messageText(message)} sessionKey={sessionKey} agentId={agentId} onReveal={() => terminalRef.current?.reveal()} />
             {message.attachments?.map((attachment) => (
               <small className="attachment-chip" key={`${message.id}-${attachment.name}`}>{attachment.name}</small>
             ))}
@@ -261,13 +250,11 @@ function ToolRequests({
   text,
   sessionKey,
   agentId,
-  onRunCommand,
   onReveal
 }: {
   text: string;
   sessionKey: string | null;
   agentId: string | null;
-  onRunCommand: (command: string) => void;
   onReveal: () => void;
 }) {
   const [requests, setRequests] = useState<ToolRequestRecord[]>([]);
@@ -326,8 +313,8 @@ function ToolRequests({
                   setHandled((current) => ({ ...current, [index]: "running" }));
                   approveToolRequest(request.id)
                     .then((response) => {
-                      if (!response.command) throw new Error(response.message || "Broker did not return a command.");
-                      onRunCommand(response.command);
+                      if (!response.execution?.wroteToTerminal) throw new Error(response.message || "Broker did not execute the request.");
+                      onReveal();
                       setHandled((current) => ({ ...current, [index]: "approved" }));
                     })
                     .catch((error) => {

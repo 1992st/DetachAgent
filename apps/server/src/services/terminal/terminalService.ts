@@ -141,6 +141,14 @@ class TerminalService {
     terminal.process.write(data);
   }
 
+  async runCommand(sessionKey: string, command: string): Promise<TerminalInfo> {
+    const cleaned = command.trimEnd();
+    if (!cleaned.trim()) throw new Error("Command is empty.");
+    const terminal = await this.ensure(sessionKey);
+    this.write(terminal, `${cleaned}\r`);
+    return this.info(terminal);
+  }
+
   resize(terminal: ManagedTerminal, cols: number, rows: number): void {
     const safeCols = Math.min(Math.max(Math.floor(cols), 40), 240);
     const safeRows = Math.min(Math.max(Math.floor(rows), 10), 80);

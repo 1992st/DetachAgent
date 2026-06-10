@@ -27,6 +27,12 @@ export interface ToolRequestCreateResponse {
 export interface ToolRequestDecisionResponse {
   request: ToolRequestRecord;
   command?: string;
+  execution?: {
+    target: ToolTarget;
+    terminalId?: string;
+    sessionKey?: string;
+    wroteToTerminal?: boolean;
+  };
   message?: string;
 }
 

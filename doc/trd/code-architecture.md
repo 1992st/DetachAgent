@@ -73,8 +73,8 @@ detaches_agent/
   - 从 assistant 文本中解析 fenced request，生成服务端 `ToolRequestRecord`。
   - 分配服务端 `requestId`。
   - 阻断不可用 target，禁止把 `remote-agent-host` / `gateway-managed` 退化成本机执行。
-  - 审批本机 terminal 请求时返回待写入 terminal 的 command。
-  - 审批文件传输请求时复用 `fileTransferService.prepareTransfer` 生成一次性 curl 命令。
+  - 审批本机 terminal 请求时直接调用 `terminalService.runCommand` 写入会话 terminal。
+  - 审批文件传输请求时复用 `fileTransferService.prepareTransfer` 生成一次性 curl 命令，并由 Broker 写入会话 terminal。
   - 写入 `storage/logs/tool-broker-audit.jsonl`。
 
 ### 文件
@@ -105,7 +105,7 @@ detaches_agent/
   - 渲染历史、用户消息、assistant 流式消息。
   - 合并流式响应，避免重复打印。
   - 把 assistant 文本交给 Tool Broker 解析，按返回的 `ToolRequestRecord` 渲染审批卡。
-  - 用户 Run/Transfer 后先调用 Tool Broker 审批；Broker 返回 command 后才调用 TerminalPanel 写入命令。
+  - 用户 Run/Transfer 后调用 Tool Broker 审批；Broker 在服务端写入 terminal，前端只展开 terminal 查看结果。
 
 ### Terminal
 
@@ -113,7 +113,7 @@ detaches_agent/
   - 建立 `/api/terminal/:sessionKey` WebSocket。
   - 默认折叠隐藏。
   - 可展开查看输出、输入命令、复制输出、清屏。
-  - 暴露 `runCommand` 给 ChatPanel 审批卡使用。
+  - 对审批卡只暴露 `reveal`，命令写入由服务端 Tool Broker 完成。
 
 ### Settings / Diagnostics
 
@@ -140,7 +140,7 @@ tool request
 
 路由层负责检查目标环境是否可用、生成审批卡、执行对应 adapter，并把结果回写给 agent。UI 审批卡必须展示 target，避免“归档到你的电脑”这类语义被误执行到本机 staging workspace。
 
-当前已加入服务端 Tool Broker 作为执行路由入口。UI 不再本地解析工具协议，只把 assistant 文本交给 `/api/tools/requests/extract`，由服务端解析 fenced request、登记请求、阻断 target 并写审计日志。后续应让 Gateway adapter 直接产生结构化 tool request，进一步减少文本协议依赖。
+当前已加入服务端 Tool Broker 作为执行路由入口。UI 不再本地解析工具协议，也不再把 approved command 直接写入 terminal；它只把 assistant 文本交给 `/api/tools/requests/extract`，由服务端解析 fenced request、登记请求、阻断 target、审批后写入会话 terminal 并写审计日志。后续应让 Gateway adapter 直接产生结构化 tool request，进一步减少文本协议依赖。
 
 当前后端暴露 `/api/gateway/capabilities`，从 Gateway hello/features 中提炼可用能力。已观察到的候选能力包括：
 

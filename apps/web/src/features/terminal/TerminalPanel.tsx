@@ -7,7 +7,6 @@ interface Props {
 }
 
 export interface TerminalPanelHandle {
-  runCommand: (command: string) => boolean;
   reveal: () => void;
 }
 
@@ -21,11 +20,6 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
   const outputRef = useRef<HTMLPreElement | null>(null);
 
   useImperativeHandle(ref, () => ({
-    runCommand(command: string) {
-      if (!command.trim() || socketRef.current?.readyState !== WebSocket.OPEN) return false;
-      socketRef.current.send(JSON.stringify({ type: "input", data: `${command.trimEnd()}\r` }));
-      return true;
-    },
     reveal() {
       setOpen(true);
     }

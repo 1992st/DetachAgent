@@ -383,6 +383,10 @@ async function main() {
     const approvedTerminalTool = await requestJson(`/api/tools/requests/${terminalTool.request.id}/approve`, { method: "POST" });
     assert.equal(approvedTerminalTool.request.status, "approved");
     assert.equal(approvedTerminalTool.command, "pwd");
+    assert.equal(approvedTerminalTool.execution.target, "local-user-machine");
+    assert.equal(approvedTerminalTool.execution.sessionKey, chatSessionKey);
+    assert.equal(approvedTerminalTool.execution.wroteToTerminal, true);
+    assert.match(approvedTerminalTool.execution.terminalId, /.+/);
 
     const blockedTerminalTool = await requestJson("/api/tools/requests", {
       method: "POST",
@@ -416,6 +420,8 @@ async function main() {
     assert.equal(approvedBrokerTransfer.request.status, "approved");
     assert.match(approvedBrokerTransfer.command, /curl -fL/);
     assert.match(approvedBrokerTransfer.command, /detaches-note-via-broker\.txt/);
+    assert.equal(approvedBrokerTransfer.execution.wroteToTerminal, true);
+    assert.equal(approvedBrokerTransfer.execution.sessionKey, chatSessionKey);
 
     const extractedTools = await requestJson("/api/tools/requests/extract", {
       method: "POST",
@@ -482,8 +488,8 @@ async function main() {
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "terminal" && event.request.target === "local-user-machine"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "terminal" && event.request.target === "remote-agent-host" && event.request.status === "blocked"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.payload?.command === "echo broker-parse"), true);
-    assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.command === "pwd"), true);
-    assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && /detaches-note-via-broker\.txt/.test(event.command || "")), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.command === "pwd" && typeof event.terminalId === "string"), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && /detaches-note-via-broker\.txt/.test(event.command || "") && typeof event.terminalId === "string"), true);
 
     chat.send(JSON.stringify({ type: "abort", runId: "run-smoke-1" }));
     while (!observed.abort) {
