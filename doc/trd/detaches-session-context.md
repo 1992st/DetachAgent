@@ -94,6 +94,11 @@ gateway-managed      预留，需 Gateway 原生文件/工具/artifact adapter
 
 - `storage/logs/tool-broker-audit.jsonl`
 
+状态文件：
+
+- `storage/cache/tool-broker-state.json`
+- 保存 broker request、terminal execution、tool result forward 状态。它是当前状态快照，不替代审计日志。
+
 ## 下一步目标
 
 ### 远端 agent-side skill

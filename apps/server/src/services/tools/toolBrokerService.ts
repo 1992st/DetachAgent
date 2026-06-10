@@ -37,11 +37,20 @@ interface ToolExecutionRecord {
   forwardedAt?: string;
 }
 
+interface ToolBrokerState {
+  version: 1;
+  requests: ToolRequestRecord[];
+  executions: ToolExecutionRecord[];
+}
+
 class ToolBrokerService {
   private requests = new Map<string, ToolRequestRecord>();
   private executions = new Map<string, ToolExecutionRecord>();
+  private loaded = false;
+  private saveChain: Promise<void> = Promise.resolve();
 
   async extractFromText(input: { text: string; sessionKey: string; agentId?: string }): Promise<ToolRequestExtractResponse> {
+    await this.load();
     const parsed = parseToolRequests(input.text);
     const requests = [];
     for (const item of parsed) {
@@ -58,6 +67,7 @@ class ToolBrokerService {
   }
 
   async create(input: ToolRequestCreateInput): Promise<ToolRequestRecord> {
+    await this.load();
     const now = new Date().toISOString();
     const record: ToolRequestRecord = {
       ...input,
@@ -68,11 +78,13 @@ class ToolBrokerService {
       error: this.targetSupported(input.kind, input.target) ? undefined : unsupportedTargetMessage(input.kind, input.target)
     };
     this.requests.set(record.id, record);
+    await this.save();
     await this.audit({ type: "tool.create", request: record });
     return record;
   }
 
   async approve(requestId: string): Promise<ToolRequestDecisionResponse> {
+    await this.load();
     const request = this.requireRequest(requestId);
     if (request.status === "blocked") {
       await this.audit({ type: "tool.approve", requestId, status: "blocked", error: request.error });
@@ -88,6 +100,7 @@ class ToolBrokerService {
       }
       const execution = await this.runInTerminal(request, command);
       const updated = this.update(request, "approved");
+      await this.save();
       await this.audit({ type: "tool.approve", requestId, status: updated.status, command, terminalId: execution.terminalId, executionId: execution.executionId });
       void this.forwardResultToAgent(updated.id);
       return {
@@ -119,6 +132,7 @@ class ToolBrokerService {
         });
         const execution = await this.runInTerminal(request, prepared.command);
         const updated = this.update(request, "approved");
+        await this.save();
         await this.audit({ type: "tool.approve", requestId, status: updated.status, command: prepared.command, terminalId: execution.terminalId, executionId: execution.executionId });
         void this.forwardResultToAgent(updated.id);
         return {
@@ -141,6 +155,7 @@ class ToolBrokerService {
   }
 
   async result(requestId: string): Promise<ToolExecutionResultResponse> {
+    await this.load();
     const request = this.requireRequest(requestId);
     const execution = [...this.executions.values()].find((item) => item.requestId === requestId);
     if (!execution) {
@@ -187,13 +202,16 @@ class ToolBrokerService {
   }
 
   async reject(requestId: string): Promise<ToolRequestRecord> {
+    await this.load();
     const request = this.requireRequest(requestId);
     const updated = this.update(request, "rejected");
+    await this.save();
     await this.audit({ type: "tool.reject", requestId, status: updated.status });
     return updated;
   }
 
   async retryForward(requestId: string): Promise<ToolExecutionResultResponse> {
+    await this.load();
     await this.forwardResultToAgent(requestId, { delayMs: 0, force: true });
     return this.result(requestId);
   }
@@ -216,11 +234,13 @@ class ToolBrokerService {
       updatedAt: new Date().toISOString()
     };
     this.requests.set(request.id, updated);
+    void this.save();
     return updated;
   }
 
   private async fail(request: ToolRequestRecord, error: string): Promise<ToolRequestDecisionResponse> {
     const updated = this.update(request, "failed", error);
+    await this.save();
     await this.audit({ type: "tool.approve", requestId: request.id, status: "failed", error });
     return { request: updated, message: error };
   }
@@ -242,10 +262,12 @@ class ToolBrokerService {
       forwardStatus: "not-started"
     };
     this.executions.set(execution.executionId, execution);
+    await this.save();
     return execution;
   }
 
   private async forwardResultToAgent(requestId: string, options?: { delayMs?: number; force?: boolean }): Promise<void> {
+    await this.load();
     const request = this.requireRequest(requestId);
     const execution = [...this.executions.values()].find((item) => item.requestId === requestId);
     if (!execution) return;
@@ -314,6 +336,50 @@ class ToolBrokerService {
     };
     if (status !== "failed") delete updated.forwardError;
     this.executions.set(execution.executionId, updated);
+    void this.save();
+  }
+
+  private async load(): Promise<void> {
+    if (this.loaded) return;
+    this.loaded = true;
+    try {
+      const raw = await fs.readFile(this.statePath(), "utf8");
+      const parsed = JSON.parse(raw) as Partial<ToolBrokerState>;
+      if (parsed.version !== 1 || !Array.isArray(parsed.requests) || !Array.isArray(parsed.executions)) return;
+      this.requests = new Map(parsed.requests.filter(isToolRequestRecord).map((request) => [request.id, request]));
+      this.executions = new Map(parsed.executions.filter(isToolExecutionRecord).map((execution) => [execution.executionId, execution]));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        await this.audit({
+          type: "tool.result.forward",
+          requestId: "state-load",
+          executionId: "state-load",
+          status: "failed",
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  }
+
+  private async save(): Promise<void> {
+    const state: ToolBrokerState = {
+      version: 1,
+      requests: [...this.requests.values()],
+      executions: [...this.executions.values()]
+    };
+    this.saveChain = this.saveChain.then(async () => {
+      const filePath = this.statePath();
+      const tempPath = `${filePath}.${process.pid}.tmp`;
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+      await fs.rename(tempPath, filePath);
+    });
+    return this.saveChain;
+  }
+
+  private statePath(): string {
+    return path.join(appConfig.storageDir, "cache", "tool-broker-state.json");
   }
 
   private async audit(event: AuditEvent): Promise<void> {
@@ -425,6 +491,31 @@ function unsupportedTargetMessage(kind: ToolRequestKind, target: ToolTarget): st
 
 function targetObject(value: unknown): value is { [key: string]: unknown } {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isToolRequestRecord(value: unknown): value is ToolRequestRecord {
+  if (!targetObject(value)) return false;
+  return typeof value.id === "string"
+    && (value.kind === "terminal" || value.kind === "file-transfer")
+    && typeof value.sessionKey === "string"
+    && typeof value.createdAt === "string"
+    && typeof value.updatedAt === "string"
+    && typeof value.payload === "object"
+    && value.payload !== null
+    && !Array.isArray(value.payload);
+}
+
+function isToolExecutionRecord(value: unknown): value is ToolExecutionRecord {
+  if (!targetObject(value)) return false;
+  return typeof value.executionId === "string"
+    && typeof value.requestId === "string"
+    && typeof value.sessionKey === "string"
+    && typeof value.terminalId === "string"
+    && typeof value.startOffset === "number"
+    && typeof value.command === "string"
+    && typeof value.wrappedCommand === "string"
+    && typeof value.createdAt === "string"
+    && (value.forwardStatus === "not-started" || value.forwardStatus === "pending" || value.forwardStatus === "sent" || value.forwardStatus === "failed");
 }
 
 function delay(ms: number): Promise<void> {

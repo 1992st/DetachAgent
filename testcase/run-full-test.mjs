@@ -147,6 +147,95 @@ async function terminalPersistenceTest() {
   }
 }
 
+async function toolBrokerPersistenceTest() {
+  const startedAt = Date.now();
+  const storageDir = "./storage-smoke-tool-broker";
+  await fs.rm(path.join(repoRoot, storageDir), { recursive: true, force: true });
+
+  function startServer() {
+    const server = spawn("node", ["apps/server/dist/index.js"], {
+      cwd: repoRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        DETACHES_SERVER_HOST: host,
+        DETACHES_SERVER_PORT: String(serverPort),
+        DETACHES_STORAGE_DIR: storageDir,
+        OPENCLAW_GATEWAY_TRANSPORT: "direct",
+        OPENCLAW_GATEWAY_DIRECT_HOST: "127.0.0.1",
+        OPENCLAW_GATEWAY_REMOTE_PORT: "9",
+        OPENCLAW_AUTH_MODE: "none"
+      }
+    });
+    let stdout = "";
+    let stderr = "";
+    server.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+    server.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+    return { server, output: () => ({ stdout, stderr }) };
+  }
+
+  async function stopServer(server) {
+    if (server.exitCode !== null) return;
+    server.kill("SIGTERM");
+    await wait(500);
+  }
+
+  let first = null;
+  let second = null;
+  try {
+    first = startServer();
+    await waitForHttp(`http://${host}:${serverPort}/`);
+    const created = await fetch(`http://${host}:${serverPort}/api/tools/requests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "terminal",
+        target: "local-user-machine",
+        sessionKey: "agent:testcase:detaches:broker-persist",
+        agentId: "agent-alpha",
+        reason: "persist broker request",
+        payload: { command: "echo broker-persist" }
+      })
+    });
+    if (!created.ok) throw new Error(`Create request failed: ${created.status} ${await created.text()}`);
+    const body = await created.json();
+    const requestId = body.request.id;
+    await stopServer(first.server);
+
+    second = startServer();
+    await waitForHttp(`http://${host}:${serverPort}/`);
+    const result = await fetch(`http://${host}:${serverPort}/api/tools/requests/${encodeURIComponent(requestId)}/result`);
+    if (!result.ok) throw new Error(`Result after restart failed: ${result.status} ${await result.text()}`);
+    const restored = await result.json();
+    const statePath = path.join(repoRoot, storageDir, "cache", "tool-broker-state.json");
+    const persisted = JSON.parse(await fs.readFile(statePath, "utf8"));
+    const passed = restored.request.id === requestId
+      && restored.request.status === "pending"
+      && restored.result.forwardStatus === "not-started"
+      && persisted.requests.some((request) => request.id === requestId);
+    return {
+      name: "tool-broker:persistence",
+      status: passed ? "passed" : "failed",
+      exitCode: passed ? 0 : 1,
+      durationMs: Date.now() - startedAt,
+      stdout: JSON.stringify({ restored, persistedRequestCount: persisted.requests.length }, null, 2).slice(0, 2000),
+      stderr: passed ? "" : "Broker request was not restored from persisted state."
+    };
+  } catch (error) {
+    return {
+      name: "tool-broker:persistence",
+      status: "failed",
+      exitCode: 1,
+      durationMs: Date.now() - startedAt,
+      stdout: JSON.stringify({ first: first?.output(), second: second?.output() }, null, 2),
+      stderr: error.stack ?? error.message
+    };
+  } finally {
+    if (first) await stopServer(first.server);
+    if (second) await stopServer(second.server);
+  }
+}
+
 function summarize(tests) {
   const passed = tests.filter((test) => test.status === "passed").length;
   const failed = tests.length - passed;
@@ -162,6 +251,7 @@ async function main() {
   tests.push(await runCommand("adapter:openclaw-detaches", "pnpm", ["--filter", "@detaches/openclaw-detaches-adapter", "test"]));
   tests.push(await runCommand("smoke:gateway", "pnpm", ["smoke"]));
   tests.push(await terminalPersistenceTest());
+  tests.push(await toolBrokerPersistenceTest());
 
   const result = {
     name: "detaches_agent full test",

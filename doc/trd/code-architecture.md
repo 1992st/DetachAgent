@@ -78,6 +78,7 @@ detaches_agent/
   - 写入命令时注入 start/end marker，记录 executionId、terminalId 和 terminal replay 起点；`/api/tools/requests/:requestId/result` 可查询输出快照、completed、exitCode 和工具结果回写状态。
   - 工具结果回写有 outbox 状态：`not-started` / `pending` / `sent` / `failed`。`POST /api/tools/requests/:requestId/forward` 可手动重试。
   - 当前仍通过 Gateway `chat.send` 把 `[detaches_agent 工具结果]` 快照回写到同一 session，让 agent 可继续推理；这是过渡层，最终应替换成 OpenClaw/Gateway 原生结构化 tool result。
+  - 当前 request/execution 状态持久化到 `storage/cache/tool-broker-state.json`，服务重启后仍可查询请求、执行记录和回写状态。
   - 写入 `storage/logs/tool-broker-audit.jsonl`。
 
 ### 文件
