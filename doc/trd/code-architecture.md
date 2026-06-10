@@ -144,6 +144,14 @@ adapter 选择优先级应从 capability summary 推导：
 - `remote-agent-host`：优先评估 `node.invoke` / `environments.*`。
 - `local-user-machine`：作为本机 fallback，但不能承接声明为远端的请求。
 
+2026-06-11 探测记录：
+
+- 真实 Gateway `tools.catalog` 暴露 `exec`、`read`、`write` 等工具，但 `tools.invoke` 的参数 schema 尚未从 Gateway 响应中确认；直接尝试 `name + command/input/params/path` 均被 schema 拒绝。
+- `environments.list` 返回 `gateway` 环境，capabilities 包含 `agent.run`、`sessions`、`tools`、`workspace`。
+- `agents.files.list` 可直接返回 agent 的真实 workspace，例如 `audio-process` 的 workspace 是 `/Volumes/zhangstExtern/openclaw/workspace/audio-process`。
+- 因此第一阶段 adapter 不应先盲写 `tools.invoke` 执行逻辑；应优先用 `agents.files.*` 做 agent workspace 发现与文件归档路径校验。
+- 执行类能力（如远端 shell）等确认 `tools.invoke` 或 `node.invoke` 参数协议后再接入。
+
 ### Agent 请求本机命令
 
 ````text
