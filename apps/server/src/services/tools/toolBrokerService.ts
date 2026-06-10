@@ -8,6 +8,7 @@ import type {
   ToolRequestKind,
   ToolRequestRecord,
   ToolRequestStatus,
+  ToolExecutionResultResponse,
   ToolTarget
 } from "@detaches/shared";
 import { appConfig } from "../../config/appConfig.js";
@@ -16,11 +17,22 @@ import { terminalService } from "../terminal/terminalService.js";
 
 type AuditEvent =
   | { type: "tool.create"; request: ToolRequestRecord }
-  | { type: "tool.approve"; requestId: string; status: ToolRequestStatus; command?: string; terminalId?: string; error?: string }
+  | { type: "tool.approve"; requestId: string; status: ToolRequestStatus; command?: string; terminalId?: string; executionId?: string; error?: string }
   | { type: "tool.reject"; requestId: string; status: ToolRequestStatus };
+
+interface ToolExecutionRecord {
+  executionId: string;
+  requestId: string;
+  sessionKey: string;
+  terminalId: string;
+  startOffset: number;
+  command: string;
+  createdAt: string;
+}
 
 class ToolBrokerService {
   private requests = new Map<string, ToolRequestRecord>();
+  private executions = new Map<string, ToolExecutionRecord>();
 
   async extractFromText(input: { text: string; sessionKey: string; agentId?: string }): Promise<ToolRequestExtractResponse> {
     const parsed = parseToolRequests(input.text);
@@ -67,16 +79,17 @@ class ToolBrokerService {
       if (!command) {
         return this.fail(request, "Terminal request payload.command is required.");
       }
-      const terminal = await terminalService.runCommand(request.sessionKey, command);
+      const execution = await this.runInTerminal(request, command);
       const updated = this.update(request, "approved");
-      await this.audit({ type: "tool.approve", requestId, status: updated.status, command, terminalId: terminal.terminalId });
+      await this.audit({ type: "tool.approve", requestId, status: updated.status, command, terminalId: execution.terminalId, executionId: execution.executionId });
       return {
         request: updated,
         command,
         execution: {
+          executionId: execution.executionId,
           target: request.target,
-          terminalId: terminal.terminalId,
-          sessionKey: terminal.sessionKey,
+          terminalId: execution.terminalId,
+          sessionKey: execution.sessionKey,
           wroteToTerminal: true
         },
         message: "Command was written to the session terminal by the server broker."
@@ -96,16 +109,17 @@ class ToolBrokerService {
           agentId: request.agentId,
           sessionKey: request.sessionKey
         });
-        const terminal = await terminalService.runCommand(request.sessionKey, prepared.command);
+        const execution = await this.runInTerminal(request, prepared.command);
         const updated = this.update(request, "approved");
-        await this.audit({ type: "tool.approve", requestId, status: updated.status, command: prepared.command, terminalId: terminal.terminalId });
+        await this.audit({ type: "tool.approve", requestId, status: updated.status, command: prepared.command, terminalId: execution.terminalId, executionId: execution.executionId });
         return {
           request: updated,
           command: prepared.command,
           execution: {
+            executionId: execution.executionId,
             target: request.target,
-            terminalId: terminal.terminalId,
-            sessionKey: terminal.sessionKey,
+            terminalId: execution.terminalId,
+            sessionKey: execution.sessionKey,
             wroteToTerminal: true
           },
           message: "File transfer command was written to the session terminal by the server broker."
@@ -115,6 +129,42 @@ class ToolBrokerService {
       }
     }
     return this.fail(request, `Unsupported tool request kind: ${request.kind}`);
+  }
+
+  async result(requestId: string): Promise<ToolExecutionResultResponse> {
+    const request = this.requireRequest(requestId);
+    const execution = [...this.executions.values()].find((item) => item.requestId === requestId);
+    if (!execution) {
+      return {
+        request,
+        result: {
+          executionId: "",
+          requestId,
+          status: request.status,
+          sessionKey: request.sessionKey,
+          output: "",
+          outputBytes: 0,
+          capturedAt: new Date().toISOString(),
+          message: "No terminal execution has been recorded for this request."
+        }
+      };
+    }
+    const snapshot = await terminalService.snapshot(execution.sessionKey);
+    const output = snapshot.replay.slice(execution.startOffset).slice(-20_000);
+    return {
+      request,
+      result: {
+        executionId: execution.executionId,
+        requestId,
+        status: request.status,
+        terminalId: execution.terminalId,
+        sessionKey: execution.sessionKey,
+        output,
+        outputBytes: Buffer.byteLength(output, "utf8"),
+        capturedAt: new Date().toISOString(),
+        message: "Output is a terminal replay snapshot captured after the broker wrote the command."
+      }
+    };
   }
 
   async reject(requestId: string): Promise<ToolRequestRecord> {
@@ -149,6 +199,22 @@ class ToolBrokerService {
     const updated = this.update(request, "failed", error);
     await this.audit({ type: "tool.approve", requestId: request.id, status: "failed", error });
     return { request: updated, message: error };
+  }
+
+  private async runInTerminal(request: ToolRequestRecord, command: string): Promise<ToolExecutionRecord> {
+    const before = await terminalService.snapshot(request.sessionKey);
+    const terminal = await terminalService.runCommand(request.sessionKey, command);
+    const execution: ToolExecutionRecord = {
+      executionId: nanoid(),
+      requestId: request.id,
+      sessionKey: request.sessionKey,
+      terminalId: terminal.terminalId,
+      startOffset: before.replay.length,
+      command,
+      createdAt: new Date().toISOString()
+    };
+    this.executions.set(execution.executionId, execution);
+    return execution;
   }
 
   private async audit(event: AuditEvent): Promise<void> {

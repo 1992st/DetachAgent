@@ -77,6 +77,12 @@ gateway-managed      预留，需 Gateway 原生文件/工具/artifact adapter
 
 审批后由 Tool Broker 在服务端调用会话 terminal 写入命令；前端不再直接把 approved command 写入 terminal，只负责展示 terminal 输出。
 
+执行结果查询：
+
+- `GET /api/tools/requests/:requestId/result`
+- 返回 `executionId`、`terminalId`、`sessionKey`、terminal replay 输出切片、`capturedAt`。
+- 当前结果是输出快照，不代表命令已经自然结束；后续需要补完成检测和输出摘要回写 agent。
+
 审批入口：
 
 - `POST /api/tools/requests/:requestId/approve`

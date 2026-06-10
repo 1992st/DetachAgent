@@ -438,6 +438,14 @@ apiRoutes.post("/tools/requests/:requestId/approve", async (req, res) => {
   }
 });
 
+apiRoutes.get("/tools/requests/:requestId/result", async (req, res) => {
+  try {
+    res.json(await toolBrokerService.result(req.params.requestId));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 apiRoutes.post("/tools/requests/:requestId/reject", async (req, res) => {
   try {
     res.json({ request: await toolBrokerService.reject(req.params.requestId) });

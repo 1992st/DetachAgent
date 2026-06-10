@@ -49,7 +49,7 @@
   - 保存路径：`storage/logs/tool-broker-audit.jsonl`。
 - 后续还需要补齐：
   - 命令真正写入 terminal 的时间已可通过 `tool.approve` 与 `terminalId` 追踪，后续需要 UI 展示。
-  - terminal 输出摘要。
+  - terminal 输出快照已可通过 `/api/tools/requests/:requestId/result` 查询，后续需要完成检测和摘要回写 agent。
   - 用户审批 UI 的操作者身份。
   - 与聊天消息 id / runId 的关联。
 

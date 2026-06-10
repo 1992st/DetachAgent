@@ -387,6 +387,14 @@ async function main() {
     assert.equal(approvedTerminalTool.execution.sessionKey, chatSessionKey);
     assert.equal(approvedTerminalTool.execution.wroteToTerminal, true);
     assert.match(approvedTerminalTool.execution.terminalId, /.+/);
+    await wait(200);
+    const terminalToolResult = await requestJson(`/api/tools/requests/${terminalTool.request.id}/result`);
+    assert.equal(terminalToolResult.result.requestId, terminalTool.request.id);
+    assert.equal(terminalToolResult.result.executionId, approvedTerminalTool.execution.executionId);
+    assert.equal(terminalToolResult.result.terminalId, approvedTerminalTool.execution.terminalId);
+    assert.equal(terminalToolResult.result.sessionKey, chatSessionKey);
+    assert.equal(typeof terminalToolResult.result.output, "string");
+    assert.equal(terminalToolResult.result.outputBytes >= 0, true);
 
     const blockedTerminalTool = await requestJson("/api/tools/requests", {
       method: "POST",
@@ -422,6 +430,9 @@ async function main() {
     assert.match(approvedBrokerTransfer.command, /detaches-note-via-broker\.txt/);
     assert.equal(approvedBrokerTransfer.execution.wroteToTerminal, true);
     assert.equal(approvedBrokerTransfer.execution.sessionKey, chatSessionKey);
+    const brokerTransferResult = await requestJson(`/api/tools/requests/${brokerTransfer.request.id}/result`);
+    assert.equal(brokerTransferResult.result.executionId, approvedBrokerTransfer.execution.executionId);
+    assert.equal(brokerTransferResult.result.terminalId, approvedBrokerTransfer.execution.terminalId);
 
     const extractedTools = await requestJson("/api/tools/requests/extract", {
       method: "POST",

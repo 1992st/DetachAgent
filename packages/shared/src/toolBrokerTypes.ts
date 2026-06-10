@@ -28,6 +28,7 @@ export interface ToolRequestDecisionResponse {
   request: ToolRequestRecord;
   command?: string;
   execution?: {
+    executionId?: string;
     target: ToolTarget;
     terminalId?: string;
     sessionKey?: string;
@@ -44,4 +45,21 @@ export interface ToolRequestExtractInput {
 
 export interface ToolRequestExtractResponse {
   requests: ToolRequestRecord[];
+}
+
+export interface ToolExecutionResult {
+  executionId: string;
+  requestId: string;
+  status: ToolRequestStatus;
+  terminalId?: string;
+  sessionKey: string;
+  output: string;
+  outputBytes: number;
+  capturedAt: string;
+  message?: string;
+}
+
+export interface ToolExecutionResultResponse {
+  request: ToolRequestRecord;
+  result: ToolExecutionResult;
 }

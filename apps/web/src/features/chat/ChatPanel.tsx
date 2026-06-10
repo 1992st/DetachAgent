@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, FileText, Paperclip, Send, Square, X } from "lucide-react";
 import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
-import { approveToolRequest, extractToolRequests, rejectToolRequest } from "../../lib/api.js";
+import { approveToolRequest, extractToolRequests, fetchToolRequestResult, rejectToolRequest } from "../../lib/api.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
 
 interface Props {
@@ -260,6 +260,7 @@ function ToolRequests({
   const [requests, setRequests] = useState<ToolRequestRecord[]>([]);
   const [handled, setHandled] = useState<Record<number, "approved" | "rejected" | "running" | "error" | "blocked">>({});
   const [errors, setErrors] = useState<Record<number, string>>({});
+  const [resultSummaries, setResultSummaries] = useState<Record<number, string>>({});
   useEffect(() => {
     if (!sessionKey || !text) {
       setRequests([]);
@@ -267,6 +268,7 @@ function ToolRequests({
     }
     setHandled({});
     setErrors({});
+    setResultSummaries({});
     setRequests([]);
     void extractToolRequests({ text, sessionKey, agentId })
       .then((response) => {
@@ -303,6 +305,7 @@ function ToolRequests({
               <small>requestId: {request.id}</small>
               {unsupported ? <p className="request-error">{unsupportedTargetMessage(request.target)}</p> : null}
               {errors[index] ? <p className="request-error">{errors[index]}</p> : null}
+              {resultSummaries[index] ? <small>{resultSummaries[index]}</small> : null}
             </div>
             <div className="terminal-request-actions">
               <button
@@ -316,6 +319,14 @@ function ToolRequests({
                       if (!response.execution?.wroteToTerminal) throw new Error(response.message || "Broker did not execute the request.");
                       onReveal();
                       setHandled((current) => ({ ...current, [index]: "approved" }));
+                      return fetchToolRequestResult(request.id);
+                    })
+                    .then((response) => {
+                      if (!response) return;
+                      setResultSummaries((current) => ({
+                        ...current,
+                        [index]: `captured ${response.result.outputBytes} bytes from terminal ${response.result.terminalId || ""}`.trim()
+                      }));
                     })
                     .catch((error) => {
                       setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));

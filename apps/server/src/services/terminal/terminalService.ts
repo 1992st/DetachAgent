@@ -136,6 +136,11 @@ class TerminalService {
     return terminal.buffer;
   }
 
+  async snapshot(sessionKey: string): Promise<{ terminal: TerminalInfo; replay: string }> {
+    const terminal = await this.ensure(sessionKey);
+    return { terminal: this.info(terminal), replay: this.replay(terminal) };
+  }
+
   write(terminal: ManagedTerminal, data: string): void {
     terminal.lastActiveAt = new Date().toISOString();
     terminal.process.write(data);

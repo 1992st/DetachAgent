@@ -11,6 +11,7 @@ import type {
   ToolRequestCreateInput,
   ToolRequestCreateResponse,
   ToolRequestDecisionResponse,
+  ToolExecutionResultResponse,
   ToolRequestExtractResponse,
   ToolRequestRecord,
   ToolTarget
@@ -96,6 +97,12 @@ export async function extractToolRequests(input: { text: string; sessionKey: str
 
 export async function approveToolRequest(requestId: string): Promise<ToolRequestDecisionResponse> {
   const res = await fetch(`/api/tools/requests/${encodeURIComponent(requestId)}/approve`, { method: "POST" });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function fetchToolRequestResult(requestId: string): Promise<ToolExecutionResultResponse> {
+  const res = await fetch(`/api/tools/requests/${encodeURIComponent(requestId)}/result`);
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }
