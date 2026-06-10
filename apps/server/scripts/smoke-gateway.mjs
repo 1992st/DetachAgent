@@ -383,6 +383,8 @@ async function main() {
       })
     });
     assert.equal(terminalTool.request.status, "pending");
+    const pendingToolList = await requestJson(`/api/tools/requests?sessionKey=${encodeURIComponent(chatSessionKey)}&agentId=agent-alpha&status=pending&limit=10`);
+    assert.equal(pendingToolList.requests.some((request) => request.id === terminalTool.request.id), true);
     const approvedTerminalTool = await requestJson(`/api/tools/requests/${terminalTool.request.id}/approve`, { method: "POST" });
     assert.equal(approvedTerminalTool.request.status, "approved");
     assert.equal(approvedTerminalTool.command, "printf 'smoke-complete\\n'");
@@ -420,6 +422,8 @@ async function main() {
     assert.equal(typeof forwardedTerminalToolResult.result.forwardedAt, "string");
     const retriedTerminalToolForward = await requestJson(`/api/tools/requests/${terminalTool.request.id}/forward`, { method: "POST" });
     assert.equal(retriedTerminalToolForward.result.forwardStatus, "sent");
+    const approvedToolList = await requestJson(`/api/tools/requests?sessionKey=${encodeURIComponent(chatSessionKey)}&agentId=agent-alpha&status=approved&limit=10`);
+    assert.equal(approvedToolList.requests.some((request) => request.id === terminalTool.request.id), true);
 
     const blockedTerminalTool = await requestJson("/api/tools/requests", {
       method: "POST",

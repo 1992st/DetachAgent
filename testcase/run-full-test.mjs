@@ -207,18 +207,22 @@ async function toolBrokerPersistenceTest() {
     const result = await fetch(`http://${host}:${serverPort}/api/tools/requests/${encodeURIComponent(requestId)}/result`);
     if (!result.ok) throw new Error(`Result after restart failed: ${result.status} ${await result.text()}`);
     const restored = await result.json();
+    const listed = await fetch(`http://${host}:${serverPort}/api/tools/requests?sessionKey=${encodeURIComponent("agent:testcase:detaches:broker-persist")}&status=pending`);
+    if (!listed.ok) throw new Error(`List after restart failed: ${listed.status} ${await listed.text()}`);
+    const restoredList = await listed.json();
     const statePath = path.join(repoRoot, storageDir, "cache", "tool-broker-state.json");
     const persisted = JSON.parse(await fs.readFile(statePath, "utf8"));
     const passed = restored.request.id === requestId
       && restored.request.status === "pending"
       && restored.result.forwardStatus === "not-started"
+      && restoredList.requests.some((request) => request.id === requestId)
       && persisted.requests.some((request) => request.id === requestId);
     return {
       name: "tool-broker:persistence",
       status: passed ? "passed" : "failed",
       exitCode: passed ? 0 : 1,
       durationMs: Date.now() - startedAt,
-      stdout: JSON.stringify({ restored, persistedRequestCount: persisted.requests.length }, null, 2).slice(0, 2000),
+      stdout: JSON.stringify({ restored, restoredList, persistedRequestCount: persisted.requests.length }, null, 2).slice(0, 2000),
       stderr: passed ? "" : "Broker request was not restored from persisted state."
     };
   } catch (error) {

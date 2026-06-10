@@ -79,6 +79,7 @@ detaches_agent/
   - 工具结果回写有 outbox 状态：`not-started` / `pending` / `sent` / `failed`。`POST /api/tools/requests/:requestId/forward` 可手动重试。
   - 当前仍通过 Gateway `chat.send` 把 `[detaches_agent 工具结果]` 快照回写到同一 session，让 agent 可继续推理；这是过渡层，最终应替换成 OpenClaw/Gateway 原生结构化 tool result。
   - 当前 request/execution 状态持久化到 `storage/cache/tool-broker-state.json`，服务重启后仍可查询请求、执行记录和回写状态。
+  - `GET /api/tools/requests` 提供 broker 队列查询，支持 sessionKey、agentId、status、limit 过滤。
   - 写入 `storage/logs/tool-broker-audit.jsonl`。
 
 ### 文件
@@ -109,6 +110,7 @@ detaches_agent/
   - 渲染历史、用户消息、assistant 流式消息。
   - 合并流式响应，避免重复打印。
   - 把 assistant 文本交给 Tool Broker 解析，按返回的 `ToolRequestRecord` 渲染审批卡。
+  - 通过 broker 队列查询刷新请求状态，避免审批卡只依赖单条聊天消息的临时解析结果。
   - 用户 Run/Transfer 后调用 Tool Broker 审批；Broker 在服务端写入 terminal，前端只展开 terminal 查看结果。
 
 ### Terminal

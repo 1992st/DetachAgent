@@ -25,6 +25,17 @@ export interface ToolRequestCreateResponse {
   request: ToolRequestRecord;
 }
 
+export interface ToolRequestListInput {
+  sessionKey?: string;
+  agentId?: string;
+  status?: ToolRequestStatus;
+  limit?: number;
+}
+
+export interface ToolRequestListResponse {
+  requests: ToolRequestRecord[];
+}
+
 export interface ToolRequestDecisionResponse {
   request: ToolRequestRecord;
   command?: string;

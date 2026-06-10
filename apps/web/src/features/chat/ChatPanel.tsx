@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, FileText, Paperclip, Send, Square, X } from "lucide-react";
 import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
-import { approveToolRequest, extractToolRequests, fetchToolRequestResult, rejectToolRequest, retryToolResultForward } from "../../lib/api.js";
+import { approveToolRequest, extractToolRequests, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward } from "../../lib/api.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
 
 interface Props {
@@ -272,10 +272,18 @@ function ToolRequests({
     setRequests([]);
     void extractToolRequests({ text, sessionKey, agentId })
       .then((response) => {
-        setRequests(response.requests);
+        const extractedIds = new Set(response.requests.map((request) => request.id));
+        return fetchToolRequests({ sessionKey, agentId, limit: 100 })
+          .then((listed) => response.requests.length
+            ? mergeToolRequests(response.requests, listed.requests.filter((request) => extractedIds.has(request.id)))
+            : listed.requests.slice(0, 10))
+          .catch(() => response.requests);
+      })
+      .then((mergedRequests) => {
+        setRequests(mergedRequests);
         const nextHandled: Record<number, "blocked"> = {};
         const nextErrors: Record<number, string> = {};
-        response.requests.forEach((request, index) => {
+        mergedRequests.forEach((request, index) => {
           if (request.status === "blocked") {
             nextHandled[index] = "blocked";
             nextErrors[index] = request.error || "Tool request is blocked.";
@@ -369,6 +377,11 @@ function ToolRequests({
       })}
     </div>
   );
+}
+
+function mergeToolRequests(primary: ToolRequestRecord[], updates: ToolRequestRecord[]): ToolRequestRecord[] {
+  const byId = new Map(updates.map((request) => [request.id, request]));
+  return primary.map((request) => byId.get(request.id) ?? request);
 }
 
 function toolResultSummary(response: ToolExecutionResultResponse): string {

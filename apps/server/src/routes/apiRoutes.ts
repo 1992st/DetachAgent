@@ -378,6 +378,15 @@ function parseToolTarget(value: unknown): ToolTarget {
   return "local-user-machine";
 }
 
+function isToolRequestStatus(value: string): value is "pending" | "approved" | "rejected" | "blocked" | "started" | "failed" {
+  return value === "pending"
+    || value === "approved"
+    || value === "rejected"
+    || value === "blocked"
+    || value === "started"
+    || value === "failed";
+}
+
 apiRoutes.post("/files/transfer/prepare", async (req, res) => {
   try {
     const fileId = String(req.body.fileId || "");
@@ -410,6 +419,18 @@ apiRoutes.post("/tools/requests", async (req, res) => {
       return;
     }
     res.json({ request: await toolBrokerService.create({ kind, target, sessionKey, agentId, reason, payload }) });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.get("/tools/requests", async (req, res) => {
+  try {
+    const sessionKey = typeof req.query.sessionKey === "string" ? req.query.sessionKey.trim() : undefined;
+    const agentId = typeof req.query.agentId === "string" ? req.query.agentId.trim() : undefined;
+    const status = typeof req.query.status === "string" && isToolRequestStatus(req.query.status) ? req.query.status : undefined;
+    const limit = typeof req.query.limit === "string" ? Number(req.query.limit) : undefined;
+    res.json(await toolBrokerService.list({ sessionKey, agentId, status, limit }));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }

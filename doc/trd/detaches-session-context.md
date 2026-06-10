@@ -75,6 +75,12 @@ gateway-managed      预留，需 Gateway 原生文件/工具/artifact adapter
 
 服务端 `/api/tools/requests/extract` 负责解析 assistant 文本中的 `detaches-terminal` / `detaches-file-transfer` fenced block，并生成 `ToolRequestRecord`。前端只渲染 broker 返回的请求状态，不再维护自己的协议解析器。
 
+Broker 队列查询：
+
+- `GET /api/tools/requests`
+- 支持 `sessionKey`、`agentId`、`status`、`limit` 过滤。
+- UI 可从 broker 队列恢复请求状态；后续 Gateway/OpenClaw 原生 tool event 也应写入同一个队列，而不是继续依赖 assistant 文本解析。
+
 审批后由 Tool Broker 在服务端调用会话 terminal 写入命令；前端不再直接把 approved command 写入 terminal，只负责展示 terminal 输出。
 
 执行结果查询：

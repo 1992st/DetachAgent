@@ -13,6 +13,7 @@ import type {
   ToolRequestDecisionResponse,
   ToolExecutionResultResponse,
   ToolRequestExtractResponse,
+  ToolRequestListResponse,
   ToolRequestRecord,
   ToolTarget
 } from "@detaches/shared";
@@ -81,6 +82,18 @@ export async function createToolRequest(input: ToolRequestCreateInput): Promise<
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input)
   });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function fetchToolRequests(input: { sessionKey?: string | null; agentId?: string | null; status?: string; limit?: number } = {}): Promise<ToolRequestListResponse> {
+  const params = new URLSearchParams();
+  if (input.sessionKey) params.set("sessionKey", input.sessionKey);
+  if (input.agentId) params.set("agentId", input.agentId);
+  if (input.status) params.set("status", input.status);
+  if (input.limit) params.set("limit", String(input.limit));
+  const query = params.toString();
+  const res = await fetch(`/api/tools/requests${query ? `?${query}` : ""}`);
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }

@@ -7,6 +7,8 @@ import type {
   ToolResultForwardStatus,
   ToolRequestExtractResponse,
   ToolRequestKind,
+  ToolRequestListInput,
+  ToolRequestListResponse,
   ToolRequestRecord,
   ToolRequestStatus,
   ToolExecutionResultResponse,
@@ -81,6 +83,18 @@ class ToolBrokerService {
     await this.save();
     await this.audit({ type: "tool.create", request: record });
     return record;
+  }
+
+  async list(input: ToolRequestListInput = {}): Promise<ToolRequestListResponse> {
+    await this.load();
+    const limit = Number.isFinite(input.limit) && input.limit ? Math.min(Math.max(Math.floor(input.limit), 1), 200) : 50;
+    const requests = [...this.requests.values()]
+      .filter((request) => !input.sessionKey || request.sessionKey === input.sessionKey)
+      .filter((request) => !input.agentId || request.agentId === input.agentId)
+      .filter((request) => !input.status || request.status === input.status)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit);
+    return { requests };
   }
 
   async approve(requestId: string): Promise<ToolRequestDecisionResponse> {
