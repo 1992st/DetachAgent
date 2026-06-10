@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import zlib from "node:zlib";
 import { promisify } from "node:util";
+import type { OpenClawAdapterInstallPlan, OpenClawAdapterReadiness, OpenClawAdapterReadinessCheck, OpenClawAdapterReadinessState } from "@detaches/shared";
 import { repoRoot } from "../../config/appConfig.js";
 
 const gzip = promisify(zlib.gzip);
@@ -41,38 +42,6 @@ export interface OpenClawAdapterInfo {
     shell: string;
     notes: string[];
   };
-}
-
-export interface OpenClawAdapterInstallPlan {
-  target: "remote-agent-host";
-  adapterId: string;
-  version: string;
-  baseUrl: string;
-  installDir: string;
-  bundleUrl: string;
-  bundleSha256: string;
-  commands: string[];
-  verifyCommands: string[];
-  notes: string[];
-}
-
-export type OpenClawAdapterReadinessState = "ready" | "missing" | "invalid" | "error";
-
-export interface OpenClawAdapterReadinessCheck {
-  id: string;
-  state: OpenClawAdapterReadinessState;
-  message: string;
-  details?: unknown;
-}
-
-export interface OpenClawAdapterReadiness {
-  target: "local-distribution" | "remote-agent-host";
-  installDir: string;
-  expectedAdapterId: string;
-  expectedVersion: string;
-  state: OpenClawAdapterReadinessState;
-  checks: OpenClawAdapterReadinessCheck[];
-  verifyCommands: string[];
 }
 
 function sha256(buffer: Buffer): string {

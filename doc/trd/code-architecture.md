@@ -154,6 +154,15 @@ detaches_agent/
   - 订阅 `/api/tools/stream`，收到 broker request 事件后刷新队列。
   - 承担主要审批、拒绝、结果回写重试和打开 terminal 操作，不依赖某条聊天消息存在。
 
+### Adapter Status
+
+- `apps/web/src/features/adapters/AdapterStatusPanel.tsx`
+  - 右侧栏展示 OpenClaw detaches adapter readiness。
+  - 调用 `/api/adapters/openclaw-detaches/readiness` 和 `/api/adapters/openclaw-detaches/install-plan`。
+  - 展示本地 adapter distribution 的 ready/missing/invalid/error 状态，避免把本地文件系统检查误报成远端已安装状态。
+  - 展示远端安装目录、安装命令和远端验证命令。
+  - 当前只展示和复制命令，不自动执行远端安装。
+
 ### Terminal
 
 - `apps/web/src/features/terminal/TerminalPanel.tsx`

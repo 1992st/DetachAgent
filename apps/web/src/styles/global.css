@@ -1070,3 +1070,136 @@ h3 { font-size: 14px; }
     justify-content: space-between;
   }
 }
+
+.panel-error.tight {
+  margin: 8px 0;
+}
+
+.adapter-status-panel {
+  margin: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.adapter-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.adapter-field span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.adapter-field input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 9px;
+}
+
+.adapter-state-card {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.adapter-state-card.ready {
+  border-color: #99f6e4;
+  background: #f0fdfa;
+}
+
+.adapter-state-card.missing,
+.adapter-state-card.invalid {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.adapter-state-card.error {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.adapter-state-card > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.adapter-state-card small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.adapter-state-card ul {
+  display: grid;
+  gap: 5px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adapter-state-card li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.adapter-state-card li.ready {
+  color: #0f766e;
+}
+
+.adapter-state-card li.missing,
+.adapter-state-card li.invalid {
+  color: #92400e;
+}
+
+.adapter-state-card li.error {
+  color: var(--danger);
+}
+
+.adapter-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.adapter-command-box {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.adapter-command-box > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.adapter-command-box pre {
+  max-height: 180px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #d1fae5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

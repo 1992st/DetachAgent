@@ -1,6 +1,7 @@
 export * from "./connectionTypes.js";
 export * from "./gatewayTypes.js";
 export * from "./agentTypes.js";
+export * from "./adapterTypes.js";
 export * from "./chatTypes.js";
 export * from "./clientTypes.js";
 export * from "./detachesContextTypes.js";

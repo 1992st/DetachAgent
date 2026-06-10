@@ -6,6 +6,8 @@ import type {
   FileTransferPrepareResponse,
   FileUploadResponse,
   NetworkTestResponse,
+  OpenClawAdapterInstallPlan,
+  OpenClawAdapterReadiness,
   PublicSettings,
   SettingsUpdate,
   ToolGatewayEventInput,
@@ -171,6 +173,26 @@ export async function saveSettings(settings: SettingsUpdate): Promise<PublicSett
 
 export async function testNetwork(): Promise<NetworkTestResponse> {
   const res = await fetch("/api/network/test", { method: "POST" });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function fetchOpenClawAdapterReadiness(input: { target?: "local-distribution" | "remote-agent-host"; installDir?: string } = {}): Promise<OpenClawAdapterReadiness> {
+  const params = new URLSearchParams();
+  if (input.target) params.set("target", input.target);
+  if (input.installDir) params.set("installDir", input.installDir);
+  const query = params.toString();
+  const res = await fetch(`/api/adapters/openclaw-detaches/readiness${query ? `?${query}` : ""}`);
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function fetchOpenClawAdapterInstallPlan(input: { baseUrl?: string; installDir?: string } = {}): Promise<OpenClawAdapterInstallPlan> {
+  const params = new URLSearchParams();
+  if (input.baseUrl) params.set("baseUrl", input.baseUrl);
+  if (input.installDir) params.set("installDir", input.installDir);
+  const query = params.toString();
+  const res = await fetch(`/api/adapters/openclaw-detaches/install-plan${query ? `?${query}` : ""}`);
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }
