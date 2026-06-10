@@ -1,5 +1,5 @@
 import os from "node:os";
-import type { ChatSessionMode, ClientIdentity, DetachesSessionContext } from "@detaches/shared";
+import type { ChatSessionMode, ClientIdentity, DetachesSessionContext, DetachesStagedFileContext, UploadedFileRef } from "@detaches/shared";
 import { loadOrCreateDeviceIdentity } from "./gateway/deviceIdentityService.js";
 import { openclawDetachesAdapterService } from "./adapters/openclawDetachesAdapterService.js";
 
@@ -18,10 +18,26 @@ export function publicClientIdentity(): ClientIdentity {
   };
 }
 
-export function buildDetachesSessionContext(sessionMode: ChatSessionMode, sessionKey: string): DetachesSessionContext {
+export function buildDetachesSessionContext(sessionMode: ChatSessionMode, sessionKey: string, attachments: UploadedFileRef[] = []): DetachesSessionContext {
   const identity = publicClientIdentity();
   const agentId = agentIdFromSessionKey(sessionKey);
   const remoteAdapter = openclawDetachesAdapterService.lastRemoteReadiness();
+  const stagedFiles: DetachesStagedFileContext[] = attachments.map((file) => ({
+    fileId: file.id,
+    name: file.name,
+    displayName: file.displayName || file.name,
+    mimeType: file.mimeType || "application/octet-stream",
+    size: file.size,
+    localPath: file.localPath,
+    currentLocation: "user-local-staging" as const,
+    remotePath: file.remotePath,
+    transfer: {
+      requestFence: "detaches-file-transfer" as const,
+      supportedTargets: ["local-user-machine"],
+      defaultTarget: "local-user-machine" as const,
+      requiresApproval: true
+    }
+  }));
   return {
     app: "detaches_agent",
     version: 1,
@@ -40,6 +56,9 @@ export function buildDetachesSessionContext(sessionMode: ChatSessionMode, sessio
           ? remoteAdapter.checks.map((check) => `${check.id}:${check.state}`).join(", ")
           : "Remote adapter readiness has not been probed in this server session."
       }
+    },
+    files: {
+      staged: stagedFiles
     },
     capabilities: [
       {
@@ -71,8 +90,8 @@ export function buildDetachesSessionContext(sessionMode: ChatSessionMode, sessio
   };
 }
 
-export function buildChatClientContext(sessionMode: ChatSessionMode, sessionKey: string): Record<string, unknown> {
-  const detaches = buildDetachesSessionContext(sessionMode, sessionKey);
+export function buildChatClientContext(sessionMode: ChatSessionMode, sessionKey: string, attachments: UploadedFileRef[] = []): Record<string, unknown> {
+  const detaches = buildDetachesSessionContext(sessionMode, sessionKey, attachments);
   const identity = detaches.userDevice;
   return {
     app: "detaches_agent",

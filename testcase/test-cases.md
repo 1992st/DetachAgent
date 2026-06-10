@@ -32,7 +32,7 @@
 - Gateway connect challenge 被正确响应。
 - agent/session 列表正确返回。
 - 文件上传返回 base64 attachment。
-- `chat.send` 包含原始用户消息和 detaches_agent 接入上下文。
+- `chat.send` 包含原始用户消息、detaches_agent 接入上下文和 `clientContext.detaches.files.staged`。
 - abort 请求被转发。
 
 ## TC-002A OpenClaw detaches adapter

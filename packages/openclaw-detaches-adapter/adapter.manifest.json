@@ -41,6 +41,10 @@
     "capabilities",
     "invariants"
   ],
+  "optionalContextFields": [
+    "adapterStatus",
+    "files.staged"
+  ],
   "hardRules": [
     "Never claim a command, file read, file transfer, download, archive, or modification has happened until approved tool output proves it.",
     "Never change a target from remote-agent-host or gateway-managed to local-user-machine as a fallback.",

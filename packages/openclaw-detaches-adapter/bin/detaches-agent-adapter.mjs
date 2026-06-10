@@ -95,6 +95,16 @@ function inspectContext(context) {
     }];
   }));
   const adapterStatus = context?.adapterStatus?.remoteAgentHost;
+  const stagedFiles = Array.isArray(context?.files?.staged) ? context.files.staged.map((file) => ({
+    fileId: file?.fileId,
+    name: file?.name,
+    displayName: file?.displayName,
+    mimeType: file?.mimeType,
+    size: file?.size,
+    currentLocation: file?.currentLocation,
+    remotePath: file?.remotePath ?? null,
+    transfer: file?.transfer ?? null
+  })) : [];
   const warnings = [];
   for (const [target, status] of Object.entries(targetSupport)) {
     if (status.unavailableBy.length > 0) {
@@ -113,6 +123,9 @@ function inspectContext(context) {
     agentId: context?.agentId ?? null,
     userDevice: context?.userDevice ?? null,
     adapterStatus: adapterStatus ?? null,
+    files: {
+      staged: stagedFiles
+    },
     capabilities,
     targetSupport,
     warnings,

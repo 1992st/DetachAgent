@@ -11,6 +11,23 @@ export interface DetachesToolCapability {
   executionHost: "user-local-machine" | "remote-agent-host" | "gateway";
 }
 
+export interface DetachesStagedFileContext {
+  fileId: string;
+  name: string;
+  displayName: string;
+  mimeType: string;
+  size: number;
+  localPath?: string;
+  currentLocation: "user-local-staging";
+  remotePath?: string;
+  transfer: {
+    requestFence: "detaches-file-transfer";
+    supportedTargets: ToolTarget[];
+    defaultTarget: ToolTarget;
+    requiresApproval: boolean;
+  };
+}
+
 export interface DetachesSessionContext {
   app: "detaches_agent";
   version: 1;
@@ -32,6 +49,9 @@ export interface DetachesSessionContext {
       remoteUser?: string;
       summary: string;
     };
+  };
+  files?: {
+    staged: DetachesStagedFileContext[];
   };
   capabilities: DetachesToolCapability[];
   invariants: string[];

@@ -11,6 +11,7 @@ Before requesting tools, inspect the latest `clientContext.detaches` object or t
 - `sessionKey`
 - `agentId`
 - user device identity
+- staged files in `files.staged`
 - supported capability targets
 - unavailable targets
 - execution invariants
@@ -56,5 +57,7 @@ If the user asks for work on "your computer", clarify whether they mean the user
 ## File Rules
 
 Files mentioned in `[detaches_agent 文件上下文]` are initially only in the user's local staging area.
+
+Prefer `clientContext.detaches.files.staged` over natural-language file descriptions when it exists. Each staged file includes `fileId`, display name, current location, and the required transfer request fence.
 
 You cannot read those files from the remote agent host until an approved transfer succeeds and terminal/tool output proves the destination path exists.

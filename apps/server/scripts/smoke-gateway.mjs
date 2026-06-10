@@ -395,6 +395,11 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.sessionKey, chatSessionKey);
     assert.equal(userChatSend.clientContext?.detaches?.agentId, "agent-alpha");
     assert.equal(userChatSend.clientContext?.detaches?.adapterStatus?.remoteAgentHost?.state, "error");
+    assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.length, 1);
+    assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.fileId, upload.file.id);
+    assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.displayName, "P100协议说明-示例.txt");
+    assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.currentLocation, "user-local-staging");
+    assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.requestFence, "detaches-file-transfer");
     assert.equal(userChatSend.clientContext?.detaches?.capabilities?.some((capability) => capability.name === "terminal" && capability.supportedTargets.includes("local-user-machine")), true);
     assert.equal(userChatSend.clientContext?.routeContext?.origin?.provider, "detaches_agent");
     assert.equal(userChatSend.attachments, undefined);

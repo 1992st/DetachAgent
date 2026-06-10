@@ -10,6 +10,24 @@
     "displayName": "detaches test machine",
     "sessionNamespace": "detaches:detaches"
   },
+  "files": {
+    "staged": [
+      {
+        "fileId": "file-123",
+        "name": "input.pdf",
+        "displayName": "input.pdf",
+        "mimeType": "application/pdf",
+        "size": 1024,
+        "currentLocation": "user-local-staging",
+        "transfer": {
+          "requestFence": "detaches-file-transfer",
+          "supportedTargets": ["local-user-machine"],
+          "defaultTarget": "local-user-machine",
+          "requiresApproval": true
+        }
+      }
+    ]
+  },
   "capabilities": [
     {
       "name": "terminal",
