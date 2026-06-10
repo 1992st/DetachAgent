@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import express from "express";
 import multer from "multer";
-import type { AppHealth, DiagnosticItem, DiagnosticsResponse, NetworkTestResponse, NetworkTestStep, ToolTarget } from "@detaches/shared";
+import type { AppHealth, DiagnosticItem, DiagnosticsResponse, NetworkTestResponse, NetworkTestStep, ToolDecisionActor, ToolTarget } from "@detaches/shared";
 import { appConfig } from "../config/appConfig.js";
 import { settingsStore, runtimeConfig } from "../config/settingsStore.js";
 import { sshTunnelService } from "../services/tunnel/sshTunnelService.js";
@@ -387,6 +387,17 @@ function isToolRequestStatus(value: string): value is "pending" | "approved" | "
     || value === "failed";
 }
 
+function parseToolDecisionActor(value: unknown): ToolDecisionActor | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  return {
+    deviceId: typeof record.deviceId === "string" ? record.deviceId.trim() : undefined,
+    deviceIdShort: typeof record.deviceIdShort === "string" ? record.deviceIdShort.trim() : undefined,
+    displayName: typeof record.displayName === "string" ? record.displayName.trim() : undefined,
+    source: record.source === "detaches-ui" || record.source === "api" || record.source === "unknown" ? record.source : "api"
+  };
+}
+
 apiRoutes.post("/files/transfer/prepare", async (req, res) => {
   try {
     const fileId = String(req.body.fileId || "");
@@ -484,7 +495,8 @@ apiRoutes.post("/tools/requests/extract", async (req, res) => {
 apiRoutes.post("/tools/requests/:requestId/approve", async (req, res) => {
   try {
     const riskAccepted = req.body && typeof req.body === "object" && req.body.riskAccepted === true;
-    res.json(await toolBrokerService.approve(req.params.requestId, { riskAccepted }));
+    const actor = parseToolDecisionActor(req.body?.actor);
+    res.json(await toolBrokerService.approve(req.params.requestId, { riskAccepted, actor }));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -508,7 +520,8 @@ apiRoutes.post("/tools/requests/:requestId/forward", async (req, res) => {
 
 apiRoutes.post("/tools/requests/:requestId/reject", async (req, res) => {
   try {
-    res.json({ request: await toolBrokerService.reject(req.params.requestId) });
+    const actor = parseToolDecisionActor(req.body?.actor);
+    res.json({ request: await toolBrokerService.reject(req.params.requestId, { actor }) });
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }

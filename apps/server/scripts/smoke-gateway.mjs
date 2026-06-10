@@ -358,6 +358,12 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.capabilities?.some((capability) => capability.name === "terminal" && capability.supportedTargets.includes("local-user-machine")), true);
     assert.equal(userChatSend.clientContext?.routeContext?.origin?.provider, "detaches_agent");
     assert.equal(userChatSend.attachments, undefined);
+    const decisionActor = {
+      deviceId: userChatSend.clientContext.detaches.userDevice.deviceId,
+      deviceIdShort: userChatSend.clientContext.detaches.userDevice.deviceIdShort,
+      displayName: userChatSend.clientContext.detaches.userDevice.displayName,
+      source: "detaches-ui"
+    };
 
     const preparedTransfer = await requestJson("/api/files/transfer/prepare", {
       method: "POST",
@@ -387,8 +393,13 @@ async function main() {
     assert.equal(terminalTool.request.risk.level, "safe");
     const pendingToolList = await requestJson(`/api/tools/requests?sessionKey=${encodeURIComponent(chatSessionKey)}&agentId=agent-alpha&status=pending&limit=10`);
     assert.equal(pendingToolList.requests.some((request) => request.id === terminalTool.request.id), true);
-    const approvedTerminalTool = await requestJson(`/api/tools/requests/${terminalTool.request.id}/approve`, { method: "POST" });
+    const approvedTerminalTool = await requestJson(`/api/tools/requests/${terminalTool.request.id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor: decisionActor })
+    });
     assert.equal(approvedTerminalTool.request.status, "approved");
+    assert.equal(approvedTerminalTool.request.lastDecision.actor.deviceIdShort, decisionActor.deviceIdShort);
     assert.equal(approvedTerminalTool.command, "printf 'smoke-complete\\n'");
     assert.equal(approvedTerminalTool.execution.target, "local-user-machine");
     assert.equal(approvedTerminalTool.execution.sessionKey, chatSessionKey);
@@ -504,9 +515,10 @@ async function main() {
     const confirmedElevatedApprove = await requestJson(`/api/tools/requests/${elevatedTerminalTool.request.id}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ riskAccepted: true })
+      body: JSON.stringify({ riskAccepted: true, actor: decisionActor })
     });
     assert.equal(confirmedElevatedApprove.request.status, "approved");
+    assert.equal(confirmedElevatedApprove.request.lastDecision.riskAccepted, true);
 
     const destructiveTerminalTool = await requestJson("/api/tools/requests", {
       method: "POST",
@@ -538,6 +550,12 @@ async function main() {
     });
     assert.equal(blockedTerminalTool.request.status, "blocked");
     assert.match(blockedTerminalTool.request.error, /cannot fallback/);
+    const rejectedBlockedTool = await requestJson(`/api/tools/requests/${blockedTerminalTool.request.id}/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor: decisionActor })
+    });
+    assert.equal(rejectedBlockedTool.request.lastDecision.actor.source, "detaches-ui");
 
     const brokerUploadForm = new FormData();
     brokerUploadForm.append("sessionKey", chatSessionKey);
@@ -641,6 +659,8 @@ async function main() {
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.ingest" && event.sourceEventId === "gateway-tool-event-smoke-1" && event.duplicate === false), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.ingest" && event.sourceEventId === "gateway-tool-event-smoke-1" && event.duplicate === true), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.command === "printf 'smoke-complete\\n'" && typeof event.terminalId === "string"), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.actor?.deviceIdShort === decisionActor.deviceIdShort), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.reject" && event.actor?.source === "detaches-ui"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && /detaches-note-via-broker\.txt/.test(event.command || "") && typeof event.terminalId === "string"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.result.forward" && event.status === "sent"), true);
 

@@ -11,6 +11,20 @@ export interface ToolRiskAssessment {
   reasons: string[];
 }
 
+export interface ToolDecisionActor {
+  deviceId?: string;
+  deviceIdShort?: string;
+  displayName?: string;
+  source?: "detaches-ui" | "api" | "unknown";
+}
+
+export interface ToolDecisionRecord {
+  action: "approved" | "rejected";
+  decidedAt: string;
+  actor?: ToolDecisionActor;
+  riskAccepted?: boolean;
+}
+
 export interface ToolRequestCreateInput {
   kind: ToolRequestKind;
   target: ToolTarget;
@@ -26,6 +40,7 @@ export interface ToolRequestRecord extends ToolRequestCreateInput {
   id: string;
   status: ToolRequestStatus;
   risk?: ToolRiskAssessment;
+  lastDecision?: ToolDecisionRecord;
   createdAt: string;
   updatedAt: string;
   error?: string;
@@ -71,6 +86,11 @@ export interface ToolRequestDecisionResponse {
 
 export interface ToolRequestApproveInput {
   riskAccepted?: boolean;
+  actor?: ToolDecisionActor;
+}
+
+export interface ToolRequestRejectInput {
+  actor?: ToolDecisionActor;
 }
 
 export interface ToolRequestExtractInput {

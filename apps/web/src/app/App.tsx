@@ -145,6 +145,7 @@ export function App() {
           <FilePanel
             sessionKey={selectedSession}
             agentId={selectedAgent?.id ?? null}
+            clientIdentity={clientIdentity}
             files={attachments}
             uploading={uploading}
             error={fileError}

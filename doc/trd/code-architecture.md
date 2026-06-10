@@ -76,6 +76,7 @@ detaches_agent/
   - 入队时执行基础风险分级：safe/elevated/destructive；destructive 会直接 blocked，elevated 在 UI 标记风险原因，审批 API 必须带 `riskAccepted: true`。
   - 阻断不可用 target，禁止把 `remote-agent-host` / `gateway-managed` 退化成本机执行。
   - 审批本机 terminal 请求时直接调用 `terminalService.runCommand` 写入会话 terminal。
+  - 审批/拒绝时记录 `lastDecision`，包含 actor、decidedAt 和 riskAccepted，并同步写入审计日志。
   - 审批文件传输请求时复用 `fileTransferService.prepareTransfer` 生成一次性 curl 命令，并由 Broker 写入会话 terminal。
   - 写入命令时注入 start/end marker，记录 executionId、terminalId 和 terminal replay 起点；`/api/tools/requests/:requestId/result` 可查询输出快照、completed、exitCode 和工具结果回写状态。
   - 工具结果回写有 outbox 状态：`not-started` / `pending` / `sent` / `failed`。`POST /api/tools/requests/:requestId/forward` 可手动重试。

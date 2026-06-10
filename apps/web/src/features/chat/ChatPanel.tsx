@@ -170,7 +170,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
               </button>
             </div>
             <p>{messageText(message)}</p>
-            <ToolRequests text={messageText(message)} sessionKey={sessionKey} agentId={agentId} onReveal={() => terminalRef.current?.reveal()} />
+            <ToolRequests text={messageText(message)} sessionKey={sessionKey} agentId={agentId} clientIdentity={clientIdentity} onReveal={() => terminalRef.current?.reveal()} />
             {message.attachments?.map((attachment) => (
               <small className="attachment-chip" key={`${message.id}-${attachment.name}`}>{attachment.name}</small>
             ))}
@@ -258,11 +258,13 @@ function ToolRequests({
   text,
   sessionKey,
   agentId,
+  clientIdentity,
   onReveal
 }: {
   text: string;
   sessionKey: string | null;
   agentId: string | null;
+  clientIdentity: ClientIdentity | null;
   onReveal: () => void;
 }) {
   const [requests, setRequests] = useState<ToolRequestRecord[]>([]);
@@ -332,7 +334,7 @@ function ToolRequests({
                 disabled={unsupported || Boolean(state && state !== "error")}
                 onClick={() => {
                   setHandled((current) => ({ ...current, [index]: "running" }));
-                  approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated" })
+                  approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated", actor: decisionActor(clientIdentity) })
                     .then((response) => {
                       if (!response.execution?.wroteToTerminal) throw new Error(response.message || "Broker did not execute the request.");
                       onReveal();
@@ -357,7 +359,7 @@ function ToolRequests({
                 className="secondary-button"
                 disabled={Boolean(state && state !== "error")}
                 onClick={() => {
-                  void rejectToolRequest(request.id);
+                  void rejectToolRequest(request.id, { actor: decisionActor(clientIdentity) });
                   setHandled((current) => ({ ...current, [index]: "rejected" }));
                 }}
               >
@@ -387,6 +389,15 @@ function ToolRequests({
       })}
     </div>
   );
+}
+
+function decisionActor(identity: ClientIdentity | null) {
+  return {
+    deviceId: identity?.deviceId,
+    deviceIdShort: identity?.deviceIdShort,
+    displayName: identity?.displayName,
+    source: "detaches-ui" as const
+  };
 }
 
 function mergeToolRequests(primary: ToolRequestRecord[], updates: ToolRequestRecord[]): ToolRequestRecord[] {

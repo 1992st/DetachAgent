@@ -7,6 +7,7 @@ import type {
   ToolRequestApproveInput,
   ToolRequestCreateInput,
   ToolRequestCreateResponse,
+  ToolDecisionActor,
   ToolRequestDecisionResponse,
   ToolResultForwardStatus,
   ToolRequestExtractResponse,
@@ -14,6 +15,7 @@ import type {
   ToolRequestListInput,
   ToolRequestListResponse,
   ToolRequestRecord,
+  ToolRequestRejectInput,
   ToolRequestStatus,
   ToolRiskAssessment,
   ToolExecutionResultResponse,
@@ -27,9 +29,9 @@ import { terminalService } from "../terminal/terminalService.js";
 type AuditEvent =
   | { type: "tool.create"; request: ToolRequestRecord }
   | { type: "tool.ingest"; requestId: string; sourceEventId: string; duplicate: boolean }
-  | { type: "tool.approve"; requestId: string; status: ToolRequestStatus; command?: string; terminalId?: string; executionId?: string; error?: string }
+  | { type: "tool.approve"; requestId: string; status: ToolRequestStatus; command?: string; terminalId?: string; executionId?: string; riskAccepted?: boolean; actor?: ToolDecisionActor; error?: string }
   | { type: "tool.result.forward"; requestId: string; executionId: string; status: ToolResultForwardStatus; ok: boolean; error?: string }
-  | { type: "tool.reject"; requestId: string; status: ToolRequestStatus };
+  | { type: "tool.reject"; requestId: string; status: ToolRequestStatus; actor?: ToolDecisionActor };
 
 export type ToolBrokerEvent = {
   action: "created" | "updated" | "ingested" | "duplicate";
@@ -139,13 +141,14 @@ class ToolBrokerService {
     await this.load();
     const request = this.requireRequest(requestId);
     if (request.status === "blocked") {
-      await this.audit({ type: "tool.approve", requestId, status: "blocked", error: request.error });
+      await this.audit({ type: "tool.approve", requestId, status: "blocked", actor: input.actor, riskAccepted: input.riskAccepted, error: request.error });
       throw new Error(request.error || "Tool request is blocked.");
     }
     if (request.status !== "pending" && request.status !== "failed") {
       throw new Error(`Tool request is already ${request.status}.`);
     }
     if (request.risk?.level === "elevated" && !input.riskAccepted) {
+      await this.audit({ type: "tool.approve", requestId, status: request.status, actor: input.actor, riskAccepted: false, error: "risk confirmation missing" });
       throw new Error(`Elevated-risk tool request requires explicit confirmation: ${request.risk.reasons.join("; ")}`);
     }
     if (request.kind === "terminal") {
@@ -154,9 +157,9 @@ class ToolBrokerService {
         return this.fail(request, "Terminal request payload.command is required.");
       }
       const execution = await this.runInTerminal(request, command);
-      const updated = this.update(request, "approved");
+      const updated = this.update(request, "approved", undefined, decision("approved", input));
       await this.save();
-      await this.audit({ type: "tool.approve", requestId, status: updated.status, command, terminalId: execution.terminalId, executionId: execution.executionId });
+      await this.audit({ type: "tool.approve", requestId, status: updated.status, command, terminalId: execution.terminalId, executionId: execution.executionId, actor: input.actor, riskAccepted: input.riskAccepted });
       void this.forwardResultToAgent(updated.id);
       return {
         request: updated,
@@ -186,9 +189,9 @@ class ToolBrokerService {
           sessionKey: request.sessionKey
         });
         const execution = await this.runInTerminal(request, prepared.command);
-        const updated = this.update(request, "approved");
+        const updated = this.update(request, "approved", undefined, decision("approved", input));
         await this.save();
-        await this.audit({ type: "tool.approve", requestId, status: updated.status, command: prepared.command, terminalId: execution.terminalId, executionId: execution.executionId });
+        await this.audit({ type: "tool.approve", requestId, status: updated.status, command: prepared.command, terminalId: execution.terminalId, executionId: execution.executionId, actor: input.actor, riskAccepted: input.riskAccepted });
         void this.forwardResultToAgent(updated.id);
         return {
           request: updated,
@@ -256,12 +259,12 @@ class ToolBrokerService {
     };
   }
 
-  async reject(requestId: string): Promise<ToolRequestRecord> {
+  async reject(requestId: string, input: ToolRequestRejectInput = {}): Promise<ToolRequestRecord> {
     await this.load();
     const request = this.requireRequest(requestId);
-    const updated = this.update(request, "rejected");
+    const updated = this.update(request, "rejected", undefined, decision("rejected", input));
     await this.save();
-    await this.audit({ type: "tool.reject", requestId, status: updated.status });
+    await this.audit({ type: "tool.reject", requestId, status: updated.status, actor: input.actor });
     return updated;
   }
 
@@ -287,10 +290,11 @@ class ToolBrokerService {
     return [...this.requests.values()].find((request) => request.sourceEventId === normalized) ?? null;
   }
 
-  private update(request: ToolRequestRecord, status: ToolRequestStatus, error?: string): ToolRequestRecord {
+  private update(request: ToolRequestRecord, status: ToolRequestStatus, error?: string, lastDecision?: ToolRequestRecord["lastDecision"]): ToolRequestRecord {
     const updated = {
       ...request,
       status,
+      lastDecision: lastDecision ?? request.lastDecision,
       error,
       updatedAt: new Date().toISOString()
     };
@@ -578,6 +582,15 @@ function assessRisk(input: Pick<ToolRequestRecord, "kind" | "payload">): ToolRis
     reasons.push("修改 shell/profile、SSH 或系统相关路径");
   }
   return reasons.length ? { level: "elevated", reasons } : { level: "safe", reasons: [] };
+}
+
+function decision(action: "approved" | "rejected", input: ToolRequestApproveInput | ToolRequestRejectInput): ToolRequestRecord["lastDecision"] {
+  return {
+    action,
+    decidedAt: new Date().toISOString(),
+    actor: input.actor,
+    riskAccepted: "riskAccepted" in input ? input.riskAccepted : undefined
+  };
 }
 
 function targetObject(value: unknown): value is { [key: string]: unknown } {

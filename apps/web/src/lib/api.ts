@@ -16,6 +16,7 @@ import type {
   ToolExecutionResultResponse,
   ToolRequestExtractResponse,
   ToolRequestListResponse,
+  ToolRequestRejectInput,
   ToolRequestRecord,
   ToolTarget
 } from "@detaches/shared";
@@ -142,8 +143,12 @@ export async function retryToolResultForward(requestId: string): Promise<ToolExe
   return res.json();
 }
 
-export async function rejectToolRequest(requestId: string): Promise<{ request: ToolRequestRecord }> {
-  const res = await fetch(`/api/tools/requests/${encodeURIComponent(requestId)}/reject`, { method: "POST" });
+export async function rejectToolRequest(requestId: string, input: ToolRequestRejectInput = {}): Promise<{ request: ToolRequestRecord }> {
+  const res = await fetch(`/api/tools/requests/${encodeURIComponent(requestId)}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }

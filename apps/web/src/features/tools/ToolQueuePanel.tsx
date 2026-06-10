@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, Eye, RefreshCw, Send, TerminalSquare, X } from "lucide-react";
-import type { ToolBrokerSocketEvent, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget } from "@detaches/shared";
+import type { ClientIdentity, ToolBrokerSocketEvent, ToolDecisionActor, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget } from "@detaches/shared";
 import { approveToolRequest, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward } from "../../lib/api.js";
 
 interface Props {
   sessionKey: string | null;
   agentId: string | null;
+  clientIdentity: ClientIdentity | null;
   onRevealTerminal: () => void;
 }
 
-export function ToolQueuePanel({ sessionKey, agentId, onRevealTerminal }: Props) {
+export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTerminal }: Props) {
   const [requests, setRequests] = useState<ToolRequestRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +59,7 @@ export function ToolQueuePanel({ sessionKey, agentId, onRevealTerminal }: Props)
     setBusy((current) => ({ ...current, [request.id]: true }));
     setError(null);
     try {
-      const response = await approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated" });
+      const response = await approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated", actor: decisionActor(clientIdentity) });
       if (!response.execution?.wroteToTerminal) throw new Error(response.message || "Broker did not execute the request.");
       onRevealTerminal();
       const result = await fetchToolRequestResult(request.id);
@@ -75,7 +76,7 @@ export function ToolQueuePanel({ sessionKey, agentId, onRevealTerminal }: Props)
     setBusy((current) => ({ ...current, [request.id]: true }));
     setError(null);
     try {
-      await rejectToolRequest(request.id);
+      await rejectToolRequest(request.id, { actor: decisionActor(clientIdentity) });
       await refresh();
     } catch (rejectError) {
       setError(rejectError instanceof Error ? rejectError.message : String(rejectError));
@@ -154,6 +155,15 @@ export function ToolQueuePanel({ sessionKey, agentId, onRevealTerminal }: Props)
       </div>
     </section>
   );
+}
+
+function decisionActor(identity: ClientIdentity | null): ToolDecisionActor {
+  return {
+    deviceId: identity?.deviceId,
+    deviceIdShort: identity?.deviceIdShort,
+    displayName: identity?.displayName,
+    source: "detaches-ui"
+  };
 }
 
 const targetLabels: Record<ToolTarget, string> = {

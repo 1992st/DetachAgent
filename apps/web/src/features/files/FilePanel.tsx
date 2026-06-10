@@ -1,5 +1,5 @@
 import { Download, FileUp } from "lucide-react";
-import type { DiagnosticItem, UploadedFileRef } from "@detaches/shared";
+import type { ClientIdentity, DiagnosticItem, UploadedFileRef } from "@detaches/shared";
 import { downloadUrl } from "../../lib/api.js";
 import { DiagnosticsPanel } from "../connection/DiagnosticsPanel.js";
 import { ToolQueuePanel } from "../tools/ToolQueuePanel.js";
@@ -7,6 +7,7 @@ import { ToolQueuePanel } from "../tools/ToolQueuePanel.js";
 interface Props {
   sessionKey: string | null;
   agentId: string | null;
+  clientIdentity: ClientIdentity | null;
   files: UploadedFileRef[];
   uploading: boolean;
   error: string | null;
@@ -22,6 +23,7 @@ interface Props {
 export function FilePanel({
   sessionKey,
   agentId,
+  clientIdentity,
   files,
   uploading,
   error,
@@ -36,7 +38,7 @@ export function FilePanel({
   return (
     <aside className="file-panel">
       <DiagnosticsPanel items={diagnostics} loading={diagnosticsLoading} error={diagnosticsError} onRefresh={onDiagnosticsRefresh} />
-      <ToolQueuePanel sessionKey={sessionKey} agentId={agentId} onRevealTerminal={onRevealTerminal} />
+      <ToolQueuePanel sessionKey={sessionKey} agentId={agentId} clientIdentity={clientIdentity} onRevealTerminal={onRevealTerminal} />
       <div className="panel-heading">
         <div>
           <h2>Files</h2>
