@@ -58,7 +58,7 @@ export function ToolQueuePanel({ sessionKey, agentId, onRevealTerminal }: Props)
     setBusy((current) => ({ ...current, [request.id]: true }));
     setError(null);
     try {
-      const response = await approveToolRequest(request.id);
+      const response = await approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated" });
       if (!response.execution?.wroteToTerminal) throw new Error(response.message || "Broker did not execute the request.");
       onRevealTerminal();
       const result = await fetchToolRequestResult(request.id);
@@ -129,7 +129,7 @@ export function ToolQueuePanel({ sessionKey, agentId, onRevealTerminal }: Props)
                 {summaries[request.id] ? <small>{summaries[request.id]}</small> : null}
               </div>
               <div className="terminal-request-actions">
-                <button type="button" className="icon-button" title="Run" disabled={disabled || request.status === "approved"} onClick={() => void runRequest(request)}>
+                <button type="button" className="icon-button" title={request.risk?.level === "elevated" ? "Confirm run" : "Run"} disabled={disabled || request.status === "approved"} onClick={() => void runRequest(request)}>
                   <Check size={15} />
                 </button>
                 <button type="button" className="icon-button" title="Reject" disabled={busy[request.id] || request.status !== "pending"} onClick={() => void rejectRequest(request)}>

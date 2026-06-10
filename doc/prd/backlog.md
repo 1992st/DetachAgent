@@ -58,7 +58,7 @@
 
 - 已有基础风险分级：
   - `safe`：正常进入待审批队列。
-  - `elevated`：仍可审批，但 UI 显示风险原因。
+  - `elevated`：UI 显示风险原因，审批 API 必须带 `riskAccepted: true` 才允许执行。
   - `destructive`：直接 blocked，不能审批执行。
 - 已覆盖基础规则：
   - `rm -rf`
@@ -66,7 +66,7 @@
   - 修改 shell/profile
   - 网络下载并执行脚本
   - 删除或覆盖 workspace 外文件
-- 后续还需要补齐：高风险命令二次确认、可配置策略、用户身份记录。
+- 后续还需要补齐：更强二次确认交互、可配置策略、用户身份记录。
 
 ### Terminal 状态强化
 

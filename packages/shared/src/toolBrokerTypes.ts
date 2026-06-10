@@ -69,6 +69,10 @@ export interface ToolRequestDecisionResponse {
   message?: string;
 }
 
+export interface ToolRequestApproveInput {
+  riskAccepted?: boolean;
+}
+
 export interface ToolRequestExtractInput {
   text: string;
   sessionKey: string;

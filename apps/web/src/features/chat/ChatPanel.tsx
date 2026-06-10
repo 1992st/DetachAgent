@@ -332,7 +332,7 @@ function ToolRequests({
                 disabled={unsupported || Boolean(state && state !== "error")}
                 onClick={() => {
                   setHandled((current) => ({ ...current, [index]: "running" }));
-                  approveToolRequest(request.id)
+                  approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated" })
                     .then((response) => {
                       if (!response.execution?.wroteToTerminal) throw new Error(response.message || "Broker did not execute the request.");
                       onReveal();
@@ -350,7 +350,7 @@ function ToolRequests({
                 }}
               >
                 <Check size={15} />
-                {state === "approved" ? "Approved" : state === "running" ? "Approving" : actionLabel}
+                {state === "approved" ? "Approved" : state === "running" ? "Approving" : request.risk?.level === "elevated" ? `Confirm ${actionLabel}` : actionLabel}
               </button>
               <button
                 type="button"

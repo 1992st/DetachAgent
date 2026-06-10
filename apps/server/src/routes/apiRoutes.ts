@@ -483,7 +483,8 @@ apiRoutes.post("/tools/requests/extract", async (req, res) => {
 
 apiRoutes.post("/tools/requests/:requestId/approve", async (req, res) => {
   try {
-    res.json(await toolBrokerService.approve(req.params.requestId));
+    const riskAccepted = req.body && typeof req.body === "object" && req.body.riskAccepted === true;
+    res.json(await toolBrokerService.approve(req.params.requestId, { riskAccepted }));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }

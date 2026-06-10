@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import { nanoid } from "nanoid";
 import type {
   ToolGatewayEventInput,
+  ToolRequestApproveInput,
   ToolRequestCreateInput,
   ToolRequestCreateResponse,
   ToolRequestDecisionResponse,
@@ -134,7 +135,7 @@ class ToolBrokerService {
     return { requests };
   }
 
-  async approve(requestId: string): Promise<ToolRequestDecisionResponse> {
+  async approve(requestId: string, input: ToolRequestApproveInput = {}): Promise<ToolRequestDecisionResponse> {
     await this.load();
     const request = this.requireRequest(requestId);
     if (request.status === "blocked") {
@@ -143,6 +144,9 @@ class ToolBrokerService {
     }
     if (request.status !== "pending" && request.status !== "failed") {
       throw new Error(`Tool request is already ${request.status}.`);
+    }
+    if (request.risk?.level === "elevated" && !input.riskAccepted) {
+      throw new Error(`Elevated-risk tool request requires explicit confirmation: ${request.risk.reasons.join("; ")}`);
     }
     if (request.kind === "terminal") {
       const command = stringPayload(request, "command");

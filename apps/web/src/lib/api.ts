@@ -9,6 +9,7 @@ import type {
   PublicSettings,
   SettingsUpdate,
   ToolGatewayEventInput,
+  ToolRequestApproveInput,
   ToolRequestCreateInput,
   ToolRequestCreateResponse,
   ToolRequestDecisionResponse,
@@ -119,8 +120,12 @@ export async function extractToolRequests(input: { text: string; sessionKey: str
   return res.json();
 }
 
-export async function approveToolRequest(requestId: string): Promise<ToolRequestDecisionResponse> {
-  const res = await fetch(`/api/tools/requests/${encodeURIComponent(requestId)}/approve`, { method: "POST" });
+export async function approveToolRequest(requestId: string, input: ToolRequestApproveInput = {}): Promise<ToolRequestDecisionResponse> {
+  const res = await fetch(`/api/tools/requests/${encodeURIComponent(requestId)}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }

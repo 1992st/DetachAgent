@@ -488,12 +488,25 @@ async function main() {
         sessionKey: chatSessionKey,
         agentId: "agent-alpha",
         reason: "smoke elevated terminal risk",
-        payload: { command: "sudo ls /var" }
+        payload: { command: "chmod --help >/dev/null" }
       })
     });
     assert.equal(elevatedTerminalTool.request.status, "pending");
     assert.equal(elevatedTerminalTool.request.risk.level, "elevated");
-    assert.match(elevatedTerminalTool.request.risk.reasons.join(" "), /sudo/);
+    assert.match(elevatedTerminalTool.request.risk.reasons.join(" "), /权限/);
+    const rejectedElevatedApprove = await fetch(`http://${host}:${serverPort}/api/tools/requests/${elevatedTerminalTool.request.id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    });
+    assert.equal(rejectedElevatedApprove.status, 400);
+    assert.match(await rejectedElevatedApprove.text(), /requires explicit confirmation/);
+    const confirmedElevatedApprove = await requestJson(`/api/tools/requests/${elevatedTerminalTool.request.id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ riskAccepted: true })
+    });
+    assert.equal(confirmedElevatedApprove.request.status, "approved");
 
     const destructiveTerminalTool = await requestJson("/api/tools/requests", {
       method: "POST",
