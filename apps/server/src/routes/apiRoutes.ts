@@ -472,7 +472,8 @@ apiRoutes.get("/adapters/openclaw-detaches/install-plan", async (req, res) => {
   try {
     const baseUrl = typeof req.query.baseUrl === "string" ? req.query.baseUrl : undefined;
     const installDir = typeof req.query.installDir === "string" ? req.query.installDir : undefined;
-    res.json(await openclawDetachesAdapterService.installPlan({ baseUrl, installDir }));
+    const workspaceDir = typeof req.query.workspaceDir === "string" ? req.query.workspaceDir : undefined;
+    res.json(await openclawDetachesAdapterService.installPlan({ baseUrl, installDir, workspaceDir }));
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -481,13 +482,14 @@ apiRoutes.get("/adapters/openclaw-detaches/install-plan", async (req, res) => {
 apiRoutes.get("/adapters/openclaw-detaches/readiness", async (req, res) => {
   try {
     const installDir = typeof req.query.installDir === "string" ? req.query.installDir : undefined;
+    const workspaceDir = typeof req.query.workspaceDir === "string" ? req.query.workspaceDir : undefined;
     const target = req.query.target === "remote-agent-host" || req.query.target === "local-distribution"
       ? req.query.target
       : undefined;
     const probe = req.query.probe === "remote-ssh" ? "remote-ssh" : "local-fs";
     res.json(probe === "remote-ssh"
-      ? await openclawDetachesAdapterService.remoteReadiness({ installDir })
-      : await openclawDetachesAdapterService.readiness({ installDir, target }));
+      ? await openclawDetachesAdapterService.remoteReadiness({ installDir, workspaceDir })
+      : await openclawDetachesAdapterService.readiness({ installDir, workspaceDir, target }));
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }

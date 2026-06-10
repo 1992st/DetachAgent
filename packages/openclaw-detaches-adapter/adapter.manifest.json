@@ -9,6 +9,7 @@
     "approvalBroker": "detaches_agent local UI"
   },
   "skill": {
+    "skill": "SKILL.md",
     "manifest": "skill.manifest.json",
     "instructions": "AGENT.md",
     "readme": "README.md",

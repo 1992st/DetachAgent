@@ -18,6 +18,7 @@
 
 - `adapter.manifest.json`：机器可读 capability、target、hard rules。
 - `skill.manifest.json`：agent-side skill 入口元数据，声明 instructions、CLI、context 和 safety。
+- `SKILL.md`：OpenClaw workspace skill 入口，安装时复制到 `~/.openclaw/workspace/skills/detaches-agent/SKILL.md`，让真实 OpenClaw skills loader 可发现。
 - `AGENT.md`：给远端 OpenClaw agent/skill 使用的操作说明。
 - `README.md`：安装后给人类 operator/agent maintainer 阅读的使用流程。
 - `bin/detaches-agent-adapter.mjs`：CLI，可打印 manifest、校验/诊断 `clientContext.detaches`、生成标准 `detaches-terminal` / `detaches-file-transfer` fenced request。
@@ -33,8 +34,8 @@
 - `GET /api/adapters/openclaw-detaches`：返回 manifest、文件清单、sha256、bundle 元信息和安装提示。
 - `GET /api/adapters/openclaw-detaches/files/<path>`：下载白名单内的单个 adapter 文件。
 - `GET /api/adapters/openclaw-detaches/bundle`：下载 `openclaw-detaches-adapter.tar.gz`。
-- `GET /api/adapters/openclaw-detaches/install-plan?baseUrl=...&installDir=...`：生成给真实 agent host 执行的安装命令和验证命令。
-- `GET /api/adapters/openclaw-detaches/readiness?target=...&installDir=...`：检查 adapter distribution 或指定安装目录是否完整。
+- `GET /api/adapters/openclaw-detaches/install-plan?baseUrl=...&installDir=...&workspaceDir=...`：生成给真实 agent host 执行的安装命令和验证命令；默认 workspace 为 `~/.openclaw/workspace`。
+- `GET /api/adapters/openclaw-detaches/readiness?target=...&installDir=...&workspaceDir=...`：检查 adapter distribution、指定安装目录以及 OpenClaw workspace skill 入口是否完整。
 
 这让远端 agent host 可以从 detaches_agent 获取同一份协议资产。它仍不是最终的 OpenClaw 原生 skill 安装器，但已经把“agent 需要知道当前 detaches 场景”从聊天 prompt 推进为可分发、可校验的 adapter 包。
 
@@ -43,7 +44,9 @@
 - 下载 detaches adapter bundle。
 - 校验 sha256。
 - 解包到指定 installDir。
+- 复制 `SKILL.md` 到 `$WORKSPACE_DIR/skills/detaches-agent/SKILL.md`，对齐 OpenClaw workspace skills 约定。
 - 校验 `adapter.manifest.json` 和 `skill.manifest.json` 都指向同一 adapter id。
+- 校验 workspace skill frontmatter 声明 `name: detaches-agent`。
 - 运行 `detaches-agent-adapter manifest` 验证 CLI 可执行。
 
 当前 UI 可以把 install-plan 创建为待审批远端操作。`adapter-install` 请求：
@@ -58,7 +61,7 @@
 readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 
 - 默认不传 `installDir` 时，检查本仓库内 adapter distribution 是否完整。
-- 传入 `installDir` 时，检查该目录中的 `adapter.manifest.json`、`skill.manifest.json`、`package.json` 和 CLI 文件。
+- 传入 `installDir` 时，检查该目录中的 `adapter.manifest.json`、`skill.manifest.json`、`package.json`、CLI 文件，以及 `$workspaceDir/skills/detaches-agent/SKILL.md`。
 - 返回 verify commands，可作为后续远端 SSH/agent-side skill 的健康检查脚本。
 - 传 `probe=remote-ssh` 时，通过当前 SSH 配置在远端 agent host 执行只读检查脚本；不安装、不写文件、不改变远端状态。
 

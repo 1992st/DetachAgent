@@ -18,6 +18,7 @@ const adapterFiles = [
   { path: "skill.manifest.json", mode: 0o644, mimeType: "application/json" },
   { path: "README.md", mode: 0o644, mimeType: "text/markdown; charset=utf-8" },
   { path: "AGENT.md", mode: 0o644, mimeType: "text/markdown; charset=utf-8" },
+  { path: "SKILL.md", mode: 0o644, mimeType: "text/markdown; charset=utf-8" },
   { path: "bin/detaches-agent-adapter.mjs", mode: 0o755, mimeType: "text/javascript; charset=utf-8" }
 ] as const;
 
@@ -59,6 +60,9 @@ export interface OpenClawAdapterRemoteInstallCommand {
   bundleUrl: string;
   bundleSha256: string;
 }
+
+const defaultWorkspaceDir = "~/.openclaw/workspace";
+const openClawSkillName = "detaches-agent";
 
 function sha256(buffer: Buffer): string {
   return crypto.createHash("sha256").update(buffer).digest("hex");
@@ -135,6 +139,11 @@ function normalizeInstallDir(value: string | undefined): string {
   return trimmed || "~/.openclaw/detaches_agent";
 }
 
+function normalizeWorkspaceDir(value: string | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed || defaultWorkspaceDir;
+}
+
 function expandHomeDir(value: string): string {
   if (value === "~") return process.env.HOME || value;
   if (value.startsWith("~/")) return path.join(process.env.HOME || "~", value.slice(2));
@@ -152,20 +161,23 @@ async function readJsonFile(filePath: string): Promise<unknown> {
   return JSON.parse(await fs.readFile(filePath, "utf8"));
 }
 
-function remoteReadinessScript(installDir: string, expectedAdapterId: string, expectedVersion: string): string {
+function remoteReadinessScript(installDir: string, expectedAdapterId: string, expectedVersion: string, workspaceDir = defaultWorkspaceDir): string {
   const manifestPath = `${installDir}/adapter.manifest.json`;
   const skillManifestPath = `${installDir}/skill.manifest.json`;
   const packagePath = `${installDir}/package.json`;
   const cliPath = `${installDir}/bin/detaches-agent-adapter.mjs`;
+  const skillPath = `${workspaceDir}/skills/${openClawSkillName}/SKILL.md`;
   return [
     "set +e",
     `INSTALL_DIR=${shellQuote(installDir)}`,
+    `WORKSPACE_DIR=${shellQuote(workspaceDir)}`,
     `EXPECTED_ADAPTER_ID=${shellQuote(expectedAdapterId)}`,
     `EXPECTED_VERSION=${shellQuote(expectedVersion)}`,
     `MANIFEST_PATH=${shellQuote(manifestPath)}`,
     `SKILL_MANIFEST_PATH=${shellQuote(skillManifestPath)}`,
     `PACKAGE_PATH=${shellQuote(packagePath)}`,
     `CLI_PATH=${shellQuote(cliPath)}`,
+    `SKILL_PATH=${shellQuote(skillPath)}`,
     "STATE=ready",
     "json_escape() { printf '%s' \"$1\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'; }",
     "emit_check() {",
@@ -214,6 +226,15 @@ function remoteReadinessScript(installDir: string, expectedAdapterId: string, ex
     "  emit_check cli ready \"Adapter CLI exists at $CLI_PATH.\"",
     "else",
     "  emit_check cli missing \"Adapter CLI is missing at $CLI_PATH.\"",
+    "fi",
+    "if [ -f \"$SKILL_PATH\" ]; then",
+    "  if grep -q \"^name:[[:space:]]*detaches-agent\" \"$SKILL_PATH\"; then",
+    "    emit_check openclaw-skill ready \"OpenClaw workspace skill exists at $SKILL_PATH.\"",
+    "  else",
+    "    emit_check openclaw-skill invalid \"OpenClaw workspace skill exists but does not declare name detaches-agent.\"",
+    "  fi",
+    "else",
+    "  emit_check openclaw-skill missing \"OpenClaw workspace skill is missing at $SKILL_PATH.\"",
     "fi",
     "printf '{\"state\":\"%s\",\"checks\":[%s]}\\n' \"$STATE\" \"$CHECKS\""
   ].join("\n");
@@ -307,12 +328,14 @@ export const openclawDetachesAdapterService = {
     };
   },
 
-  async installPlan(input: { baseUrl?: string; installDir?: string } = {}): Promise<OpenClawAdapterInstallPlan> {
+  async installPlan(input: { baseUrl?: string; installDir?: string; workspaceDir?: string } = {}): Promise<OpenClawAdapterInstallPlan> {
     const info = await this.info();
     const baseUrl = normalizeBaseUrl(input.baseUrl);
     const installDir = normalizeInstallDir(input.installDir);
+    const workspaceDir = normalizeWorkspaceDir(input.workspaceDir);
     const bundleUrl = `${baseUrl}/api/adapters/openclaw-detaches/bundle`;
     const quotedInstallDir = shellQuote(installDir);
+    const quotedWorkspaceDir = shellQuote(workspaceDir);
     const quotedBundleUrl = shellQuote(bundleUrl);
     return {
       target: "remote-agent-host",
@@ -320,11 +343,13 @@ export const openclawDetachesAdapterService = {
       version: info.version,
       baseUrl,
       installDir,
+      workspaceDir,
       bundleUrl,
       bundleSha256: info.bundle.sha256,
       commands: [
         "set -euo pipefail",
         `INSTALL_DIR=${quotedInstallDir}`,
+        `WORKSPACE_DIR=${quotedWorkspaceDir}`,
         `BUNDLE_URL=${quotedBundleUrl}`,
         `EXPECTED_ADAPTER_ID=${shellQuote(info.id)}`,
         `BUNDLE_SHA256=${shellQuote(info.bundle.sha256)}`,
@@ -335,17 +360,22 @@ export const openclawDetachesAdapterService = {
         "test \"$ACTUAL_SHA256\" = \"$BUNDLE_SHA256\"",
         "tar -xzf \"$TMP_BUNDLE\" -C \"$INSTALL_DIR\" --strip-components=1",
         "chmod +x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
+        "mkdir -p \"$WORKSPACE_DIR/skills/detaches-agent\"",
+        "cp \"$INSTALL_DIR/SKILL.md\" \"$WORKSPACE_DIR/skills/detaches-agent/SKILL.md\"",
         "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\"",
         "grep -q \"\\\"adapterId\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/skill.manifest.json\"",
+        "grep -q \"^name:[[:space:]]*detaches-agent\" \"$WORKSPACE_DIR/skills/detaches-agent/SKILL.md\"",
         "if command -v node >/dev/null 2>&1; then node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest >/dev/null; fi",
         "printf 'detaches adapter installed: %s\\n' \"$INSTALL_DIR\""
       ],
       verifyCommands: [
         `INSTALL_DIR=${quotedInstallDir}`,
+        `WORKSPACE_DIR=${quotedWorkspaceDir}`,
         `EXPECTED_ADAPTER_ID=${shellQuote(info.id)}`,
         "test -x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
         "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\"",
         "grep -q \"\\\"adapterId\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/skill.manifest.json\"",
+        "grep -q \"^name:[[:space:]]*detaches-agent\" \"$WORKSPACE_DIR/skills/detaches-agent/SKILL.md\"",
         "if command -v node >/dev/null 2>&1; then node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" --help >/dev/null; fi"
       ],
       notes: [
@@ -356,13 +386,18 @@ export const openclawDetachesAdapterService = {
     };
   },
 
-  async readiness(input: { installDir?: string; target?: "local-distribution" | "remote-agent-host" } = {}): Promise<OpenClawAdapterReadiness> {
+  async readiness(input: { installDir?: string; workspaceDir?: string; target?: "local-distribution" | "remote-agent-host" } = {}): Promise<OpenClawAdapterReadiness> {
     const info = await this.info();
     const target = input.target ?? (input.installDir ? "remote-agent-host" : "local-distribution");
     const installDir = input.installDir ? normalizeInstallDir(input.installDir) : adapterRoot;
+    const workspaceDir = normalizeWorkspaceDir(input.workspaceDir);
     const absoluteInstallDir = input.installDir ? path.resolve(expandHomeDir(installDir)) : adapterRoot;
+    const absoluteWorkspaceDir = path.resolve(expandHomeDir(workspaceDir));
     const manifestPath = path.join(absoluteInstallDir, "adapter.manifest.json");
     const skillManifestPath = path.join(absoluteInstallDir, "skill.manifest.json");
+    const openClawSkillPath = input.installDir
+      ? path.join(absoluteWorkspaceDir, "skills", openClawSkillName, "SKILL.md")
+      : path.join(absoluteInstallDir, "SKILL.md");
     const cliPath = path.join(absoluteInstallDir, "bin", "detaches-agent-adapter.mjs");
     const checks: OpenClawAdapterReadinessCheck[] = [];
 
@@ -449,6 +484,26 @@ export const openclawDetachesAdapterService = {
     }
 
     try {
+      const content = await fs.readFile(openClawSkillPath, "utf8");
+      const ready = /^name:\s*detaches-agent/m.test(content);
+      checks.push({
+        id: "openclaw-skill",
+        state: ready ? "ready" : "invalid",
+        message: ready
+          ? `OpenClaw skill entry is available at ${input.installDir ? path.join(workspaceDir, "skills", openClawSkillName, "SKILL.md") : "SKILL.md"}.`
+          : "OpenClaw skill entry exists but does not declare name detaches-agent."
+      });
+    } catch (error: any) {
+      checks.push({
+        id: "openclaw-skill",
+        state: error?.code === "ENOENT" ? "missing" : "error",
+        message: error?.code === "ENOENT"
+          ? `OpenClaw skill entry is missing at ${input.installDir ? path.join(workspaceDir, "skills", openClawSkillName, "SKILL.md") : "SKILL.md"}.`
+          : error?.message || "Failed to read OpenClaw skill entry."
+      });
+    }
+
+    try {
       const stats = await fs.stat(cliPath);
       checks.push({
         id: "cli",
@@ -470,6 +525,7 @@ export const openclawDetachesAdapterService = {
     return {
       target,
       installDir,
+      workspaceDir,
       probe: "local-fs",
       expectedAdapterId: info.id,
       expectedVersion: info.version,
@@ -477,10 +533,12 @@ export const openclawDetachesAdapterService = {
       checks,
       verifyCommands: [
         `INSTALL_DIR=${shellQuote(installDir)}`,
+        `WORKSPACE_DIR=${shellQuote(workspaceDir)}`,
         `EXPECTED_ADAPTER_ID=${shellQuote(info.id)}`,
         "test -d \"$INSTALL_DIR\"",
         "test -f \"$INSTALL_DIR/adapter.manifest.json\"",
         "test -f \"$INSTALL_DIR/skill.manifest.json\"",
+        "test -f \"$WORKSPACE_DIR/skills/detaches-agent/SKILL.md\" || test -f \"$INSTALL_DIR/SKILL.md\"",
         "test -x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" || test -f \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
         "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\"",
         "grep -q \"\\\"adapterId\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/skill.manifest.json\""
@@ -488,13 +546,15 @@ export const openclawDetachesAdapterService = {
     };
   },
 
-  async remoteReadiness(input: { installDir?: string } = {}): Promise<OpenClawAdapterReadiness> {
+  async remoteReadiness(input: { installDir?: string; workspaceDir?: string } = {}): Promise<OpenClawAdapterReadiness> {
     const info = await this.info();
     const config = await runtimeConfig();
     const installDir = normalizeInstallDir(input.installDir);
+    const workspaceDir = normalizeWorkspaceDir(input.workspaceDir);
     const base: OpenClawAdapterReadiness = {
       target: "remote-agent-host",
       installDir,
+      workspaceDir,
       probe: "remote-ssh",
       remoteHost: config.remoteHost,
       remoteUser: config.remoteUser || undefined,
@@ -504,10 +564,12 @@ export const openclawDetachesAdapterService = {
       checks: [],
       verifyCommands: [
         `INSTALL_DIR=${shellQuote(installDir)}`,
+        `WORKSPACE_DIR=${shellQuote(workspaceDir)}`,
         `EXPECTED_ADAPTER_ID=${shellQuote(info.id)}`,
         "test -d \"$INSTALL_DIR\"",
         "test -f \"$INSTALL_DIR/adapter.manifest.json\"",
         "test -f \"$INSTALL_DIR/skill.manifest.json\"",
+        "test -f \"$WORKSPACE_DIR/skills/detaches-agent/SKILL.md\"",
         "test -x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" || test -f \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
         "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\"",
         "grep -q \"\\\"adapterId\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/skill.manifest.json\""
@@ -522,7 +584,7 @@ export const openclawDetachesAdapterService = {
       return readiness;
     }
     try {
-      const script = remoteReadinessScript(installDir, info.id, info.version);
+      const script = remoteReadinessScript(installDir, info.id, info.version, workspaceDir);
       const { stdout, stderr } = await execFileAsync("ssh", sshArgs(config, script), { timeout: 12000, maxBuffer: 1024 * 256 });
       const line = stdout.trim().split("\n").filter(Boolean).at(-1);
       if (!line) throw new Error(stderr.trim() || "Remote readiness probe returned no output.");
@@ -558,11 +620,11 @@ export const openclawDetachesAdapterService = {
     return lastRemoteReadiness;
   },
 
-  async prepareRemoteInstallCommand(input: { installDir?: string } = {}): Promise<OpenClawAdapterRemoteInstallCommand> {
+  async prepareRemoteInstallCommand(input: { installDir?: string; workspaceDir?: string } = {}): Promise<OpenClawAdapterRemoteInstallCommand> {
     const config = await runtimeConfig();
     if (!config.remoteUser) throw new Error("Remote SSH user is not configured.");
     const baseUrl = `http://127.0.0.1:${config.serverPort}`;
-    const plan = await this.installPlan({ baseUrl, installDir: input.installDir });
+    const plan = await this.installPlan({ baseUrl, installDir: input.installDir, workspaceDir: input.workspaceDir });
     const args = sshArgs(config, remoteInstallScript(plan));
     const bundleUrl = `${baseUrl}/api/adapters/openclaw-detaches/bundle`;
     return {

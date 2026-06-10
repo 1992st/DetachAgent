@@ -214,8 +214,9 @@ class ToolBrokerService {
     }
     if (request.kind === "adapter-install") {
       const installDir = stringPayload(request, "installDir") || "~/.openclaw/detaches_agent";
+      const workspaceDir = stringPayload(request, "workspaceDir") || "~/.openclaw/workspace";
       try {
-        const prepared = await openclawDetachesAdapterService.prepareRemoteInstallCommand({ installDir });
+        const prepared = await openclawDetachesAdapterService.prepareRemoteInstallCommand({ installDir, workspaceDir });
         const execution = await this.runInTerminal(request, prepared.command);
         const updated = this.update(request, "approved", undefined, decision("approved", input));
         await this.save();

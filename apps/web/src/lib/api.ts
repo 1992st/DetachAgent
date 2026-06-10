@@ -188,10 +188,11 @@ export async function testNetwork(): Promise<NetworkTestResponse> {
   return res.json();
 }
 
-export async function fetchOpenClawAdapterReadiness(input: { target?: "local-distribution" | "remote-agent-host"; installDir?: string; probe?: "local-fs" | "remote-ssh" } = {}): Promise<OpenClawAdapterReadiness> {
+export async function fetchOpenClawAdapterReadiness(input: { target?: "local-distribution" | "remote-agent-host"; installDir?: string; workspaceDir?: string; probe?: "local-fs" | "remote-ssh" } = {}): Promise<OpenClawAdapterReadiness> {
   const params = new URLSearchParams();
   if (input.target) params.set("target", input.target);
   if (input.installDir) params.set("installDir", input.installDir);
+  if (input.workspaceDir) params.set("workspaceDir", input.workspaceDir);
   if (input.probe) params.set("probe", input.probe);
   const query = params.toString();
   const res = await fetch(`/api/adapters/openclaw-detaches/readiness${query ? `?${query}` : ""}`);
@@ -199,10 +200,11 @@ export async function fetchOpenClawAdapterReadiness(input: { target?: "local-dis
   return res.json();
 }
 
-export async function fetchOpenClawAdapterInstallPlan(input: { baseUrl?: string; installDir?: string } = {}): Promise<OpenClawAdapterInstallPlan> {
+export async function fetchOpenClawAdapterInstallPlan(input: { baseUrl?: string; installDir?: string; workspaceDir?: string } = {}): Promise<OpenClawAdapterInstallPlan> {
   const params = new URLSearchParams();
   if (input.baseUrl) params.set("baseUrl", input.baseUrl);
   if (input.installDir) params.set("installDir", input.installDir);
+  if (input.workspaceDir) params.set("workspaceDir", input.workspaceDir);
   const query = params.toString();
   const res = await fetch(`/api/adapters/openclaw-detaches/install-plan${query ? `?${query}` : ""}`);
   if (!res.ok) throw new Error(await errorMessage(res));

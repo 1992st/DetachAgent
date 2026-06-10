@@ -34,11 +34,15 @@ assert.equal(parsedManifest.skill.manifest, "skill.manifest.json");
 const parsedSkillManifest = JSON.parse(await fs.readFile(path.join(adapterDir, "skill.manifest.json"), "utf8"));
 assert.equal(parsedSkillManifest.adapterId, "detaches_agent.openclaw.adapter");
 assert.equal(parsedSkillManifest.entrypoints.instructions, "AGENT.md");
+assert.equal(parsedSkillManifest.entrypoints.skill, "SKILL.md");
 assert.equal(parsedSkillManifest.safety.executesToolsDirectly, false);
 
 const readme = await fs.readFile(path.join(adapterDir, "README.md"), "utf8");
 assert.match(readme, /context-fetch/);
 assert.match(readme, /require user approval/i);
+const skillMd = await fs.readFile(path.join(adapterDir, "SKILL.md"), "utf8");
+assert.match(skillMd, /^name:\s*detaches-agent/m);
+assert.match(skillMd, /metadata:.*openclaw/);
 
 const validContext = await run(["validate-context", "test/valid-context.json"]);
 assert.equal(validContext.code, 0);

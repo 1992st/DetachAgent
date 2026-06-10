@@ -7,6 +7,7 @@ It does not execute commands or move files by itself. It validates session conte
 ## Files
 
 - `AGENT.md`: Instructions for the OpenClaw agent.
+- `SKILL.md`: Workspace skill entry copied to `~/.openclaw/workspace/skills/detaches-agent/SKILL.md`.
 - `adapter.manifest.json`: Machine-readable protocol and capability manifest.
 - `skill.manifest.json`: Stable agent-side skill entry metadata.
 - `bin/detaches-agent-adapter.mjs`: CLI used by the agent host.

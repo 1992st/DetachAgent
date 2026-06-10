@@ -4,9 +4,11 @@ import type { DetachesContextExportCreateResponse, OpenClawAdapterInstallPlan, O
 import { createDetachesContextExport, createToolRequest, fetchOpenClawAdapterInstallPlan, fetchOpenClawAdapterReadiness, fetchToolRequests } from "../../lib/api.js";
 
 const defaultInstallDir = "~/.openclaw/detaches_agent";
+const defaultWorkspaceDir = "~/.openclaw/workspace";
 
 export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string | null; agentId: string | null }) {
   const [installDir, setInstallDir] = useState(defaultInstallDir);
+  const [workspaceDir, setWorkspaceDir] = useState(defaultWorkspaceDir);
   const [readiness, setReadiness] = useState<OpenClawAdapterReadiness | null>(null);
   const [installPlan, setInstallPlan] = useState<OpenClawAdapterInstallPlan | null>(null);
   const [probe, setProbe] = useState<"local-fs" | "remote-ssh">("local-fs");
@@ -37,9 +39,9 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
     try {
       const [nextReadiness, nextPlan] = await Promise.all([
         fetchOpenClawAdapterReadiness(nextProbe === "remote-ssh"
-          ? { probe: "remote-ssh", target: "remote-agent-host", installDir }
+          ? { probe: "remote-ssh", target: "remote-agent-host", installDir, workspaceDir }
           : { probe: "local-fs" }),
-        fetchOpenClawAdapterInstallPlan({ installDir })
+        fetchOpenClawAdapterInstallPlan({ installDir, workspaceDir })
       ]);
       setReadiness(nextReadiness);
       setInstallPlan(nextPlan);
@@ -65,7 +67,7 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data) as ToolBrokerSocketEvent;
       if (data.type !== "request" || data.request.kind !== "adapter-install") return;
-      if (!requestMatchesInstallDir(data.request, installDir)) return;
+      if (!requestMatchesInstallDir(data.request, installDir, workspaceDir)) return;
       setInstallRequest(data.request);
       if (data.request.status === "approved" || data.request.status === "failed") {
         setProbe("remote-ssh");
@@ -75,7 +77,7 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
     ws.onerror = () => ws.close();
     return () => ws.close();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionKey, agentId, installDir]);
+  }, [sessionKey, agentId, installDir, workspaceDir]);
 
   async function copy(text: string) {
     if (!text) return;
@@ -98,7 +100,7 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
         agentId: agentId || undefined,
         reason: "Install detaches_agent OpenClaw adapter on the remote agent host after user approval.",
         source: "api",
-        payload: { installDir }
+        payload: { installDir, workspaceDir }
       });
       setRequestMessage(`已创建安装审批请求：${response.request.id}`);
       setInstallRequest(response.request);
@@ -135,7 +137,7 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
       return;
     }
     const response = await fetchToolRequests({ sessionKey, agentId, limit: 50 });
-    const request = response.requests.find((item) => requestMatchesInstallDir(item, installDir)) ?? null;
+    const request = response.requests.find((item) => requestMatchesInstallDir(item, installDir, workspaceDir)) ?? null;
     setInstallRequest(request);
   }
 
@@ -168,6 +170,10 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
       <label className="adapter-field">
         <span>远端安装目录（用于安装计划）</span>
         <input value={installDir} onChange={(event) => setInstallDir(event.target.value)} onBlur={() => void refresh()} />
+      </label>
+      <label className="adapter-field">
+        <span>OpenClaw workspace（用于注册 SKILL.md）</span>
+        <input value={workspaceDir} onChange={(event) => setWorkspaceDir(event.target.value)} onBlur={() => void refresh()} />
       </label>
       {readiness ? (
         <div className={`adapter-state-card ${readiness.state}`}>
@@ -281,10 +287,11 @@ function remoteProbeText(readiness: OpenClawAdapterReadiness): string {
   return remote ? `远端只读 SSH 探测：${remote}` : "远端只读 SSH 探测";
 }
 
-function requestMatchesInstallDir(request: ToolRequestRecord, installDir: string): boolean {
+function requestMatchesInstallDir(request: ToolRequestRecord, installDir: string, workspaceDir: string): boolean {
   return request.kind === "adapter-install"
     && request.target === "remote-agent-host"
-    && (typeof request.payload.installDir !== "string" || request.payload.installDir === installDir);
+    && (typeof request.payload.installDir !== "string" || request.payload.installDir === installDir)
+    && (typeof request.payload.workspaceDir !== "string" || request.payload.workspaceDir === workspaceDir);
 }
 
 function shellQuote(value: string): string {

@@ -5,6 +5,7 @@
   "description": "Agent-side skill metadata for OpenClaw sessions mediated by detaches_agent.",
   "adapterId": "detaches_agent.openclaw.adapter",
   "entrypoints": {
+    "skill": "SKILL.md",
     "instructions": "AGENT.md",
     "adapterManifest": "adapter.manifest.json",
     "cli": "bin/detaches-agent-adapter.mjs"

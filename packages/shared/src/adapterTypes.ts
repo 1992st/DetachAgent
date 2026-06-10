@@ -13,6 +13,7 @@ export interface OpenClawAdapterReadiness {
   probe?: "local-fs" | "remote-ssh";
   remoteHost?: string;
   remoteUser?: string;
+  workspaceDir?: string;
   expectedAdapterId: string;
   expectedVersion: string;
   state: OpenClawAdapterReadinessState;
@@ -26,6 +27,7 @@ export interface OpenClawAdapterInstallPlan {
   version: string;
   baseUrl: string;
   installDir: string;
+  workspaceDir: string;
   bundleUrl: string;
   bundleSha256: string;
   commands: string[];
