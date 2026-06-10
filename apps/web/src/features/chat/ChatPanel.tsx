@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, FileText, Paperclip, Send, Square, X } from "lucide-react";
-import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
-import { approveToolRequest, extractToolRequests, fetchToolRequestResult, rejectToolRequest } from "../../lib/api.js";
+import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
+import { approveToolRequest, extractToolRequests, fetchToolRequestResult, rejectToolRequest, retryToolResultForward } from "../../lib/api.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
 
 interface Props {
@@ -323,10 +323,7 @@ function ToolRequests({
                     })
                     .then((response) => {
                       if (!response) return;
-                      setResultSummaries((current) => ({
-                        ...current,
-                        [index]: `captured ${response.result.outputBytes} bytes from terminal ${response.result.terminalId || ""}`.trim()
-                      }));
+                      setResultSummaries((current) => ({ ...current, [index]: toolResultSummary(response) }));
                     })
                     .catch((error) => {
                       setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
@@ -352,12 +349,41 @@ function ToolRequests({
               <button type="button" className="icon-button" title="Show terminal" onClick={onReveal}>
                 <Eye size={15} />
               </button>
+              {state === "approved" ? (
+                <button
+                  type="button"
+                  className="icon-button"
+                  title="Retry result forward"
+                  onClick={() => {
+                    retryToolResultForward(request.id)
+                      .then((response) => setResultSummaries((current) => ({ ...current, [index]: toolResultSummary(response) })))
+                      .catch((error) => setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) })));
+                  }}
+                >
+                  <Send size={15} />
+                </button>
+              ) : null}
             </div>
           </div>
         );
       })}
     </div>
   );
+}
+
+function toolResultSummary(response: ToolExecutionResultResponse): string {
+  const result = response.result;
+  const status = result.completed
+    ? `completed${typeof result.exitCode === "number" ? `, exit ${result.exitCode}` : ""}`
+    : "still running";
+  const forward = result.forwardStatus === "sent"
+    ? "forwarded to agent"
+    : result.forwardStatus === "failed"
+      ? `forward failed${result.forwardError ? `: ${result.forwardError}` : ""}`
+      : result.forwardStatus === "pending"
+        ? "forward pending"
+        : "forward not started";
+  return `${status}; ${forward}; captured ${result.outputBytes} bytes from terminal ${result.terminalId || ""}`.trim();
 }
 
 function toolRequestCode(request: ToolRequestRecord): string {

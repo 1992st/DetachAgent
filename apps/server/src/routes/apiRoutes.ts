@@ -446,6 +446,14 @@ apiRoutes.get("/tools/requests/:requestId/result", async (req, res) => {
   }
 });
 
+apiRoutes.post("/tools/requests/:requestId/forward", async (req, res) => {
+  try {
+    res.json(await toolBrokerService.retryForward(req.params.requestId));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 apiRoutes.post("/tools/requests/:requestId/reject", async (req, res) => {
   try {
     res.json({ request: await toolBrokerService.reject(req.params.requestId) });

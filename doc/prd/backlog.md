@@ -48,8 +48,8 @@
   - 记录 target、sessionKey、agentId、审批、拒绝、失败原因。
   - 保存路径：`storage/logs/tool-broker-audit.jsonl`。
 - 后续还需要补齐：
-  - 命令真正写入 terminal 的时间已可通过 `tool.approve` 与 `terminalId` 追踪，后续需要 UI 展示。
-  - terminal 输出快照已可通过 `/api/tools/requests/:requestId/result` 查询，并 best-effort 回写 agent；后续需要完成检测和更稳定的摘要策略。
+  - 命令真正写入 terminal 的时间已可通过 `tool.approve` 与 `terminalId` 追踪，UI 已显示基础执行/回写状态，后续需要更完整的执行详情抽屉。
+  - terminal 输出快照已可通过 `/api/tools/requests/:requestId/result` 查询，并通过有状态 outbox 回写 agent；后续需要替换为 Gateway/OpenClaw 原生结构化 tool result，减少 `chat.send` 文本协议依赖。
   - 用户审批 UI 的操作者身份。
   - 与聊天消息 id / runId 的关联。
 

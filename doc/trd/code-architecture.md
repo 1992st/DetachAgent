@@ -75,8 +75,9 @@ detaches_agent/
   - 阻断不可用 target，禁止把 `remote-agent-host` / `gateway-managed` 退化成本机执行。
   - 审批本机 terminal 请求时直接调用 `terminalService.runCommand` 写入会话 terminal。
   - 审批文件传输请求时复用 `fileTransferService.prepareTransfer` 生成一次性 curl 命令，并由 Broker 写入会话 terminal。
-  - 写入命令时注入 start/end marker，记录 executionId、terminalId 和 terminal replay 起点；`/api/tools/requests/:requestId/result` 可查询输出快照、completed 和 exitCode。
-  - best-effort 通过 Gateway `chat.send` 把 `[detaches_agent 工具结果]` 快照回写到同一 session，让 agent 可继续推理。
+  - 写入命令时注入 start/end marker，记录 executionId、terminalId 和 terminal replay 起点；`/api/tools/requests/:requestId/result` 可查询输出快照、completed、exitCode 和工具结果回写状态。
+  - 工具结果回写有 outbox 状态：`not-started` / `pending` / `sent` / `failed`。`POST /api/tools/requests/:requestId/forward` 可手动重试。
+  - 当前仍通过 Gateway `chat.send` 把 `[detaches_agent 工具结果]` 快照回写到同一 session，让 agent 可继续推理；这是过渡层，最终应替换成 OpenClaw/Gateway 原生结构化 tool result。
   - 写入 `storage/logs/tool-broker-audit.jsonl`。
 
 ### 文件
@@ -142,7 +143,7 @@ tool request
 
 路由层负责检查目标环境是否可用、生成审批卡、执行对应 adapter，并把结果回写给 agent。UI 审批卡必须展示 target，避免“归档到你的电脑”这类语义被误执行到本机 staging workspace。
 
-当前已加入服务端 Tool Broker 作为执行路由入口。UI 不再本地解析工具协议，也不再把 approved command 直接写入 terminal；它只把 assistant 文本交给 `/api/tools/requests/extract`，由服务端解析 fenced request、登记请求、阻断 target、审批后写入会话 terminal、记录 execution、回写工具结果快照并写审计日志。后续应让 Gateway adapter 直接产生结构化 tool request，进一步减少文本协议依赖。
+当前已加入服务端 Tool Broker 作为执行路由入口。UI 不再本地解析工具协议，也不再把 approved command 直接写入 terminal；它只把 assistant 文本交给 `/api/tools/requests/extract`，由服务端解析 fenced request、登记请求、阻断 target、审批后写入会话 terminal、记录 execution、查询/重试工具结果回写并写审计日志。后续应让 Gateway adapter 直接产生结构化 tool request 和 tool result，进一步减少文本协议依赖。
 
 当前后端暴露 `/api/gateway/capabilities`，从 Gateway hello/features 中提炼可用能力。已观察到的候选能力包括：
 

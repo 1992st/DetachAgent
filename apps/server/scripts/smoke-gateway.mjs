@@ -402,6 +402,7 @@ async function main() {
     assert.equal(terminalToolResult.result.sessionKey, chatSessionKey);
     assert.equal(terminalToolResult.result.completed, true);
     assert.equal(terminalToolResult.result.exitCode, 0);
+    assert.match(terminalToolResult.result.forwardStatus, /pending|sent/);
     assert.match(terminalToolResult.result.output, /smoke-complete/);
     assert.equal(typeof terminalToolResult.result.output, "string");
     assert.equal(terminalToolResult.result.outputBytes >= 0, true);
@@ -414,6 +415,11 @@ async function main() {
     assert.match(forwardedToolResult.message, /detaches_agent 工具结果/);
     assert.match(forwardedToolResult.message, new RegExp(terminalTool.request.id));
     assert.equal(forwardedToolResult.clientContext?.toolResult, true);
+    const forwardedTerminalToolResult = await requestJson(`/api/tools/requests/${terminalTool.request.id}/result`);
+    assert.equal(forwardedTerminalToolResult.result.forwardStatus, "sent");
+    assert.equal(typeof forwardedTerminalToolResult.result.forwardedAt, "string");
+    const retriedTerminalToolForward = await requestJson(`/api/tools/requests/${terminalTool.request.id}/forward`, { method: "POST" });
+    assert.equal(retriedTerminalToolForward.result.forwardStatus, "sent");
 
     const blockedTerminalTool = await requestJson("/api/tools/requests", {
       method: "POST",
@@ -531,6 +537,7 @@ async function main() {
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.payload?.command === "echo broker-parse"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.command === "printf 'smoke-complete\\n'" && typeof event.terminalId === "string"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && /detaches-note-via-broker\.txt/.test(event.command || "") && typeof event.terminalId === "string"), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.result.forward" && event.status === "sent"), true);
 
     chat.send(JSON.stringify({ type: "abort", runId: "run-smoke-1" }));
     while (!observed.abort) {

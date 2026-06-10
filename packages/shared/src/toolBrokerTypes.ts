@@ -2,6 +2,7 @@ import type { ToolTarget } from "./fileTypes.js";
 
 export type ToolRequestKind = "terminal" | "file-transfer";
 export type ToolRequestStatus = "pending" | "approved" | "rejected" | "blocked" | "started" | "failed";
+export type ToolResultForwardStatus = "not-started" | "pending" | "sent" | "failed";
 
 export interface ToolRequestCreateInput {
   kind: ToolRequestKind;
@@ -55,6 +56,9 @@ export interface ToolExecutionResult {
   sessionKey: string;
   completed: boolean;
   exitCode?: number;
+  forwardStatus: ToolResultForwardStatus;
+  forwardError?: string;
+  forwardedAt?: string;
   output: string;
   outputBytes: number;
   capturedAt: string;

@@ -80,14 +80,15 @@ gateway-managed      预留，需 Gateway 原生文件/工具/artifact adapter
 执行结果查询：
 
 - `GET /api/tools/requests/:requestId/result`
-- 返回 `executionId`、`terminalId`、`sessionKey`、terminal replay 输出切片、`completed`、`exitCode`、`capturedAt`。
-- Tool Broker 会 best-effort 通过 Gateway `chat.send` 把 `[detaches_agent 工具结果]` 快照回写到同一 session。
+- 返回 `executionId`、`terminalId`、`sessionKey`、terminal replay 输出切片、`completed`、`exitCode`、`capturedAt`、`forwardStatus`、`forwardError`、`forwardedAt`。
+- Tool Broker 会通过有状态 outbox 把 `[detaches_agent 工具结果]` 快照回写到同一 session。当前回写通道仍是 Gateway `chat.send`，不是最终的 Gateway 原生 tool result。
 - Tool Broker 通过注入 `__DETACHES_TOOL_START__` / `__DETACHES_TOOL_END__` marker 判断命令是否结束。
 
 审批入口：
 
 - `POST /api/tools/requests/:requestId/approve`
 - `POST /api/tools/requests/:requestId/reject`
+- `POST /api/tools/requests/:requestId/forward`
 
 审计文件：
 

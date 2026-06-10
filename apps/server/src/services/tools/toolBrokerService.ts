@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import type {
   ToolRequestCreateInput,
   ToolRequestDecisionResponse,
+  ToolResultForwardStatus,
   ToolRequestExtractResponse,
   ToolRequestKind,
   ToolRequestRecord,
@@ -19,7 +20,7 @@ import { terminalService } from "../terminal/terminalService.js";
 type AuditEvent =
   | { type: "tool.create"; request: ToolRequestRecord }
   | { type: "tool.approve"; requestId: string; status: ToolRequestStatus; command?: string; terminalId?: string; executionId?: string; error?: string }
-  | { type: "tool.result.forward"; requestId: string; executionId: string; ok: boolean; error?: string }
+  | { type: "tool.result.forward"; requestId: string; executionId: string; status: ToolResultForwardStatus; ok: boolean; error?: string }
   | { type: "tool.reject"; requestId: string; status: ToolRequestStatus };
 
 interface ToolExecutionRecord {
@@ -31,6 +32,9 @@ interface ToolExecutionRecord {
   command: string;
   wrappedCommand: string;
   createdAt: string;
+  forwardStatus: ToolResultForwardStatus;
+  forwardError?: string;
+  forwardedAt?: string;
 }
 
 class ToolBrokerService {
@@ -148,6 +152,7 @@ class ToolBrokerService {
           status: request.status,
           sessionKey: request.sessionKey,
           completed: false,
+          forwardStatus: "not-started",
           output: "",
           outputBytes: 0,
           capturedAt: new Date().toISOString(),
@@ -168,6 +173,9 @@ class ToolBrokerService {
         sessionKey: execution.sessionKey,
         completed: parsed.completed,
         exitCode: parsed.exitCode,
+        forwardStatus: execution.forwardStatus,
+        forwardError: execution.forwardError,
+        forwardedAt: execution.forwardedAt,
         output,
         outputBytes: Buffer.byteLength(output, "utf8"),
         capturedAt: new Date().toISOString(),
@@ -183,6 +191,11 @@ class ToolBrokerService {
     const updated = this.update(request, "rejected");
     await this.audit({ type: "tool.reject", requestId, status: updated.status });
     return updated;
+  }
+
+  async retryForward(requestId: string): Promise<ToolExecutionResultResponse> {
+    await this.forwardResultToAgent(requestId, { delayMs: 0, force: true });
+    return this.result(requestId);
   }
 
   private targetSupported(kind: ToolRequestKind, target: ToolTarget): boolean {
@@ -225,17 +238,20 @@ class ToolBrokerService {
       startOffset: before.replay.length,
       command,
       wrappedCommand,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      forwardStatus: "not-started"
     };
     this.executions.set(execution.executionId, execution);
     return execution;
   }
 
-  private async forwardResultToAgent(requestId: string): Promise<void> {
+  private async forwardResultToAgent(requestId: string, options?: { delayMs?: number; force?: boolean }): Promise<void> {
     const request = this.requireRequest(requestId);
     const execution = [...this.executions.values()].find((item) => item.requestId === requestId);
     if (!execution) return;
-    await delay(600);
+    if (!options?.force && execution.forwardStatus === "sent") return;
+    this.setForwardState(execution, "pending");
+    await delay(options?.delayMs ?? 600);
     try {
       const result = await this.result(requestId);
       const output = result.result.output.trim();
@@ -273,16 +289,31 @@ class ToolBrokerService {
           executionId: execution.executionId
         }
       });
-      await this.audit({ type: "tool.result.forward", requestId, executionId: execution.executionId, ok: true });
+      this.setForwardState(execution, "sent");
+      await this.audit({ type: "tool.result.forward", requestId, executionId: execution.executionId, status: "sent", ok: true });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.setForwardState(execution, "failed", message);
       await this.audit({
         type: "tool.result.forward",
         requestId,
         executionId: execution.executionId,
+        status: "failed",
         ok: false,
-        error: error instanceof Error ? error.message : String(error)
+        error: message
       });
     }
+  }
+
+  private setForwardState(execution: ToolExecutionRecord, status: ToolResultForwardStatus, error?: string): void {
+    const updated: ToolExecutionRecord = {
+      ...execution,
+      forwardStatus: status,
+      forwardError: error,
+      forwardedAt: status === "sent" ? new Date().toISOString() : execution.forwardedAt
+    };
+    if (status !== "failed") delete updated.forwardError;
+    this.executions.set(execution.executionId, updated);
   }
 
   private async audit(event: AuditEvent): Promise<void> {
