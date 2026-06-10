@@ -51,7 +51,8 @@ detaches_agent/
   - 保留消息 `id`、`runId`、role、text、timestamp 和 raw payload，便于审计工具请求来源。
 
 - `apps/server/src/services/clientContextService.ts`
-  - 生成 `clientContext.detaches` 和可见 `[detaches_agent 接入上下文]`。
+  - 生成机器可读 `chat.send.clientContext.detaches` 和短可见 `[detaches_agent 接入上下文]`。
+  - 每次聊天发送可自动创建一次性 `contextExport.consumeUrl`，让远端 agent-side adapter 直接 `doctor --url` 获取完整上下文。
   - 注入最近一次 remote-agent-host adapter readiness 快照，让 agent 能知道远端 adapter 是否已探测/安装。
   - readiness 只作为状态事实，不自动开放通用远端 terminal/file-transfer target。
 
@@ -62,7 +63,7 @@ detaches_agent/
 - `apps/server/src/ws/chatSocket.ts`
   - 前端聊天 WebSocket：`/api/chat/:sessionKey`。
   - 按 sessionKey 过滤 Gateway chat event。
-  - 发送用户消息时追加 detaches_agent 接入上下文和 terminal 控制协议说明。
+  - 发送用户消息时把完整 detaches 上下文放入 `clientContext.detaches`，消息文本只追加短兼容提示和附件提示。
 
 ### Terminal
 
@@ -264,7 +265,7 @@ Client events：
 ## 已知技术限制
 
 - 当前环境中 `node-pty` 可能失败，fallback shell 可执行普通命令，但不是完整 TTY。
-- Gateway `chat.send` 参数校验严格，不能传自定义 `routeContext`，所以 detaches 上下文采用 message 注入方式。
+- Gateway `chat.send` 已使用 `clientContext.detaches` 传递 detaches 上下文；自然语言消息只保留短兼容提示，不再承载完整 broker/capability 状态。
 - 当前没有远端 agent host 的执行 adapter；`detaches-terminal` 和 `detaches-file-transfer` 只支持 `local-user-machine`。如果 agent 请求 `remote-agent-host` 或 `gateway-managed`，UI 必须显示不可用并阻断执行。
 - Chat、terminal、file-transfer 的 UI 和协议解析目前集中在 `ChatPanel.tsx`，附件状态集中在 `App.tsx`，拓展性偏弱：
   - 附件缺少按 session 独立的 store，导致不同 agent 页面之间容易串状态。

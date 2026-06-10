@@ -11,6 +11,8 @@
     "cli": "bin/detaches-agent-adapter.mjs"
   },
   "commands": {
+    "doctorUrl": "detaches-agent-adapter doctor --url <one-time-context-export-url> --output-context /tmp/detaches-client-context.json",
+    "doctorContext": "detaches-agent-adapter doctor --context /tmp/detaches-client-context.json",
     "fetchContext": "detaches-agent-adapter context-fetch <one-time-context-export-url> --output /tmp/detaches-client-context.json",
     "inspectContext": "detaches-agent-adapter inspect-context /tmp/detaches-client-context.json",
     "probeBroker": "detaches-agent-adapter broker-probe <detaches-agent-base-url>",

@@ -21,11 +21,17 @@
 - `SKILL.md`：OpenClaw workspace skill 入口，安装时复制到 `~/.openclaw/workspace/skills/detaches-agent/SKILL.md`，让真实 OpenClaw skills loader 可发现。
 - `AGENT.md`：给远端 OpenClaw agent/skill 使用的操作说明。
 - `README.md`：安装后给人类 operator/agent maintainer 阅读的使用流程。
-- `bin/detaches-agent-adapter.mjs`：CLI，可打印 manifest、校验/诊断 `clientContext.detaches`、生成标准 `detaches-terminal` / `detaches-file-transfer` fenced request。
+- `bin/detaches-agent-adapter.mjs`：CLI，可打印 manifest、校验/诊断 `clientContext.detaches`、通过 `doctor` 生成 agent-side runbook，并生成标准 `detaches-terminal` / `detaches-file-transfer` fenced request 或 broker-event。
 
 它本身不执行命令、不传输文件，也不绕过 detaches_agent UI 审批。它的作用是让真实 agent 机器拥有稳定、可测试、可安装的协议入口，后续再按 OpenClaw 官方 skill/plugin 目录规范包装。
 
-`inspect-context` 是当前最小 agent-side skill 入口：远端 agent 可以把收到的 `clientContext.detaches` 保存为 JSON 后交给 CLI，得到 session identity、adapter readiness、capability target、requestable/unavailable 状态和 hard rules。它只输出机器可读诊断，不执行工具。
+`doctor` 是当前首选 agent-side skill 入口：远端 agent 可以直接消费 `clientContext.detaches.contextExport.consumeUrl`：
+
+```bash
+node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --url "$CONSUME_URL" --output-context /tmp/detaches-client-context.json
+```
+
+也可以对已保存的 `clientContext.detaches` 文件运行 `doctor --context`。`doctor` 输出 session identity、adapter readiness、requestable/blocked target、staged files、hard rules 和 broker-event 命令模板。它只输出诊断和请求模板，不执行工具、不传输文件、不绕过审批。`inspect-context` 仍保留为底层 JSON 诊断命令。
 
 `terminal-request` / `file-transfer-request` 默认仍能输出 fenced block，兼容旧聊天文本解析；同时支持 `--format broker-event` 输出 Tool Broker `gateway-event` JSON envelope，也可以通过 `--submit-url <detaches_agent>/api/tools/events/gateway` 由 CLI 直接提交。结构化提交是当前替代文本 fenced block 的优先路径。
 
@@ -81,10 +87,11 @@ readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 
 这份 manifest 会同时进入两条链路：
 
-- `chat.send.clientContext.detaches`：给 Gateway/agent runtime 使用的结构化上下文。
-- 用户消息中的 `[detaches_agent 接入上下文]`：兼容当前 agent 只能阅读自然语言上下文的场景。
+- `chat.send.clientContext.detaches`：给 Gateway/agent runtime 使用的结构化上下文，是主链路。
+- `clientContext.detaches.contextExport.consumeUrl`：每次聊天发送自动生成的一次性 URL，远端 agent-side `doctor --url` 可直接消费；URL 消费后立即失效。
+- 用户消息中的短 `[detaches_agent 接入上下文]`：兼容当前 agent 只能阅读自然语言上下文的场景；不再承载完整 broker/capability 状态。
 
-两者来自同一份数据，避免 UI、后端和 agent 看到不一致的能力说明。
+这些字段来自同一份数据，避免 UI、后端和 agent 看到不一致的能力说明。
 
 `adapterStatus.remoteAgentHost` 只表达最近一次探测事实，例如 `ready`、`missing`、`error`。它不自动开放通用远端 terminal/file-transfer 能力；agent 仍必须依据 capability target 和 Tool Broker 支持情况发起受控请求。
 

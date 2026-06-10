@@ -32,32 +32,37 @@
 - Gateway connect challenge 被正确响应。
 - agent/session 列表正确返回。
 - 文件上传返回 base64 attachment。
-- `chat.send` 包含原始用户消息、detaches_agent 接入上下文和 `clientContext.detaches.files.staged`。
+- `chat.send` 包含原始用户消息、短 detaches_agent 接入提示和完整 `clientContext.detaches`。
+- `clientContext.detaches.contextExport.consumeUrl` 自动生成，并可被真实 `detaches-agent-adapter doctor --url` 消费；消费后 URL 失效。
+- `doctor --url` 输出 session、agentId、broker 可用状态、staged files 和 broker-event 命令模板。
 - abort 请求被转发。
 
 ## TC-002A OpenClaw detaches adapter
 
-目标：验证远端 agent-side adapter 资产可读取、可校验、可诊断会话上下文、可探测 Tool Broker、可生成标准请求块、结构化 Tool Broker event，并可直接提交 event。
+目标：验证远端 agent-side adapter 资产可读取、可校验、可通过 `doctor` 诊断会话上下文、可消费一次性 context export URL、可探测 Tool Broker、可生成标准请求块、结构化 Tool Broker event，并可直接提交 event。
 
 步骤：
 
 1. 执行 `pnpm --filter @detaches/openclaw-detaches-adapter test`。
 2. 读取 adapter manifest。
 3. 校验一个合法 `clientContext.detaches`。
-4. 用 `inspect-context` 输出 capability target 和路由告警。
-5. 用 `broker-probe` 校验 mock broker capabilities endpoint。
-6. 生成 `detaches-terminal` 请求块。
-7. 生成 `detaches-file-transfer` 请求块。
-8. 生成 `--format broker-event` JSON。
-9. 用 `--submit-url` 向 mock detaches_agent endpoint 提交 broker-event。
-10. 尝试未知 target。
+4. 用 `doctor --context` 输出 agent-side runbook。
+5. 用 `doctor --url` 消费一次性 context export URL，并可选保存 context。
+6. 用 `inspect-context` 输出 capability target 和路由告警。
+7. 用 `broker-probe` 校验 mock broker capabilities endpoint。
+8. 生成 `detaches-terminal` 请求块。
+9. 生成 `detaches-file-transfer` 请求块。
+10. 生成 `--format broker-event` JSON。
+11. 用 `--submit-url` 向 mock detaches_agent endpoint 提交 broker-event。
+12. 尝试未知 target。
 
 期望：
 
 - manifest 声明 `local-user-machine` 为 supported。
 - manifest 声明 `remote-agent-host` / `gateway-managed` 为 reserved。
 - 合法 context 校验通过。
-- `inspect-context` 能识别 `local-user-machine` 可请求、`remote-agent-host` 不可请求。
+- `doctor` 能识别 `local-user-machine` 可请求、`remote-agent-host` 不可请求，并输出 broker-event 命令模板。
+- `doctor --url` 消费一次性 context export URL 后，重复消费同一个 URL 必须失败。
 - `broker-probe` 能识别 detaches_agent broker 协议并拒绝不匹配 endpoint。
 - 请求块必须包含 fenced code block、target 和 reason。
 - broker-event JSON 必须包含 `source: gateway-event`、`sourceEventId`、`sessionKey` 和 `payload`。
