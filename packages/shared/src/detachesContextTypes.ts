@@ -53,6 +53,12 @@ export interface DetachesSessionContext {
   files?: {
     staged: DetachesStagedFileContext[];
   };
+  broker?: {
+    gatewayEventEndpoint: string;
+    eventSource: "gateway-event";
+    idempotencyField: "sourceEventId";
+    requestFormats: Array<"broker-event" | "fence">;
+  };
   capabilities: DetachesToolCapability[];
   invariants: string[];
 }

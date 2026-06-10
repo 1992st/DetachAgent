@@ -68,6 +68,7 @@ readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 - 用户设备身份
 - 最近一次 remote-agent-host adapter readiness 快照
 - 本次消息附带的 staged file 清单
+- Tool Broker 结构化事件入口
 - 可用 capability 列表
 - 每个 capability 的 `supportedTargets` 与 `unavailableTargets`
 - 必须遵守的执行不变量
@@ -82,6 +83,8 @@ readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 `adapterStatus.remoteAgentHost` 只表达最近一次探测事实，例如 `ready`、`missing`、`error`。它不自动开放通用远端 terminal/file-transfer 能力；agent 仍必须依据 capability target 和 Tool Broker 支持情况发起受控请求。
 
 `files.staged` 是本次消息附件的结构化清单，包含 `fileId`、显示名、MIME、大小、本地 staging 位置和默认 `detaches-file-transfer` 请求方式。可见 `[detaches_agent 文件上下文]` 仍作为兼容层保留，但 agent-side adapter/skill 应优先读取 `clientContext.detaches.files.staged`。
+
+`broker.gatewayEventEndpoint` 是 adapter/skill 发起结构化待审批请求的入口，对应 `/api/tools/events/gateway`。adapter CLI 的 `--submit-url` 应优先使用这个值，`sourceEventId` 负责幂等。
 
 ### Gateway 参数兼容
 

@@ -12,6 +12,7 @@ Before requesting tools, inspect the latest `clientContext.detaches` object or t
 - `agentId`
 - user device identity
 - staged files in `files.staged`
+- Tool Broker endpoint in `broker.gatewayEventEndpoint`
 - supported capability targets
 - unavailable targets
 - execution invariants
@@ -58,7 +59,7 @@ node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs terminal-request 
   --format broker-event \
   --session-key "$DETACHES_SESSION_KEY" \
   --source-event-id "$UNIQUE_EVENT_ID" \
-  --submit-url "$DETACHES_AGENT_BASE_URL/api/tools/events/gateway"
+  --submit-url "$DETACHES_BROKER_GATEWAY_EVENT_ENDPOINT"
 ```
 
 Terminal request:

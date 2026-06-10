@@ -47,7 +47,8 @@
   ],
   "optionalContextFields": [
     "adapterStatus",
-    "files.staged"
+    "files.staged",
+    "broker.gatewayEventEndpoint"
   ],
   "hardRules": [
     "Never claim a command, file read, file transfer, download, archive, or modification has happened until approved tool output proves it.",

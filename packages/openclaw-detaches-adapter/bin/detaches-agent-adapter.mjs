@@ -114,6 +114,9 @@ function inspectContext(context) {
   if (adapterStatus?.state === "ready") {
     warnings.push("remote-agent-host adapter assets are detected, but tool routing still depends on detaches_agent capability targets and approval.");
   }
+  if (!context?.broker?.gatewayEventEndpoint) {
+    warnings.push("broker.gatewayEventEndpoint is missing; fall back to fenced requests or ask detaches_agent to resend updated context.");
+  }
   return {
     ok: errors.length === 0,
     errors,
@@ -123,6 +126,7 @@ function inspectContext(context) {
     agentId: context?.agentId ?? null,
     userDevice: context?.userDevice ?? null,
     adapterStatus: adapterStatus ?? null,
+    broker: context?.broker ?? null,
     files: {
       staged: stagedFiles
     },

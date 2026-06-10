@@ -389,6 +389,7 @@ async function main() {
     assert.match(userChatSend.message, /detaches_agent 接入上下文/);
     assert.match(userChatSend.message, /agentId: agent-alpha/);
     assert.match(userChatSend.message, /remoteAdapter: state=error/);
+    assert.match(userChatSend.message, /toolBroker: gatewayEventEndpoint=http:\/\/127\.0\.0\.1:39888\/api\/tools\/events\/gateway; preferredFormat=broker-event/);
     assert.match(userChatSend.message, /terminal targets: supported=local-user-machine; unavailable=remote-agent-host,gateway-managed/);
     assert.match(userChatSend.message, /file-transfer targets: supported=local-user-machine; unavailable=remote-agent-host,gateway-managed/);
     assert.equal(userChatSend.idempotencyKey, "smoke-idempotency");
@@ -403,6 +404,8 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.displayName, "P100协议说明-示例.txt");
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.currentLocation, "user-local-staging");
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.requestFence, "detaches-file-transfer");
+    assert.equal(userChatSend.clientContext?.detaches?.broker?.gatewayEventEndpoint, `http://${host}:${serverPort}/api/tools/events/gateway`);
+    assert.equal(userChatSend.clientContext?.detaches?.broker?.requestFormats?.includes("broker-event"), true);
     assert.equal(userChatSend.clientContext?.detaches?.capabilities?.some((capability) => capability.name === "terminal" && capability.supportedTargets.includes("local-user-machine")), true);
     assert.equal(userChatSend.clientContext?.routeContext?.origin?.provider, "detaches_agent");
     assert.equal(userChatSend.attachments, undefined);

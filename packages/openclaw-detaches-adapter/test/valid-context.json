@@ -28,6 +28,12 @@
       }
     ]
   },
+  "broker": {
+    "gatewayEventEndpoint": "http://127.0.0.1:38888/api/tools/events/gateway",
+    "eventSource": "gateway-event",
+    "idempotencyField": "sourceEventId",
+    "requestFormats": ["broker-event", "fence"]
+  },
   "capabilities": [
     {
       "name": "terminal",

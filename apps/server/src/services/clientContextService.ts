@@ -1,10 +1,16 @@
 import os from "node:os";
 import type { ChatSessionMode, ClientIdentity, DetachesSessionContext, DetachesStagedFileContext, UploadedFileRef } from "@detaches/shared";
+import { appConfig } from "../config/appConfig.js";
 import { loadOrCreateDeviceIdentity } from "./gateway/deviceIdentityService.js";
 import { openclawDetachesAdapterService } from "./adapters/openclawDetachesAdapterService.js";
 
 function deviceShortId(deviceId: string): string {
   return deviceId.replace(/[^a-z0-9]/gi, "").slice(0, 12).toLowerCase() || "local";
+}
+
+function publicBaseUrl(): string {
+  const host = appConfig.serverHost === "0.0.0.0" ? "127.0.0.1" : appConfig.serverHost;
+  return `http://${host}:${appConfig.serverPort}`;
 }
 
 export function publicClientIdentity(): ClientIdentity {
@@ -59,6 +65,12 @@ export function buildDetachesSessionContext(sessionMode: ChatSessionMode, sessio
     },
     files: {
       staged: stagedFiles
+    },
+    broker: {
+      gatewayEventEndpoint: `${publicBaseUrl()}/api/tools/events/gateway`,
+      eventSource: "gateway-event",
+      idempotencyField: "sourceEventId",
+      requestFormats: ["broker-event", "fence"]
     },
     capabilities: [
       {
@@ -135,6 +147,7 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
     context.agentId ? `agentId: ${context.agentId}` : "agentId: unknown",
     `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}; installDir=${remoteAdapter?.installDir || "unknown"}; summary=${remoteAdapter?.summary || "not probed"}`,
+    `toolBroker: gatewayEventEndpoint=${context.broker?.gatewayEventEndpoint || "unknown"}; preferredFormat=broker-event; idempotency=${context.broker?.idempotencyField || "sourceEventId"}`,
     "当前用户这台电脑已经为本对话绑定了一个持久本机 terminal。这个 terminal 默认隐藏在用户界面里，用户可以点开查看活动。",
     `terminal targets: supported=${terminal?.supportedTargets.join(",") || "none"}; unavailable=${terminal?.unavailableTargets.join(",") || "none"}`,
     `file-transfer targets: supported=${transfer?.supportedTargets.join(",") || "none"}; unavailable=${transfer?.unavailableTargets.join(",") || "none"}`,
