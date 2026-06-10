@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import SftpClient from "ssh2-sftp-client";
-import type { FileTransferPrepareResponse, UploadedFileRef } from "@detaches/shared";
+import type { FileTransferPrepareResponse, ToolTarget, UploadedFileRef } from "@detaches/shared";
 import { appConfig } from "../../config/appConfig.js";
 import { runtimeConfig } from "../../config/settingsStore.js";
 
@@ -40,6 +40,7 @@ interface StagedFileRecord extends UploadedFileRef {
 
 interface TransferTokenRecord {
   fileId: string;
+  target: ToolTarget;
   token: string;
   expiresAtMs: number;
 }
@@ -57,6 +58,7 @@ type FileTransferAuditEvent =
   | {
       type: "transfer.prepare";
       fileId: string;
+      target: ToolTarget;
       fileName: string;
       remotePath: string;
       downloadUrl: string;
@@ -66,12 +68,14 @@ type FileTransferAuditEvent =
   | {
       type: "transfer.download.start";
       fileId: string;
+      target: ToolTarget;
       fileName: string;
       localPath: string;
     }
   | {
       type: "transfer.download.cleanup";
       fileId: string;
+      target: ToolTarget;
       fileName: string;
       localPath: string;
       deleted: boolean;
@@ -79,6 +83,7 @@ type FileTransferAuditEvent =
   | {
       type: "transfer.error";
       fileId?: string;
+      target?: ToolTarget;
       reason: string;
     };
 
@@ -115,23 +120,28 @@ export class FileTransferService {
     return ref;
   }
 
-  async prepareTransfer(fileId: string, remotePath: string): Promise<FileTransferPrepareResponse> {
+  async prepareTransfer(fileId: string, target: ToolTarget, remotePath: string): Promise<FileTransferPrepareResponse> {
+    if (target !== "local-user-machine") {
+      await this.audit({ type: "transfer.error", fileId, target, reason: `Unsupported transfer target: ${target}` });
+      throw new Error(`Unsupported transfer target: ${target}.`);
+    }
     const file = this.stagedFiles.get(fileId);
     if (!file) {
-      void this.audit({ type: "transfer.error", fileId, reason: "Staged file not found or already transferred." });
+      void this.audit({ type: "transfer.error", fileId, target, reason: "Staged file not found or already transferred." });
       throw new Error("Staged file not found or already transferred.");
     }
     const cleanedRemotePath = remotePath.trim();
     if (!cleanedRemotePath || cleanedRemotePath.includes("\0") || cleanedRemotePath.endsWith("/")) {
-      void this.audit({ type: "transfer.error", fileId, reason: "remotePath must be a target file path." });
+      void this.audit({ type: "transfer.error", fileId, target, reason: "remotePath must be a target file path." });
       throw new Error("remotePath must be a target file path.");
     }
     const token = nanoid(32);
     const expiresAtMs = Date.now() + 10 * 60 * 1000;
-    this.transferTokens.set(token, { fileId, token, expiresAtMs });
+    this.transferTokens.set(token, { fileId, target, token, expiresAtMs });
     const downloadUrl = `http://${this.localAccessHost()}:${appConfig.serverPort}/api/files/staged/${encodeURIComponent(fileId)}?token=${encodeURIComponent(token)}`;
     const response = {
       fileId,
+      target,
       fileName: file.displayName || file.name,
       remotePath: cleanedRemotePath,
       downloadUrl,
@@ -141,6 +151,7 @@ export class FileTransferService {
     await this.audit({
       type: "transfer.prepare",
       fileId,
+      target,
       fileName: response.fileName,
       remotePath: response.remotePath,
       downloadUrl: response.downloadUrl,
@@ -171,6 +182,7 @@ export class FileTransferService {
     await this.audit({
       type: "transfer.download.start",
       fileId,
+      target: tokenRecord.target,
       fileName: file.displayName || file.name,
       localPath: file.localPath
     });
@@ -187,6 +199,7 @@ export class FileTransferService {
       await this.audit({
         type: "transfer.download.cleanup",
         fileId,
+        target: tokenRecord.target,
         fileName: file.displayName || file.name,
         localPath: file.localPath,
         deleted

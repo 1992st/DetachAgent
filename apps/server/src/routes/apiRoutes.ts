@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import express from "express";
 import multer from "multer";
-import type { AppHealth, DiagnosticItem, DiagnosticsResponse, NetworkTestResponse, NetworkTestStep } from "@detaches/shared";
+import type { AppHealth, DiagnosticItem, DiagnosticsResponse, NetworkTestResponse, NetworkTestStep, ToolTarget } from "@detaches/shared";
 import { appConfig } from "../config/appConfig.js";
 import { settingsStore, runtimeConfig } from "../config/settingsStore.js";
 import { sshTunnelService } from "../services/tunnel/sshTunnelService.js";
@@ -362,15 +362,23 @@ apiRoutes.post("/files/upload", upload.single("file"), async (req, res) => {
   }
 });
 
+function parseToolTarget(value: unknown): ToolTarget {
+  if (value === "remote-agent-host" || value === "gateway-managed" || value === "local-user-machine") {
+    return value;
+  }
+  return "local-user-machine";
+}
+
 apiRoutes.post("/files/transfer/prepare", async (req, res) => {
   try {
     const fileId = String(req.body.fileId || "");
     const remotePath = String(req.body.remotePath || "");
+    const target = parseToolTarget(req.body.target);
     if (!fileId || !remotePath) {
       res.status(400).json({ error: "Missing fileId or remotePath." });
       return;
     }
-    res.json(await fileTransferService.prepareTransfer(fileId, remotePath));
+    res.json(await fileTransferService.prepareTransfer(fileId, target, remotePath));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }

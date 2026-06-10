@@ -305,9 +305,10 @@ async function main() {
     const preparedTransfer = await requestJson("/api/files/transfer/prepare", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileId: upload.file.id, remotePath: "/tmp/detaches-note.txt" })
+      body: JSON.stringify({ fileId: upload.file.id, target: "local-user-machine", remotePath: "/tmp/detaches-note.txt" })
     });
     assert.equal(preparedTransfer.fileId, upload.file.id);
+    assert.equal(preparedTransfer.target, "local-user-machine");
     assert.equal(preparedTransfer.remotePath, "/tmp/detaches-note.txt");
     assert.match(preparedTransfer.downloadUrl, new RegExp(`^http://${host}:${serverPort}/api/files/staged/`));
     assert.match(preparedTransfer.command, /curl -fL/);
@@ -325,9 +326,17 @@ async function main() {
       .split("\n")
       .map((line) => JSON.parse(line));
     assert.equal(auditEvents.some((event) => event.type === "upload" && event.fileId === upload.file.id), true);
-    assert.equal(auditEvents.some((event) => event.type === "transfer.prepare" && event.fileId === upload.file.id && event.remotePath === "/tmp/detaches-note.txt"), true);
-    assert.equal(auditEvents.some((event) => event.type === "transfer.download.start" && event.fileId === upload.file.id), true);
-    assert.equal(auditEvents.some((event) => event.type === "transfer.download.cleanup" && event.fileId === upload.file.id && event.deleted === true), true);
+    assert.equal(auditEvents.some((event) => event.type === "transfer.prepare" && event.fileId === upload.file.id && event.target === "local-user-machine" && event.remotePath === "/tmp/detaches-note.txt"), true);
+    assert.equal(auditEvents.some((event) => event.type === "transfer.download.start" && event.fileId === upload.file.id && event.target === "local-user-machine"), true);
+    assert.equal(auditEvents.some((event) => event.type === "transfer.download.cleanup" && event.fileId === upload.file.id && event.target === "local-user-machine" && event.deleted === true), true);
+
+    const unsupportedTransfer = await fetch(`http://${host}:${serverPort}/api/files/transfer/prepare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId: upload.file.id, target: "remote-agent-host", remotePath: "/tmp/remote.txt" })
+    });
+    assert.equal(unsupportedTransfer.status, 400);
+    assert.match(await unsupportedTransfer.text(), /Unsupported transfer target/);
 
     chat.send(JSON.stringify({ type: "abort", runId: "run-smoke-1" }));
     while (!observed.abort) {

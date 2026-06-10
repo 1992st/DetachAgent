@@ -1,3 +1,5 @@
+export type ToolTarget = "local-user-machine" | "remote-agent-host" | "gateway-managed";
+
 export interface UploadedFileRef {
   id: string;
   name: string;
@@ -18,11 +20,13 @@ export interface FileUploadResponse {
 
 export interface FileTransferPrepareRequest {
   fileId: string;
+  target: ToolTarget;
   remotePath: string;
 }
 
 export interface FileTransferPrepareResponse {
   fileId: string;
+  target: ToolTarget;
   fileName: string;
   remotePath: string;
   downloadUrl: string;

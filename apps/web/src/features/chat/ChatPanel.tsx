@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, FileText, Paperclip, Send, Square, X } from "lucide-react";
-import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, UploadedFileRef } from "@detaches/shared";
+import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, ToolTarget, UploadedFileRef } from "@detaches/shared";
 import { prepareFileTransfer } from "../../lib/api.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
 
@@ -130,7 +130,7 @@ export function ChatPanel({
   }
 
   async function prepareAndRunFileTransfer(request: FileTransferRequest) {
-    const response = await prepareFileTransfer(request.fileId, request.remotePath);
+    const response = await prepareFileTransfer(request.fileId, request.target, request.remotePath);
     const ok = terminalRef.current?.runCommand(response.command) ?? false;
     terminalRef.current?.reveal();
     if (!ok) {
@@ -263,8 +263,6 @@ interface FileTransferRequest {
   target: ToolTarget;
   reason?: string;
 }
-
-type ToolTarget = "local-user-machine" | "remote-agent-host" | "gateway-managed";
 
 const targetLabels: Record<ToolTarget, string> = {
   "local-user-machine": "用户本机",

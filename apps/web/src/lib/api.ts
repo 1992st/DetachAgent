@@ -7,7 +7,8 @@ import type {
   FileUploadResponse,
   NetworkTestResponse,
   PublicSettings,
-  SettingsUpdate
+  SettingsUpdate,
+  ToolTarget
 } from "@detaches/shared";
 
 async function errorMessage(res: Response): Promise<string> {
@@ -53,11 +54,11 @@ export async function uploadFile(file: File, sessionKey: string): Promise<FileUp
   return res.json();
 }
 
-export async function prepareFileTransfer(fileId: string, remotePath: string): Promise<FileTransferPrepareResponse> {
+export async function prepareFileTransfer(fileId: string, target: ToolTarget, remotePath: string): Promise<FileTransferPrepareResponse> {
   const res = await fetch("/api/files/transfer/prepare", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileId, remotePath })
+    body: JSON.stringify({ fileId, target, remotePath })
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
