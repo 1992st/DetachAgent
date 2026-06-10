@@ -61,6 +61,16 @@ export interface DetachesSessionContext {
     submitTokenHeader: "Authorization";
     requestFormats: Array<"broker-event" | "fence">;
   };
+  contextExport?: {
+    createEndpoint: string;
+    consumeEndpointPattern: string;
+    createdBy: "detaches-ui-loopback";
+    consumedBy: "remote-agent-host";
+    oneTime: true;
+    ttlSeconds: number;
+    adapterCommand: "context-fetch";
+    note: string;
+  };
   capabilities: DetachesToolCapability[];
   invariants: string[];
 }

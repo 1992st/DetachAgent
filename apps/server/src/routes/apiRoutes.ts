@@ -650,6 +650,15 @@ apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
     submitTokenHeader: "Authorization",
     requestFormats: ["broker-event", "fence"],
     requestKinds: ["terminal", "file-transfer", "adapter-install"],
+    contextExport: {
+      createEndpoint: `${publicServerBaseUrl(config)}/api/context/exports`,
+      consumeEndpointPattern: `${publicServerBaseUrl(config)}/api/context/exports/{token}`,
+      createdBy: "detaches-ui-loopback",
+      consumedBy: "remote-agent-host",
+      oneTime: true,
+      ttlSeconds: 300,
+      adapterCommand: "context-fetch"
+    },
     targets: ["local-user-machine", "remote-agent-host", "gateway-managed"],
     approvalRequired: true,
     adapterId: "detaches_agent.openclaw.adapter"

@@ -57,6 +57,8 @@ assert.equal(parsedInspection.broker.idempotencyField, "sourceEventId");
 assert.equal(parsedInspection.broker.submitToken, "test-submit-token");
 assert.equal(parsedInspection.broker.submitTokenHeader, "Authorization");
 assert.equal(parsedInspection.broker.requestFormats.includes("broker-event"), true);
+assert.equal(parsedInspection.contextExport.oneTime, true);
+assert.equal(parsedInspection.contextExport.adapterCommand, "context-fetch");
 assert.deepEqual(parsedInspection.targetSupport["local-user-machine"].supportedBy, ["terminal"]);
 assert.equal(parsedInspection.targetSupport["local-user-machine"].requestable, true);
 assert.deepEqual(parsedInspection.targetSupport["remote-agent-host"].unavailableBy, ["terminal"]);
@@ -304,6 +306,15 @@ const probeServer = http.createServer((_req, res) => {
     submitTokenHeader: "Authorization",
     requestFormats: ["broker-event", "fence"],
     requestKinds: ["terminal", "file-transfer", "adapter-install"],
+    contextExport: {
+      createEndpoint: "http://127.0.0.1:38888/api/context/exports",
+      consumeEndpointPattern: "http://127.0.0.1:38888/api/context/exports/{token}",
+      createdBy: "detaches-ui-loopback",
+      consumedBy: "remote-agent-host",
+      oneTime: true,
+      ttlSeconds: 300,
+      adapterCommand: "context-fetch"
+    },
     targets: ["local-user-machine", "remote-agent-host", "gateway-managed"],
     approvalRequired: true,
     adapterId: "detaches_agent.openclaw.adapter"

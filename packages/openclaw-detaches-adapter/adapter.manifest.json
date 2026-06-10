@@ -52,7 +52,9 @@
     "files.staged",
     "broker.gatewayEventEndpoint",
     "broker.submitToken",
-    "one-time context export URL"
+    "contextExport.createEndpoint",
+    "contextExport.consumeEndpointPattern",
+    "contextExport.adapterCommand"
   ],
   "hardRules": [
     "Never claim a command, file read, file transfer, download, archive, or modification has happened until approved tool output proves it.",

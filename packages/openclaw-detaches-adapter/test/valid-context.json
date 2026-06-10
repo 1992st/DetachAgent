@@ -36,6 +36,16 @@
     "submitTokenHeader": "Authorization",
     "requestFormats": ["broker-event", "fence"]
   },
+  "contextExport": {
+    "createEndpoint": "http://127.0.0.1:38888/api/context/exports",
+    "consumeEndpointPattern": "http://127.0.0.1:38888/api/context/exports/{token}",
+    "createdBy": "detaches-ui-loopback",
+    "consumedBy": "remote-agent-host",
+    "oneTime": true,
+    "ttlSeconds": 300,
+    "adapterCommand": "context-fetch",
+    "note": "Ask the user to generate a one-time context URL in the Adapter panel."
+  },
   "capabilities": [
     {
       "name": "terminal",

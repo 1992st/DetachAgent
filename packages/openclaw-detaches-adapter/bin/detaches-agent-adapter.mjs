@@ -148,6 +148,7 @@ function inspectContext(context) {
     userDevice: context?.userDevice ?? null,
     adapterStatus: adapterStatus ?? null,
     broker: context?.broker ?? null,
+    contextExport: context?.contextExport ?? null,
     files: {
       staged: stagedFiles
     },
@@ -204,6 +205,8 @@ async function brokerProbe(value) {
   if (payload?.submitTokenRequired !== true) errors.push("submitTokenRequired must be true");
   if (payload?.submitTokenHeader !== "Authorization") errors.push("submitTokenHeader must be Authorization");
   if (!Array.isArray(payload?.requestFormats) || !payload.requestFormats.includes("broker-event")) errors.push("requestFormats must include broker-event");
+  if (payload?.contextExport?.oneTime !== true) errors.push("contextExport.oneTime must be true");
+  if (payload?.contextExport?.adapterCommand !== "context-fetch") errors.push("contextExport.adapterCommand must be context-fetch");
   if (payload?.adapterId !== "detaches_agent.openclaw.adapter") errors.push("adapterId mismatch");
   const result = { ok: errors.length === 0, url, errors, capabilities: payload };
   console.log(JSON.stringify(result, null, 2));

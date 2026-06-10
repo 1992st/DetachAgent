@@ -73,6 +73,16 @@ export async function buildDetachesSessionContext(sessionMode: ChatSessionMode, 
       submitTokenHeader: "Authorization",
       requestFormats: ["broker-event", "fence"]
     },
+    contextExport: {
+      createEndpoint: `${baseUrl}/api/context/exports`,
+      consumeEndpointPattern: `${baseUrl}/api/context/exports/{token}`,
+      createdBy: "detaches-ui-loopback",
+      consumedBy: "remote-agent-host",
+      oneTime: true,
+      ttlSeconds: 300,
+      adapterCommand: "context-fetch",
+      note: "Ask the user to generate a one-time context URL in the detaches_agent Adapter panel when the remote agent host needs a fresh full clientContext. Do not invent or request broker tokens in chat."
+    },
     capabilities: [
       {
         name: "terminal",
@@ -149,6 +159,7 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
     `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}; installDir=${remoteAdapter?.installDir || "unknown"}; summary=${remoteAdapter?.summary || "not probed"}`,
     `toolBroker: gatewayEventEndpoint=${context.broker?.gatewayEventEndpoint || "unknown"}; preferredFormat=broker-event; idempotency=${context.broker?.idempotencyField || "sourceEventId"}; submitTokenHeader=${context.broker?.submitTokenHeader || "Authorization"}`,
+    `contextExport: create=${context.contextExport?.createEndpoint || "unknown"}; consume=${context.contextExport?.consumeEndpointPattern || "unknown"}; oneTime=${context.contextExport?.oneTime ? "true" : "false"}; adapterCommand=${context.contextExport?.adapterCommand || "context-fetch"}`,
     "当前用户这台电脑已经为本对话绑定了一个持久本机 terminal。这个 terminal 默认隐藏在用户界面里，用户可以点开查看活动。",
     `terminal targets: supported=${terminal?.supportedTargets.join(",") || "none"}; unavailable=${terminal?.unavailableTargets.join(",") || "none"}`,
     `file-transfer targets: supported=${transfer?.supportedTargets.join(",") || "none"}; unavailable=${transfer?.unavailableTargets.join(",") || "none"}`,

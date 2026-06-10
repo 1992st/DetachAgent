@@ -294,6 +294,9 @@ async function main() {
     assert.equal(brokerCapabilities.protocolVersion, 1);
     assert.equal(brokerCapabilities.gatewayEventEndpoint, `${publicBaseUrl}/api/tools/events/gateway`);
     assert.equal(brokerCapabilities.requestFormats.includes("broker-event"), true);
+    assert.equal(brokerCapabilities.contextExport.oneTime, true);
+    assert.equal(brokerCapabilities.contextExport.adapterCommand, "context-fetch");
+    assert.equal(brokerCapabilities.contextExport.createEndpoint, `${publicBaseUrl}/api/context/exports`);
     const adapterCli = path.resolve(new URL("../../../packages/openclaw-detaches-adapter/bin/detaches-agent-adapter.mjs", import.meta.url).pathname);
     const adapterProbe = await execFileAsync(process.execPath, [adapterCli, "broker-probe", publicBaseUrl]);
     assert.equal(JSON.parse(adapterProbe.stdout).ok, true);
@@ -430,6 +433,7 @@ async function main() {
     assert.match(userChatSend.message, /agentId: agent-alpha/);
     assert.match(userChatSend.message, /remoteAdapter: state=error/);
     assert.match(userChatSend.message, new RegExp(`toolBroker: gatewayEventEndpoint=${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/tools/events/gateway; preferredFormat=broker-event`));
+    assert.match(userChatSend.message, new RegExp(`contextExport: create=${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/context/exports; consume=`));
     assert.match(userChatSend.message, /terminal targets: supported=local-user-machine; unavailable=remote-agent-host,gateway-managed/);
     assert.match(userChatSend.message, /file-transfer targets: supported=local-user-machine; unavailable=remote-agent-host,gateway-managed/);
     assert.equal(userChatSend.idempotencyKey, "smoke-idempotency");
@@ -449,6 +453,9 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.broker?.submitToken, exportedContextWithToken.detaches.broker.submitToken);
     assert.equal(userChatSend.clientContext?.detaches?.broker?.submitTokenHeader, "Authorization");
     assert.equal(userChatSend.clientContext?.detaches?.broker?.requestFormats?.includes("broker-event"), true);
+    assert.equal(userChatSend.clientContext?.detaches?.contextExport?.oneTime, true);
+    assert.equal(userChatSend.clientContext?.detaches?.contextExport?.adapterCommand, "context-fetch");
+    assert.equal(userChatSend.clientContext?.detaches?.contextExport?.createdBy, "detaches-ui-loopback");
     assert.equal(userChatSend.clientContext?.detaches?.capabilities?.some((capability) => capability.name === "terminal" && capability.supportedTargets.includes("local-user-machine")), true);
     assert.equal(userChatSend.clientContext?.routeContext?.origin?.provider, "detaches_agent");
     assert.equal(userChatSend.attachments, undefined);

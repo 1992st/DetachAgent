@@ -20,6 +20,8 @@ Before requesting tools, inspect the latest `clientContext.detaches` object or t
 
 If the context is missing, ask the user to resend through detaches_agent or avoid tool requests.
 
+`clientContext.detaches.contextExport` describes how a fresh full context can be handed to the real agent host. The remote agent host consumes the URL, but only the user's local detaches_agent UI can create it.
+
 If detaches_agent provides a one-time context export URL, fetch it on the real agent host and save it before requesting tools:
 
 ```sh
