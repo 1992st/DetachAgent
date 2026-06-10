@@ -1213,6 +1213,39 @@ h3 { font-size: 14px; }
   overflow-wrap: anywhere;
 }
 
+.adapter-install-request {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.adapter-install-request.pending {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.adapter-install-request.approved {
+  border-color: #99f6e4;
+  background: #f0fdfa;
+}
+
+.adapter-install-request.failed,
+.adapter-install-request.blocked {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.adapter-install-request small,
+.adapter-install-request p {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .adapter-command-box {
   display: grid;
   gap: 8px;

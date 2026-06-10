@@ -1,7 +1,7 @@
 import { CheckCircle2, Clipboard, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { OpenClawAdapterInstallPlan, OpenClawAdapterReadiness } from "@detaches/shared";
-import { createToolRequest, fetchOpenClawAdapterInstallPlan, fetchOpenClawAdapterReadiness } from "../../lib/api.js";
+import type { OpenClawAdapterInstallPlan, OpenClawAdapterReadiness, ToolRequestRecord } from "@detaches/shared";
+import { createToolRequest, fetchOpenClawAdapterInstallPlan, fetchOpenClawAdapterReadiness, fetchToolRequests } from "../../lib/api.js";
 
 const defaultInstallDir = "~/.openclaw/detaches_agent";
 
@@ -14,6 +14,7 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
   const [planOpen, setPlanOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [requestMessage, setRequestMessage] = useState<string | null>(null);
+  const [installRequest, setInstallRequest] = useState<ToolRequestRecord | null>(null);
 
   const installCommands = useMemo(() => installPlan?.commands.join("\n") ?? "", [installPlan]);
   const remoteVerifyCommands = useMemo(() => installPlan?.verifyCommands.join("\n") ?? "", [installPlan]);
@@ -30,6 +31,7 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
       ]);
       setReadiness(nextReadiness);
       setInstallPlan(nextPlan);
+      await refreshInstallRequest();
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -66,11 +68,27 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
         payload: { installDir }
       });
       setRequestMessage(`已创建安装审批请求：${response.request.id}`);
+      setInstallRequest(response.request);
+      setProbe("remote-ssh");
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
     }
+  }
+
+  async function refreshInstallRequest() {
+    if (!sessionKey) {
+      setInstallRequest(null);
+      return;
+    }
+    const response = await fetchToolRequests({ sessionKey, agentId, limit: 50 });
+    const request = response.requests.find((item) => (
+      item.kind === "adapter-install"
+      && item.target === "remote-agent-host"
+      && (typeof item.payload.installDir !== "string" || item.payload.installDir === installDir)
+    )) ?? null;
+    setInstallRequest(request);
   }
 
   return (
@@ -124,7 +142,7 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
       <div className="adapter-actions">
         <button type="button" className="secondary-button compact" onClick={() => void createInstallRequest()} disabled={!sessionKey || loading}>
           <ShieldCheck size={14} />
-          创建安装审批
+          {installRequest?.status === "pending" ? "已有安装审批" : "创建安装审批"}
         </button>
         <button type="button" className="secondary-button compact" onClick={() => setPlanOpen((current) => !current)}>
           <Terminal size={14} />
@@ -134,6 +152,14 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
           <Clipboard size={14} />
         </button>
       </div>
+      {installRequest ? (
+        <div className={`adapter-install-request ${installRequest.status}`}>
+          <strong>安装请求：{installRequest.status}</strong>
+          <small>{installRequest.id}</small>
+          {installRequest.error ? <p>{installRequest.error}</p> : null}
+          {installRequest.risk ? <p>Risk: {installRequest.risk.level}{installRequest.risk.reasons.length ? ` · ${installRequest.risk.reasons.join("; ")}` : ""}</p> : null}
+        </div>
+      ) : null}
       {requestMessage ? <p className="adapter-request-message">{requestMessage}</p> : null}
       {planOpen ? (
         <div className="adapter-command-box">
