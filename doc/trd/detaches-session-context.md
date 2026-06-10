@@ -75,6 +75,8 @@ gateway-managed      预留，需 Gateway 原生文件/工具/artifact adapter
 
 服务端 `/api/tools/requests/extract` 负责解析 assistant 文本中的 `detaches-terminal` / `detaches-file-transfer` fenced block，并生成 `ToolRequestRecord`。前端只渲染 broker 返回的请求状态，不再维护自己的协议解析器。兼容文本解析路径会带上 `sourceMessageId` / `sourceRunId`，用于把工具请求回溯到具体聊天消息或 run。
 
+`chat.history` 和 live chat payload 中的 `runId` 会被映射到共享 `ChatMessage.runId`。当某条 assistant 消息里包含兼容 fenced block 工具请求时，UI 会同时把 `sourceMessageId` 和 `sourceRunId` 交给 Broker，避免只知道“哪条消息触发”，却不知道“哪个 Gateway run 触发”。
+
 结构化 Gateway 事件入口：
 
 - `POST /api/tools/events/gateway`

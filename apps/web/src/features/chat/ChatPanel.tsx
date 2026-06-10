@@ -175,6 +175,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
               sessionKey={sessionKey}
               agentId={agentId}
               sourceMessageId={message.id}
+              sourceRunId={message.runId}
               clientIdentity={clientIdentity}
               onReveal={() => terminalRef.current?.reveal()}
             />
@@ -266,6 +267,7 @@ function ToolRequests({
   sessionKey,
   agentId,
   sourceMessageId,
+  sourceRunId,
   clientIdentity,
   onReveal
 }: {
@@ -273,6 +275,7 @@ function ToolRequests({
   sessionKey: string | null;
   agentId: string | null;
   sourceMessageId: string;
+  sourceRunId?: string;
   clientIdentity: ClientIdentity | null;
   onReveal: () => void;
 }) {
@@ -289,7 +292,7 @@ function ToolRequests({
     setErrors({});
     setResultSummaries({});
     setRequests([]);
-    const loadRequests = () => extractToolRequests({ text, sessionKey, agentId, sourceMessageId })
+    const loadRequests = () => extractToolRequests({ text, sessionKey, agentId, sourceMessageId, sourceRunId })
       .then((response) => {
         const extractedIds = new Set(response.requests.map((request) => request.id));
         return fetchToolRequests({ sessionKey, agentId, limit: 100 })
@@ -313,7 +316,7 @@ function ToolRequests({
       })
       .catch((error) => setErrors({ 0: error instanceof Error ? error.message : String(error) }));
     void loadRequests();
-  }, [text, sessionKey, agentId, sourceMessageId]);
+  }, [text, sessionKey, agentId, sourceMessageId, sourceRunId]);
   if (!requests.length && !errors[0]) return null;
 
   return (
@@ -484,10 +487,12 @@ function upsertGatewayChat(current: ChatMessage[], payload: unknown): ChatMessag
   if (!text) return current;
   const role = roleFromGatewayPayload(anyPayload);
   const identity = streamIdentity(anyPayload);
+  const runId = runIdentity(anyPayload);
   const updatedAt = new Date().toISOString();
   const existingIndex = findExistingStreamMessage(current, identity, role);
   const nextMessage: ChatMessage = {
     id: identity ?? crypto.randomUUID(),
+    runId,
     role,
     text,
     timestamp: updatedAt,
@@ -498,6 +503,7 @@ function upsertGatewayChat(current: ChatMessage[], payload: unknown): ChatMessag
     if (index !== existingIndex) return message;
     return {
       ...message,
+      runId: message.runId ?? runId,
       text: mergeStreamText(message.text, text, anyPayload),
       timestamp: updatedAt,
       raw: payload
@@ -526,6 +532,21 @@ function mergeStreamText(previous: string, incoming: string, payload: Record<str
   const eventType = String(payload.type ?? payload.event ?? payload.kind ?? "");
   if (eventType.includes("delta") || typeof payload.delta === "string") return `${previous}${incoming}`;
   return incoming.length >= previous.length ? incoming : `${previous}${incoming}`;
+}
+
+function runIdentity(payload: Record<string, unknown>): string | undefined {
+  const direct = payload.runId ?? payload.run_id;
+  if (typeof direct === "string" && direct.trim()) return direct;
+  const run = payload.run as Record<string, unknown> | undefined;
+  if (run && typeof run.id === "string" && run.id.trim()) return run.id;
+  for (const key of ["payload", "message", "event", "data", "meta", "metadata"]) {
+    const child = payload[key];
+    if (child && typeof child === "object") {
+      const found = runIdentity(child as Record<string, unknown>);
+      if (found) return found;
+    }
+  }
+  return undefined;
 }
 
 function streamIdentity(payload: Record<string, unknown>): string | null {

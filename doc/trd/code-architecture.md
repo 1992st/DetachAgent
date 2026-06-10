@@ -44,6 +44,10 @@ detaches_agent/
   - 维护 OpenClaw Gateway WebSocket。
   - 支持 connect challenge、health、agents.list、sessions.list、chat.history、chat.send、chat.abort。
 
+- `apps/server/src/services/gateway/chatMapper.ts`
+  - 把 Gateway `chat.history` 返回值转换成共享 `ChatMessage`。
+  - 保留消息 `id`、`runId`、role、text、timestamp 和 raw payload，便于审计工具请求来源。
+
 - `apps/server/src/services/gateway/agentDirectoryService.ts`
   - 合并 Gateway agents 和 sessions。
   - 生成 UI agent summary。
@@ -114,6 +118,7 @@ detaches_agent/
   - 建立 `/api/chat/:sessionKey` WebSocket。
   - 渲染历史、用户消息、assistant 流式消息。
   - 合并流式响应，避免重复打印。
+  - 从 Gateway live chat payload 中提取 `runId`，并在兼容 fenced block 解析时传给 Tool Broker。
   - 把 assistant 文本交给 Tool Broker 解析，按返回的 `ToolRequestRecord` 渲染审批卡。
   - 保留消息内审批卡作为 fenced block 兼容入口。
   - 用户 Run/Transfer 后调用 Tool Broker 审批；Broker 在服务端写入 terminal，前端只展开 terminal 查看结果。

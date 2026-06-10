@@ -175,7 +175,7 @@ function createMockGateway() {
           payload: {
             sessionKey: frame.params.sessionKey,
             messages: [
-              { id: "h1", role: "assistant", content: [{ type: "text", text: "history ok" }], timestamp: Date.now() }
+              { id: "h1", runId: "run-history-smoke-1", role: "assistant", content: [{ type: "text", text: "history ok" }], timestamp: Date.now() }
             ]
           }
         }));
@@ -323,6 +323,7 @@ async function main() {
     }
     const history = messages.find((message) => message.type === "history");
     assert.equal(history.payload.messages[0].text, "history ok");
+    assert.equal(history.payload.messages[0].runId, "run-history-smoke-1");
 
     chat.send(JSON.stringify({
       type: "send",

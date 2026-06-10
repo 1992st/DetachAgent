@@ -11,6 +11,7 @@ export interface ChatAttachmentPayload {
 
 export interface ChatMessage {
   id: string;
+  runId?: string;
   role: "user" | "assistant" | "system" | "tool" | string;
   text: string;
   timestamp: string;
