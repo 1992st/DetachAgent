@@ -660,7 +660,8 @@ apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
       consumedBy: "remote-agent-host",
       oneTime: true,
       ttlSeconds: 300,
-      adapterCommand: "context-fetch"
+      adapterCommand: "context-fetch",
+      doctorCommand: "doctor"
     },
     targets: ["local-user-machine", "remote-agent-host", "gateway-managed"],
     approvalRequired: true,

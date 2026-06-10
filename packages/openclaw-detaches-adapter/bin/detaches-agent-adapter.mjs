@@ -314,6 +314,7 @@ async function brokerProbe(value) {
   if (!Array.isArray(payload?.requestFormats) || !payload.requestFormats.includes("broker-event")) errors.push("requestFormats must include broker-event");
   if (payload?.contextExport?.oneTime !== true) errors.push("contextExport.oneTime must be true");
   if (payload?.contextExport?.adapterCommand !== "context-fetch") errors.push("contextExport.adapterCommand must be context-fetch");
+  if (payload?.contextExport?.doctorCommand !== "doctor") errors.push("contextExport.doctorCommand must be doctor");
   if (payload?.adapterId !== "detaches_agent.openclaw.adapter") errors.push("adapterId mismatch");
   const result = { ok: errors.length === 0, url, errors, capabilities: payload };
   console.log(JSON.stringify(result, null, 2));

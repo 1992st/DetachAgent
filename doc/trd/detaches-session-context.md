@@ -109,12 +109,12 @@ readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 - `GET /api/context/exports/:token`：远端 agent host 可访问该 URL 获取完整 `clientContext.detaches`，包含本 session 的 broker submit token；成功读取后 token 立即失效。
 - `GET /api/context/:sessionKey`：用于调试；默认脱敏 `broker.submitToken`，只有本机回环请求显式 `includeSubmitToken=true` 才返回完整 token。
 
-`clientContext.detaches.contextExport` 是这套机制的结构化声明，包含 create endpoint、consume endpoint pattern、TTL、一次性语义和 adapter 命令名。agent/adapter 应读取这个字段判断是否支持 context export；可见 prompt 只负责提示，不负责承载 token。
+`clientContext.detaches.contextExport` 是这套机制的结构化声明，包含 create endpoint、consume endpoint pattern、自动生成的 consume URL、TTL、一次性语义、`adapterCommand: context-fetch` 和首选 `doctorCommand: doctor`。agent/adapter 应读取这个字段判断是否支持 context export；可见 prompt 只负责提示，不负责承载 token。
 
-远端 OpenClaw host 安装 adapter 后，推荐用 `context-fetch` 消费一次性 URL：
+远端 OpenClaw host 安装 adapter 后，推荐用 `doctor --url` 消费一次性 URL：
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs context-fetch "$DETACHES_CONTEXT_EXPORT_URL" --output /tmp/detaches-client-context.json
+node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --url "$CONSUME_URL" --output-context /tmp/detaches-client-context.json
 ```
 
 这条路径是当前替代“把场景和 token 都塞进 prompt”的推荐方案；prompt 仍只作为兼容层和人类可读提示存在。

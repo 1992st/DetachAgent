@@ -76,6 +76,7 @@ assert.equal(parsedInspection.broker.submitTokenHeader, "Authorization");
 assert.equal(parsedInspection.broker.requestFormats.includes("broker-event"), true);
 assert.equal(parsedInspection.contextExport.oneTime, true);
 assert.equal(parsedInspection.contextExport.adapterCommand, "context-fetch");
+assert.equal(parsedInspection.contextExport.doctorCommand, "doctor");
 assert.deepEqual(parsedInspection.targetSupport["local-user-machine"].supportedBy, ["terminal", "file-transfer"]);
 assert.equal(parsedInspection.targetSupport["local-user-machine"].requestable, true);
 assert.deepEqual(parsedInspection.targetSupport["remote-agent-host"].unavailableBy, ["terminal", "file-transfer"]);
@@ -375,7 +376,8 @@ const probeServer = http.createServer((_req, res) => {
       consumedBy: "remote-agent-host",
       oneTime: true,
       ttlSeconds: 300,
-      adapterCommand: "context-fetch"
+      adapterCommand: "context-fetch",
+      doctorCommand: "doctor"
     },
     targets: ["local-user-machine", "remote-agent-host", "gateway-managed"],
     approvalRequired: true,

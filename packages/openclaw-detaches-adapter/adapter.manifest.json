@@ -62,7 +62,8 @@
     "broker.submitToken",
     "contextExport.createEndpoint",
     "contextExport.consumeEndpointPattern",
-    "contextExport.adapterCommand"
+    "contextExport.adapterCommand",
+    "contextExport.doctorCommand"
   ],
   "hardRules": [
     "Never claim a command, file read, file transfer, download, archive, or modification has happened until approved tool output proves it.",

@@ -98,6 +98,7 @@ export async function buildDetachesSessionContext(
       oneTime: true,
       ttlSeconds: 300,
       adapterCommand: "context-fetch",
+      doctorCommand: "doctor",
       generatedForMessage: Boolean(contextExportRecord),
       note: contextExportRecord
         ? "A one-time context URL was generated for this message. Remote agent hosts should prefer doctor --url and must treat the URL as sensitive."

@@ -33,6 +33,7 @@
       "oneTime": true,
       "ttlSeconds": 300,
       "adapterCommand": "context-fetch",
+      "doctorCommand": "doctor",
       "note": "Ask the user to generate a one-time context URL in the Adapter panel."
     },
     "capabilities": [

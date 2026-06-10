@@ -296,6 +296,7 @@ async function main() {
     assert.equal(brokerCapabilities.requestFormats.includes("broker-event"), true);
     assert.equal(brokerCapabilities.contextExport.oneTime, true);
     assert.equal(brokerCapabilities.contextExport.adapterCommand, "context-fetch");
+    assert.equal(brokerCapabilities.contextExport.doctorCommand, "doctor");
     assert.equal(brokerCapabilities.contextExport.createEndpoint, `${publicBaseUrl}/api/context/exports`);
     const adapterCli = path.resolve(new URL("../../../packages/openclaw-detaches-adapter/bin/detaches-agent-adapter.mjs", import.meta.url).pathname);
     const adapterProbe = await execFileAsync(process.execPath, [adapterCli, "broker-probe", publicBaseUrl]);
@@ -466,6 +467,7 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.broker?.requestFormats?.includes("broker-event"), true);
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.oneTime, true);
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.adapterCommand, "context-fetch");
+    assert.equal(userChatSend.clientContext?.detaches?.contextExport?.doctorCommand, "doctor");
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.createdBy, "detaches-ui-loopback");
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.generatedForMessage, true);
     assert.match(userChatSend.clientContext?.detaches?.contextExport?.consumeUrl, new RegExp(`^${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/context/exports/`));

@@ -70,6 +70,7 @@ export interface DetachesSessionContext {
     oneTime: true;
     ttlSeconds: number;
     adapterCommand: "context-fetch";
+    doctorCommand: "doctor";
     generatedForMessage?: boolean;
     note: string;
   };

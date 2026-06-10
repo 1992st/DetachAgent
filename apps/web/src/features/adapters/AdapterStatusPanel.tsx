@@ -22,14 +22,13 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
 
   const installCommands = useMemo(() => installPlan?.commands.join("\n") ?? "", [installPlan]);
   const remoteVerifyCommands = useMemo(() => installPlan?.verifyCommands.join("\n") ?? "", [installPlan]);
-  const contextFetchCommand = useMemo(() => {
+  const contextDoctorCommand = useMemo(() => {
     if (!contextExport) return "";
     const cliPath = shellPath(`${installDir.replace(/\/+$/, "")}/bin/detaches-agent-adapter.mjs`);
     return [
-      `node ${cliPath} context-fetch \\`,
-      `  ${shellQuote(contextExport.consumeUrl)} \\`,
-      "  --output /tmp/detaches-client-context.json",
-      `node ${cliPath} inspect-context /tmp/detaches-client-context.json`
+      `node ${cliPath} doctor \\`,
+      `  --url ${shellQuote(contextExport.consumeUrl)} \\`,
+      "  --output-context /tmp/detaches-client-context.json"
     ].join("\n");
   }, [contextExport, installDir]);
 
@@ -248,13 +247,13 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
         {contextExport ? (
           <div className="adapter-command-box">
             <div>
-              <strong>Context Fetch</strong>
-              <button type="button" className="copy-button" title="Copy context fetch command" onClick={() => void copy(contextFetchCommand)}>
+              <strong>Context Doctor</strong>
+              <button type="button" className="copy-button" title="Copy context doctor command" onClick={() => void copy(contextDoctorCommand)}>
                 <Clipboard size={13} />
               </button>
             </div>
             <small>过期时间：{formatTime(contextExport.expiresAt)}</small>
-            <pre>{contextFetchCommand}</pre>
+            <pre>{contextDoctorCommand}</pre>
             <div>
               <strong>One-time URL</strong>
               <button type="button" className="copy-button" title="Copy one-time context URL" onClick={() => void copy(contextExport.consumeUrl)}>
