@@ -230,6 +230,7 @@ function remoteInstallScript(plan: OpenClawAdapterInstallPlan): string {
   return [
     "set -euo pipefail",
     `INSTALL_DIR=${shellQuote(plan.installDir)}`,
+    `EXPECTED_ADAPTER_ID=${shellQuote(plan.adapterId)}`,
     `BUNDLE_SHA256=${shellQuote(plan.bundleSha256)}`,
     "TMP_BUNDLE=${TMPDIR:-/tmp}/openclaw-detaches-adapter.tar.gz",
     "cat > \"$TMP_BUNDLE\"",
@@ -238,7 +239,9 @@ function remoteInstallScript(plan: OpenClawAdapterInstallPlan): string {
     "mkdir -p \"$INSTALL_DIR\"",
     "tar -xzf \"$TMP_BUNDLE\" -C \"$INSTALL_DIR\" --strip-components=1",
     "chmod +x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
-    "node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest"
+    "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\"",
+    "if command -v node >/dev/null 2>&1; then node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest >/dev/null; fi",
+    "printf 'detaches adapter installed: %s\\n' \"$INSTALL_DIR\""
   ].join("\n");
 }
 
@@ -307,6 +310,7 @@ export const openclawDetachesAdapterService = {
         "set -euo pipefail",
         `INSTALL_DIR=${quotedInstallDir}`,
         `BUNDLE_URL=${quotedBundleUrl}`,
+        `EXPECTED_ADAPTER_ID=${shellQuote(info.id)}`,
         `BUNDLE_SHA256=${shellQuote(info.bundle.sha256)}`,
         "TMP_BUNDLE=${TMPDIR:-/tmp}/openclaw-detaches-adapter.tar.gz",
         "mkdir -p \"$INSTALL_DIR\"",
@@ -315,13 +319,16 @@ export const openclawDetachesAdapterService = {
         "test \"$ACTUAL_SHA256\" = \"$BUNDLE_SHA256\"",
         "tar -xzf \"$TMP_BUNDLE\" -C \"$INSTALL_DIR\" --strip-components=1",
         "chmod +x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
-        "node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest"
+        "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\"",
+        "if command -v node >/dev/null 2>&1; then node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest >/dev/null; fi",
+        "printf 'detaches adapter installed: %s\\n' \"$INSTALL_DIR\""
       ],
       verifyCommands: [
         `INSTALL_DIR=${quotedInstallDir}`,
+        `EXPECTED_ADAPTER_ID=${shellQuote(info.id)}`,
         "test -x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
-        "node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest | grep -q 'detaches_agent.openclaw.adapter'",
-        "node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" --help >/dev/null"
+        "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\"",
+        "if command -v node >/dev/null 2>&1; then node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" --help >/dev/null; fi"
       ],
       notes: [
         "Run these commands on the real OpenClaw agent host, not inside the user's local detaches_agent terminal.",
@@ -430,10 +437,11 @@ export const openclawDetachesAdapterService = {
       checks,
       verifyCommands: [
         `INSTALL_DIR=${shellQuote(installDir)}`,
+        `EXPECTED_ADAPTER_ID=${shellQuote(info.id)}`,
         "test -d \"$INSTALL_DIR\"",
         "test -f \"$INSTALL_DIR/adapter.manifest.json\"",
         "test -x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" || test -f \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
-        "node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest | grep -q 'detaches_agent.openclaw.adapter'"
+        "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\""
       ]
     };
   },
@@ -454,10 +462,11 @@ export const openclawDetachesAdapterService = {
       checks: [],
       verifyCommands: [
         `INSTALL_DIR=${shellQuote(installDir)}`,
+        `EXPECTED_ADAPTER_ID=${shellQuote(info.id)}`,
         "test -d \"$INSTALL_DIR\"",
         "test -f \"$INSTALL_DIR/adapter.manifest.json\"",
         "test -x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" || test -f \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
-        "node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest | grep -q 'detaches_agent.openclaw.adapter'"
+        "grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$INSTALL_DIR/adapter.manifest.json\""
       ]
     };
     if (!config.remoteUser) {

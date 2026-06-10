@@ -45,6 +45,7 @@
 - 风险等级固定为 `elevated`，审批必须带 `riskAccepted: true`。
 - 审批后由 broker 在本机会话 terminal 写入 `curl local bundle | ssh remote shell` 命令。
 - bundle 从本地 detaches_agent server 读取，经 SSH stdin 传到远端，因此不要求远端能访问用户本机 HTTP 端口。
+- 远端安装/验证脚本优先用 manifest grep 校验 adapter id；如果远端 shell 能找到 `node`，再额外运行 CLI 校验。这样远端没有 node 时也能完成协议资产安装。
 - 整个流程复用 Tool Broker 审批、审计、terminal replay 和结果回写。
 
 readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：

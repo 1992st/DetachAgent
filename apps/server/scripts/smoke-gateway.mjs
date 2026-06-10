@@ -344,6 +344,8 @@ async function main() {
     assert.equal(adapterInstallPlan.bundleSha256, adapterInfo.bundle.sha256);
     assert.equal(adapterInstallPlan.commands.some((command) => /curl -fL/.test(command)), true);
     assert.equal(adapterInstallPlan.commands.some((command) => /shasum -a 256/.test(command)), true);
+    assert.equal(adapterInstallPlan.commands.some((command) => /grep -q/.test(command)), true);
+    assert.equal(adapterInstallPlan.commands.some((command) => /command -v node/.test(command)), true);
     assert.equal(adapterInstallPlan.verifyCommands.some((command) => /detaches_agent\.openclaw\.adapter/.test(command)), true);
     const adapterReadiness = await requestJson("/api/adapters/openclaw-detaches/readiness");
     assert.equal(adapterReadiness.target, "local-distribution");
