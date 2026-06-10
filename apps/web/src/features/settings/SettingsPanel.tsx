@@ -37,7 +37,8 @@ export function SettingsPanel({ onSaved }: Props) {
       gatewayRemotePort: Number(settings.gatewayRemotePort),
       gatewayLocalPort: Number(settings.gatewayLocalPort),
       authMode: settings.authMode,
-      remoteWorkspaceRoot: settings.remoteWorkspaceRoot
+      remoteWorkspaceRoot: settings.remoteWorkspaceRoot,
+      publicBaseUrl: settings.publicBaseUrl
     };
     if (token.trim()) update.authToken = token.trim();
     if (password.trim()) update.authPassword = password.trim();
@@ -179,6 +180,14 @@ export function SettingsPanel({ onSaved }: Props) {
           <label>
             Remote workspace
             <input value={settings.remoteWorkspaceRoot} onChange={(e) => setSettings({ ...settings, remoteWorkspaceRoot: e.target.value })} />
+          </label>
+          <label>
+            Public base URL
+            <input
+              value={settings.publicBaseUrl}
+              placeholder="http://100.x.x.x:38888"
+              onChange={(e) => setSettings({ ...settings, publicBaseUrl: e.target.value })}
+            />
           </label>
         </section>
 

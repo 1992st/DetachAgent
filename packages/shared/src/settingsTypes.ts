@@ -9,6 +9,7 @@ export interface PublicSettings {
   gatewayLocalPort: number;
   authMode: "token" | "password" | "none";
   remoteWorkspaceRoot: string;
+  publicBaseUrl: string;
   hasAuthToken: boolean;
   hasAuthPassword: boolean;
 }
@@ -28,4 +29,5 @@ export interface SettingsUpdate {
   clearAuthToken?: boolean;
   clearAuthPassword?: boolean;
   remoteWorkspaceRoot?: string;
+  publicBaseUrl?: string;
 }

@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { ChatSessionMode, ChatSocketClientEvent, ChatSocketServerEvent, UploadedFileRef } from "@detaches/shared";
+import type { ChatSessionMode, ChatSocketClientEvent, ChatSocketServerEvent, DetachesSessionContext, UploadedFileRef } from "@detaches/shared";
 import { gatewayClient } from "../services/gateway/gatewayClient.js";
 import { mapHistory } from "../services/gateway/chatMapper.js";
 import { buildChatClientContext, buildDetachesSessionContext, renderDetachesSessionContext } from "../services/clientContextService.js";
@@ -75,8 +75,8 @@ export function attachChatSocket(server: HttpServer): void {
         if (event.type === "history") {
           await sendHistory();
         } else if (event.type === "send") {
-          const clientContext = buildChatClientContext(sessionMode, sessionKey, event.attachments);
-          const detachesContext = buildDetachesSessionContext(sessionMode, sessionKey, event.attachments);
+          const clientContext = await buildChatClientContext(sessionMode, sessionKey, event.attachments);
+          const detachesContext = await buildDetachesSessionContext(sessionMode, sessionKey, event.attachments);
           const response = await gatewayClient.sendChat({
             sessionKey,
             message: buildOutboundMessage(event.message, detachesContext, event.attachments, event.attachmentContextOverride),
@@ -107,7 +107,7 @@ export function attachChatSocket(server: HttpServer): void {
 
 function buildOutboundMessage(
   message: string,
-  detachesContext: ReturnType<typeof buildDetachesSessionContext>,
+  detachesContext: DetachesSessionContext,
   attachments?: UploadedFileRef[],
   attachmentContextOverride?: string
 ): string {

@@ -3,7 +3,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import SftpClient from "ssh2-sftp-client";
 import type { FileTransferPrepareResponse, ToolTarget, UploadedFileRef } from "@detaches/shared";
-import { appConfig } from "../../config/appConfig.js";
+import { appConfig, publicServerBaseUrl } from "../../config/appConfig.js";
 import { runtimeConfig } from "../../config/settingsStore.js";
 import { gatewayClient } from "../gateway/gatewayClient.js";
 
@@ -151,7 +151,8 @@ export class FileTransferService {
     const token = nanoid(32);
     const expiresAtMs = Date.now() + 10 * 60 * 1000;
     this.transferTokens.set(token, { fileId, target, token, expiresAtMs });
-    const downloadUrl = `http://${this.localAccessHost()}:${appConfig.serverPort}/api/files/staged/${encodeURIComponent(fileId)}?token=${encodeURIComponent(token)}`;
+    const config = await runtimeConfig();
+    const downloadUrl = `${publicServerBaseUrl(config)}/api/files/staged/${encodeURIComponent(fileId)}?token=${encodeURIComponent(token)}`;
     const response = {
       fileId,
       target,
@@ -324,14 +325,6 @@ export class FileTransferService {
     } finally {
       await sftp.end();
     }
-  }
-
-  private localAccessHost(): string {
-    const configured = process.env.DETACHES_PUBLIC_HOST?.trim();
-    if (configured) return configured;
-    const directHost = process.env.TAILSCALE_IP?.trim();
-    if (directHost) return directHost;
-    return appConfig.serverHost === "0.0.0.0" ? "127.0.0.1" : appConfig.serverHost;
   }
 
   private async audit(event: FileTransferAuditEvent): Promise<void> {

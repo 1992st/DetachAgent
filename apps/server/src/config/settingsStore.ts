@@ -15,6 +15,7 @@ export interface RuntimeSettings {
   authToken: string;
   authPassword: string;
   remoteWorkspaceRoot: string;
+  publicBaseUrl: string;
 }
 
 type PersistedSettings = Partial<RuntimeSettings>;
@@ -70,7 +71,8 @@ export class SettingsStore {
       authMode: this.persisted.authMode ?? appConfig.authMode,
       authToken: this.persisted.authToken ?? appConfig.authToken,
       authPassword: this.persisted.authPassword ?? appConfig.authPassword,
-      remoteWorkspaceRoot: this.persisted.remoteWorkspaceRoot ?? appConfig.remoteWorkspaceRoot
+      remoteWorkspaceRoot: this.persisted.remoteWorkspaceRoot ?? appConfig.remoteWorkspaceRoot,
+      publicBaseUrl: this.persisted.publicBaseUrl ?? appConfig.publicBaseUrl
     };
   }
 
@@ -90,6 +92,7 @@ export class SettingsStore {
       gatewayLocalPort: settings.gatewayLocalPort,
       authMode: settings.authMode,
       remoteWorkspaceRoot: settings.remoteWorkspaceRoot,
+      publicBaseUrl: settings.publicBaseUrl,
       hasAuthToken: Boolean(settings.authToken),
       hasAuthPassword: Boolean(settings.authPassword)
     };
@@ -120,6 +123,8 @@ export class SettingsStore {
     if (gatewayDirectHost !== undefined) output.gatewayDirectHost = gatewayDirectHost;
     const remoteWorkspaceRoot = sanitizeString(input.remoteWorkspaceRoot);
     if (remoteWorkspaceRoot !== undefined) output.remoteWorkspaceRoot = remoteWorkspaceRoot;
+    const publicBaseUrl = sanitizeString(input.publicBaseUrl);
+    if (publicBaseUrl !== undefined) output.publicBaseUrl = publicBaseUrl.replace(/\/+$/, "");
     const authToken = sanitizeString(input.authToken);
     if (authToken !== undefined) output.authToken = authToken;
     const authPassword = sanitizeString(input.authPassword);

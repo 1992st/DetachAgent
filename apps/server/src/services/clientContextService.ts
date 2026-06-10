@@ -1,16 +1,12 @@
 import os from "node:os";
 import type { ChatSessionMode, ClientIdentity, DetachesSessionContext, DetachesStagedFileContext, UploadedFileRef } from "@detaches/shared";
-import { appConfig } from "../config/appConfig.js";
+import { publicServerBaseUrl } from "../config/appConfig.js";
+import { runtimeConfig } from "../config/settingsStore.js";
 import { loadOrCreateDeviceIdentity } from "./gateway/deviceIdentityService.js";
 import { openclawDetachesAdapterService } from "./adapters/openclawDetachesAdapterService.js";
 
 function deviceShortId(deviceId: string): string {
   return deviceId.replace(/[^a-z0-9]/gi, "").slice(0, 12).toLowerCase() || "local";
-}
-
-function publicBaseUrl(): string {
-  const host = appConfig.serverHost === "0.0.0.0" ? "127.0.0.1" : appConfig.serverHost;
-  return `http://${host}:${appConfig.serverPort}`;
 }
 
 export function publicClientIdentity(): ClientIdentity {
@@ -24,10 +20,12 @@ export function publicClientIdentity(): ClientIdentity {
   };
 }
 
-export function buildDetachesSessionContext(sessionMode: ChatSessionMode, sessionKey: string, attachments: UploadedFileRef[] = []): DetachesSessionContext {
+export async function buildDetachesSessionContext(sessionMode: ChatSessionMode, sessionKey: string, attachments: UploadedFileRef[] = []): Promise<DetachesSessionContext> {
   const identity = publicClientIdentity();
   const agentId = agentIdFromSessionKey(sessionKey);
   const remoteAdapter = openclawDetachesAdapterService.lastRemoteReadiness();
+  const config = await runtimeConfig();
+  const baseUrl = publicServerBaseUrl(config);
   const stagedFiles: DetachesStagedFileContext[] = attachments.map((file) => ({
     fileId: file.id,
     name: file.name,
@@ -67,7 +65,7 @@ export function buildDetachesSessionContext(sessionMode: ChatSessionMode, sessio
       staged: stagedFiles
     },
     broker: {
-      gatewayEventEndpoint: `${publicBaseUrl()}/api/tools/events/gateway`,
+      gatewayEventEndpoint: `${baseUrl}/api/tools/events/gateway`,
       eventSource: "gateway-event",
       idempotencyField: "sourceEventId",
       requestFormats: ["broker-event", "fence"]
@@ -102,8 +100,8 @@ export function buildDetachesSessionContext(sessionMode: ChatSessionMode, sessio
   };
 }
 
-export function buildChatClientContext(sessionMode: ChatSessionMode, sessionKey: string, attachments: UploadedFileRef[] = []): Record<string, unknown> {
-  const detaches = buildDetachesSessionContext(sessionMode, sessionKey, attachments);
+export async function buildChatClientContext(sessionMode: ChatSessionMode, sessionKey: string, attachments: UploadedFileRef[] = []): Promise<Record<string, unknown>> {
+  const detaches = await buildDetachesSessionContext(sessionMode, sessionKey, attachments);
   const identity = detaches.userDevice;
   return {
     app: "detaches_agent",

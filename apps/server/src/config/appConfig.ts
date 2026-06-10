@@ -24,6 +24,8 @@ function stringEnv(name: string, fallback = ""): string {
 export const appConfig = {
   serverHost: stringEnv("DETACHES_SERVER_HOST", "127.0.0.1"),
   serverPort: intEnv("DETACHES_SERVER_PORT", 38888),
+  publicHost: stringEnv("DETACHES_PUBLIC_HOST"),
+  publicBaseUrl: stringEnv("DETACHES_PUBLIC_BASE_URL"),
   remoteHost: stringEnv("OPENCLAW_REMOTE_HOST", DEFAULT_OPENCLAW_REMOTE_HOST),
   remoteSshPort: intEnv("OPENCLAW_REMOTE_SSH_PORT", 22),
   remoteUser: stringEnv("OPENCLAW_REMOTE_USER"),
@@ -42,3 +44,11 @@ export const appConfig = {
 };
 
 export type AppConfig = typeof appConfig;
+
+export function publicServerBaseUrl(config: Pick<AppConfig, "publicBaseUrl" | "publicHost" | "serverHost" | "serverPort"> = appConfig): string {
+  const configuredBaseUrl = config.publicBaseUrl.replace(/\/+$/, "");
+  if (configuredBaseUrl) return configuredBaseUrl;
+  const tailscaleHost = stringEnv("TAILSCALE_IP");
+  const configuredHost = config.publicHost || tailscaleHost || (config.serverHost === "0.0.0.0" ? "127.0.0.1" : config.serverHost);
+  return `http://${configuredHost}:${config.serverPort}`;
+}

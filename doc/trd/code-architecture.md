@@ -32,11 +32,13 @@ detaches_agent/
 - `apps/server/src/config/appConfig.ts`
   - 读取 `.env.local` 和环境变量。
   - 提供默认 host、port、Gateway、SSH、storage 配置。
+  - 提供 `publicServerBaseUrl()`，统一生成远端 adapter 可访问的 detaches_agent URL；优先使用 `DETACHES_PUBLIC_BASE_URL`，其次 `DETACHES_PUBLIC_HOST` / `TAILSCALE_IP` / server host。
 
 - `apps/server/src/config/settingsStore.ts`
   - 保存 UI 修改后的连接配置。
   - 路径：`storage/cache/settings.json`。
   - token/password 不暴露给 public settings。
+  - `publicBaseUrl` 可通过 UI 持久化，用于 Tool Broker gateway-event endpoint 和 staged file 下载 URL。
 
 ### Gateway
 
