@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
 import http from "node:http";
+import path from "node:path";
 import { once } from "node:events";
 import WebSocket, { WebSocketServer } from "ws";
 import { DEFAULT_OPENCLAW_REMOTE_HOST } from "../dist/config/appConfig.js";
@@ -315,6 +317,16 @@ async function main() {
     assert.equal(await stagedDownload.text(), "hello");
     const repeatedDownload = await fetch(preparedTransfer.downloadUrl);
     assert.equal(repeatedDownload.status, 404);
+
+    const auditPath = path.resolve(new URL("../../..", import.meta.url).pathname, "storage-smoke/logs/file-transfer-audit.jsonl");
+    const auditEvents = (await fs.readFile(auditPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(auditEvents.some((event) => event.type === "upload" && event.fileId === upload.file.id), true);
+    assert.equal(auditEvents.some((event) => event.type === "transfer.prepare" && event.fileId === upload.file.id && event.remotePath === "/tmp/detaches-note.txt"), true);
+    assert.equal(auditEvents.some((event) => event.type === "transfer.download.start" && event.fileId === upload.file.id), true);
+    assert.equal(auditEvents.some((event) => event.type === "transfer.download.cleanup" && event.fileId === upload.file.id && event.deleted === true), true);
 
     chat.send(JSON.stringify({ type: "abort", runId: "run-smoke-1" }));
     while (!observed.abort) {

@@ -370,7 +370,7 @@ apiRoutes.post("/files/transfer/prepare", async (req, res) => {
       res.status(400).json({ error: "Missing fileId or remotePath." });
       return;
     }
-    res.json(fileTransferService.prepareTransfer(fileId, remotePath));
+    res.json(await fileTransferService.prepareTransfer(fileId, remotePath));
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }

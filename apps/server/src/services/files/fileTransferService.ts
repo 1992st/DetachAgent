@@ -44,6 +44,44 @@ interface TransferTokenRecord {
   expiresAtMs: number;
 }
 
+type FileTransferAuditEvent =
+  | {
+      type: "upload";
+      fileId: string;
+      fileName: string;
+      storageName?: string;
+      mimeType: string;
+      size: number;
+      localPath: string;
+    }
+  | {
+      type: "transfer.prepare";
+      fileId: string;
+      fileName: string;
+      remotePath: string;
+      downloadUrl: string;
+      command: string;
+      expiresAt: string;
+    }
+  | {
+      type: "transfer.download.start";
+      fileId: string;
+      fileName: string;
+      localPath: string;
+    }
+  | {
+      type: "transfer.download.cleanup";
+      fileId: string;
+      fileName: string;
+      localPath: string;
+      deleted: boolean;
+    }
+  | {
+      type: "transfer.error";
+      fileId?: string;
+      reason: string;
+    };
+
 export class FileTransferService {
   private stagedFiles = new Map<string, StagedFileRecord>();
   private transferTokens = new Map<string, TransferTokenRecord>();
@@ -65,23 +103,34 @@ export class FileTransferService {
       createdAt: new Date().toISOString()
     };
     this.stagedFiles.set(id, ref);
+    await this.audit({
+      type: "upload",
+      fileId: ref.id,
+      fileName: ref.displayName || ref.name,
+      storageName: ref.storageName,
+      mimeType: ref.mimeType,
+      size: ref.size,
+      localPath: ref.localPath
+    });
     return ref;
   }
 
-  prepareTransfer(fileId: string, remotePath: string): FileTransferPrepareResponse {
+  async prepareTransfer(fileId: string, remotePath: string): Promise<FileTransferPrepareResponse> {
     const file = this.stagedFiles.get(fileId);
     if (!file) {
+      void this.audit({ type: "transfer.error", fileId, reason: "Staged file not found or already transferred." });
       throw new Error("Staged file not found or already transferred.");
     }
     const cleanedRemotePath = remotePath.trim();
     if (!cleanedRemotePath || cleanedRemotePath.includes("\0") || cleanedRemotePath.endsWith("/")) {
+      void this.audit({ type: "transfer.error", fileId, reason: "remotePath must be a target file path." });
       throw new Error("remotePath must be a target file path.");
     }
     const token = nanoid(32);
     const expiresAtMs = Date.now() + 10 * 60 * 1000;
     this.transferTokens.set(token, { fileId, token, expiresAtMs });
     const downloadUrl = `http://${this.localAccessHost()}:${appConfig.serverPort}/api/files/staged/${encodeURIComponent(fileId)}?token=${encodeURIComponent(token)}`;
-    return {
+    const response = {
       fileId,
       fileName: file.displayName || file.name,
       remotePath: cleanedRemotePath,
@@ -89,31 +138,59 @@ export class FileTransferService {
       command: buildCurlCommand(downloadUrl, cleanedRemotePath),
       expiresAt: new Date(expiresAtMs).toISOString()
     };
+    await this.audit({
+      type: "transfer.prepare",
+      fileId,
+      fileName: response.fileName,
+      remotePath: response.remotePath,
+      downloadUrl: response.downloadUrl,
+      command: response.command,
+      expiresAt: response.expiresAt
+    });
+    return response;
   }
 
   async consumeStagedDownload(fileId: string, token: string): Promise<{ localPath: string; name: string; cleanup: () => Promise<void> }> {
     const tokenRecord = this.transferTokens.get(token);
     if (!tokenRecord || tokenRecord.fileId !== fileId) {
+      await this.audit({ type: "transfer.error", fileId, reason: "Invalid staged file token." });
       throw new Error("Invalid staged file token.");
     }
     if (tokenRecord.expiresAtMs < Date.now()) {
       this.transferTokens.delete(token);
+      await this.audit({ type: "transfer.error", fileId, reason: "Staged file token expired." });
       throw new Error("Staged file token expired.");
     }
     const file = this.stagedFiles.get(fileId);
     if (!file) {
       this.transferTokens.delete(token);
+      await this.audit({ type: "transfer.error", fileId, reason: "Staged file not found or already transferred." });
       throw new Error("Staged file not found or already transferred.");
     }
     await fs.access(file.localPath);
+    await this.audit({
+      type: "transfer.download.start",
+      fileId,
+      fileName: file.displayName || file.name,
+      localPath: file.localPath
+    });
     const cleanup = async () => {
       this.transferTokens.delete(token);
       this.stagedFiles.delete(fileId);
+      let deleted = false;
       try {
         await fs.unlink(file.localPath);
+        deleted = true;
       } catch {
         // Best effort cleanup after a successful one-time transfer.
       }
+      await this.audit({
+        type: "transfer.download.cleanup",
+        fileId,
+        fileName: file.displayName || file.name,
+        localPath: file.localPath,
+        deleted
+      });
     };
     return { localPath: file.localPath, name: file.displayName || file.name, cleanup };
   }
@@ -179,6 +256,13 @@ export class FileTransferService {
     const directHost = process.env.TAILSCALE_IP?.trim();
     if (directHost) return directHost;
     return appConfig.serverHost === "0.0.0.0" ? "127.0.0.1" : appConfig.serverHost;
+  }
+
+  private async audit(event: FileTransferAuditEvent): Promise<void> {
+    const entry = { ts: new Date().toISOString(), ...event };
+    const logPath = path.join(appConfig.storageDir, "logs", "file-transfer-audit.jsonl");
+    await fs.mkdir(path.dirname(logPath), { recursive: true });
+    await fs.appendFile(logPath, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
   }
 }
 

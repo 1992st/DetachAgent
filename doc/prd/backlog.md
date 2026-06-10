@@ -19,6 +19,25 @@
   - 传输成功后立即删除。
   - 未发送/未传输文件按 TTL 清理。
   - UI 提供手动清理当前会话附件。
+- 文件传输必须写入审计日志：
+  - 记录上传、传输准备、一次性 URL 下载、cleanup、失败原因。
+  - 保存路径：`storage/logs/file-transfer-audit.jsonl`。
+  - UI 后续可展示“文件已被下载/已清理/未下载/失败”的真实状态。
+
+### 执行环境路由
+
+- 当前 agent 容易混淆“用户本机 terminal”和“远端 OpenClaw agent 所在机器”。
+- 不采用单纯 prompt/skill 注入作为最终方案；需要把执行目标建模成受控能力路由。
+- tool request 必须声明目标环境：
+  - `local-user-machine`：用户本机 detaches terminal。
+  - `remote-agent-host`：OpenClaw agent 实际运行的远端机器。
+  - `gateway-managed`：通过 Gateway 原生能力完成。
+- UI 和后端必须在审批卡上显示目标环境，避免用户误以为命令跑在另一台机器。
+- 如果当前目标环境不可用，agent 必须收到明确错误，而不是退化成在本机 terminal 执行。
+- 文件归档类任务必须明确归档位置：
+  - 用户本机归档。
+  - 远端 agent 工作区归档。
+  - Gateway 管理 workspace 归档。
 
 ### 执行审计日志
 
