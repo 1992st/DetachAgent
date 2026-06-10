@@ -48,6 +48,11 @@ detaches_agent/
   - 把 Gateway `chat.history` 返回值转换成共享 `ChatMessage`。
   - 保留消息 `id`、`runId`、role、text、timestamp 和 raw payload，便于审计工具请求来源。
 
+- `apps/server/src/services/clientContextService.ts`
+  - 生成 `clientContext.detaches` 和可见 `[detaches_agent 接入上下文]`。
+  - 注入最近一次 remote-agent-host adapter readiness 快照，让 agent 能知道远端 adapter 是否已探测/安装。
+  - readiness 只作为状态事实，不自动开放通用远端 terminal/file-transfer target。
+
 - `apps/server/src/services/gateway/agentDirectoryService.ts`
   - 合并 Gateway agents 和 sessions。
   - 生成 UI agent summary。

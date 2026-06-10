@@ -19,6 +19,8 @@ const adapterFiles = [
   { path: "bin/detaches-agent-adapter.mjs", mode: 0o755, mimeType: "text/javascript; charset=utf-8" }
 ] as const;
 
+let lastRemoteReadiness: OpenClawAdapterReadiness | null = null;
+
 export interface OpenClawAdapterFile {
   path: string;
   size: number;
@@ -470,10 +472,12 @@ export const openclawDetachesAdapterService = {
       ]
     };
     if (!config.remoteUser) {
-      return {
+      const readiness: OpenClawAdapterReadiness = {
         ...base,
         checks: [{ id: "ssh-config", state: "error", message: "Remote SSH user is not configured." }]
       };
+      lastRemoteReadiness = readiness;
+      return readiness;
     }
     try {
       const script = remoteReadinessScript(installDir, info.id, info.version);
@@ -482,7 +486,7 @@ export const openclawDetachesAdapterService = {
       if (!line) throw new Error(stderr.trim() || "Remote readiness probe returned no output.");
       const parsed = JSON.parse(line) as { state?: OpenClawAdapterReadinessState; checks?: OpenClawAdapterReadinessCheck[] };
       const checks = Array.isArray(parsed.checks) ? parsed.checks : [];
-      return {
+      const readiness: OpenClawAdapterReadiness = {
         ...base,
         state: parsed.state ?? aggregateReadiness(checks),
         checks: [
@@ -490,9 +494,11 @@ export const openclawDetachesAdapterService = {
           ...checks
         ]
       };
+      lastRemoteReadiness = readiness;
+      return readiness;
     } catch (error: any) {
       const output = `${error?.stdout ?? ""}${error?.stderr ?? ""}`.trim();
-      return {
+      const readiness: OpenClawAdapterReadiness = {
         ...base,
         checks: [{
           id: "ssh",
@@ -501,7 +507,13 @@ export const openclawDetachesAdapterService = {
           details: { code: error?.code, signal: error?.signal }
         }]
       };
+      lastRemoteReadiness = readiness;
+      return readiness;
     }
+  },
+
+  lastRemoteReadiness(): OpenClawAdapterReadiness | null {
+    return lastRemoteReadiness;
   },
 
   async prepareRemoteInstallCommand(input: { installDir?: string } = {}): Promise<OpenClawAdapterRemoteInstallCommand> {

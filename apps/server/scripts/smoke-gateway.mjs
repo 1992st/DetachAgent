@@ -385,6 +385,7 @@ async function main() {
     assert.match(userChatSend.message, /"target":"local-user-machine"/);
     assert.match(userChatSend.message, /detaches_agent 接入上下文/);
     assert.match(userChatSend.message, /agentId: agent-alpha/);
+    assert.match(userChatSend.message, /remoteAdapter: state=error/);
     assert.match(userChatSend.message, /terminal targets: supported=local-user-machine; unavailable=remote-agent-host,gateway-managed/);
     assert.match(userChatSend.message, /file-transfer targets: supported=local-user-machine; unavailable=remote-agent-host,gateway-managed/);
     assert.equal(userChatSend.idempotencyKey, "smoke-idempotency");
@@ -393,6 +394,7 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.version, 1);
     assert.equal(userChatSend.clientContext?.detaches?.sessionKey, chatSessionKey);
     assert.equal(userChatSend.clientContext?.detaches?.agentId, "agent-alpha");
+    assert.equal(userChatSend.clientContext?.detaches?.adapterStatus?.remoteAgentHost?.state, "error");
     assert.equal(userChatSend.clientContext?.detaches?.capabilities?.some((capability) => capability.name === "terminal" && capability.supportedTargets.includes("local-user-machine")), true);
     assert.equal(userChatSend.clientContext?.routeContext?.origin?.provider, "detaches_agent");
     assert.equal(userChatSend.attachments, undefined);

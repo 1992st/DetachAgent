@@ -1,6 +1,7 @@
 import os from "node:os";
 import type { ChatSessionMode, ClientIdentity, DetachesSessionContext } from "@detaches/shared";
 import { loadOrCreateDeviceIdentity } from "./gateway/deviceIdentityService.js";
+import { openclawDetachesAdapterService } from "./adapters/openclawDetachesAdapterService.js";
 
 function deviceShortId(deviceId: string): string {
   return deviceId.replace(/[^a-z0-9]/gi, "").slice(0, 12).toLowerCase() || "local";
@@ -20,6 +21,7 @@ export function publicClientIdentity(): ClientIdentity {
 export function buildDetachesSessionContext(sessionMode: ChatSessionMode, sessionKey: string): DetachesSessionContext {
   const identity = publicClientIdentity();
   const agentId = agentIdFromSessionKey(sessionKey);
+  const remoteAdapter = openclawDetachesAdapterService.lastRemoteReadiness();
   return {
     app: "detaches_agent",
     version: 1,
@@ -27,6 +29,18 @@ export function buildDetachesSessionContext(sessionMode: ChatSessionMode, sessio
     sessionKey,
     agentId: agentId || undefined,
     userDevice: identity,
+    adapterStatus: {
+      remoteAgentHost: {
+        state: remoteAdapter?.state ?? "unknown",
+        installDir: remoteAdapter?.installDir,
+        checkedAt: remoteAdapter ? new Date().toISOString() : undefined,
+        remoteHost: remoteAdapter?.remoteHost,
+        remoteUser: remoteAdapter?.remoteUser,
+        summary: remoteAdapter
+          ? remoteAdapter.checks.map((check) => `${check.id}:${check.state}`).join(", ")
+          : "Remote adapter readiness has not been probed in this server session."
+      }
+    },
     capabilities: [
       {
         name: "terminal",
@@ -50,7 +64,9 @@ export function buildDetachesSessionContext(sessionMode: ChatSessionMode, sessio
       "The bound terminal runs on the user's local machine and is hidden unless the user opens it.",
       "Tools are never executed by assistant text alone; every tool request must use an approved fenced request block.",
       "Do not claim a file was read, transferred, downloaded, archived, or modified until the approved tool execution output proves it.",
-      "Remote-agent-host and gateway-managed execution are reserved capabilities until a server-side adapter enables them."
+      remoteAdapter?.state === "ready"
+        ? "Remote-agent-host adapter assets have been detected, but remote execution still requires explicit detaches_agent approval and supported tool routing."
+        : "Remote-agent-host and gateway-managed execution are reserved capabilities until a server-side adapter enables them."
     ]
   };
 }
@@ -92,12 +108,14 @@ export function buildChatClientContext(sessionMode: ChatSessionMode, sessionKey:
 export function renderDetachesSessionContext(context: DetachesSessionContext): string {
   const terminal = context.capabilities.find((capability) => capability.name === "terminal");
   const transfer = context.capabilities.find((capability) => capability.name === "file-transfer");
+  const remoteAdapter = context.adapterStatus?.remoteAgentHost;
   return [
     "[detaches_agent 接入上下文]",
     "你正在通过 detaches_agent 本地 UI 与用户对话，不是普通 webchat。",
     `sessionKey: ${context.sessionKey}`,
     context.agentId ? `agentId: ${context.agentId}` : "agentId: unknown",
     `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
+    `remoteAdapter: state=${remoteAdapter?.state || "unknown"}; installDir=${remoteAdapter?.installDir || "unknown"}; summary=${remoteAdapter?.summary || "not probed"}`,
     "当前用户这台电脑已经为本对话绑定了一个持久本机 terminal。这个 terminal 默认隐藏在用户界面里，用户可以点开查看活动。",
     `terminal targets: supported=${terminal?.supportedTargets.join(",") || "none"}; unavailable=${terminal?.unavailableTargets.join(",") || "none"}`,
     `file-transfer targets: supported=${transfer?.supportedTargets.join(",") || "none"}; unavailable=${transfer?.unavailableTargets.join(",") || "none"}`,

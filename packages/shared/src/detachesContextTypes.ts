@@ -1,5 +1,6 @@
 import type { ChatSessionMode } from "./clientTypes.js";
 import type { ToolTarget } from "./fileTypes.js";
+import type { OpenClawAdapterReadinessState } from "./adapterTypes.js";
 
 export interface DetachesToolCapability {
   name: "terminal" | "file-transfer";
@@ -21,6 +22,16 @@ export interface DetachesSessionContext {
     deviceIdShort: string;
     displayName: string;
     sessionNamespace: string;
+  };
+  adapterStatus?: {
+    remoteAgentHost: {
+      state: OpenClawAdapterReadinessState | "unknown";
+      installDir?: string;
+      checkedAt?: string;
+      remoteHost?: string;
+      remoteUser?: string;
+      summary: string;
+    };
   };
   capabilities: DetachesToolCapability[];
   invariants: string[];

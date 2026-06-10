@@ -62,6 +62,7 @@ readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 - `sessionKey`
 - `agentId`
 - 用户设备身份
+- 最近一次 remote-agent-host adapter readiness 快照
 - 可用 capability 列表
 - 每个 capability 的 `supportedTargets` 与 `unavailableTargets`
 - 必须遵守的执行不变量
@@ -72,6 +73,8 @@ readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 - 用户消息中的 `[detaches_agent 接入上下文]`：兼容当前 agent 只能阅读自然语言上下文的场景。
 
 两者来自同一份数据，避免 UI、后端和 agent 看到不一致的能力说明。
+
+`adapterStatus.remoteAgentHost` 只表达最近一次探测事实，例如 `ready`、`missing`、`error`。它不自动开放通用远端 terminal/file-transfer 能力；agent 仍必须依据 capability target 和 Tool Broker 支持情况发起受控请求。
 
 ### Gateway 参数兼容
 

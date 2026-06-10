@@ -26,8 +26,6 @@ export function attachChatSocket(server: HttpServer): void {
     const url = new URL(request.url ?? "", "http://127.0.0.1");
     const sessionKey = decodeURIComponent(url.pathname.replace("/api/chat/", ""));
     const sessionMode: ChatSessionMode = url.searchParams.get("sessionMode") === "main" ? "main" : "device";
-    const clientContext = buildChatClientContext(sessionMode, sessionKey);
-    const detachesContext = buildDetachesSessionContext(sessionMode, sessionKey);
     const activeRunIds = new Set<string>();
     send(socket, { type: "ready", sessionKey });
 
@@ -77,6 +75,8 @@ export function attachChatSocket(server: HttpServer): void {
         if (event.type === "history") {
           await sendHistory();
         } else if (event.type === "send") {
+          const clientContext = buildChatClientContext(sessionMode, sessionKey);
+          const detachesContext = buildDetachesSessionContext(sessionMode, sessionKey);
           const response = await gatewayClient.sendChat({
             sessionKey,
             message: buildOutboundMessage(event.message, detachesContext, event.attachments, event.attachmentContextOverride),
