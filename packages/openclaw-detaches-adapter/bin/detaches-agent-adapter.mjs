@@ -15,8 +15,8 @@ function usage(exitCode = 0) {
     "  validate-context <context-json-file>",
     "  inspect-context <context-json-file>",
     "  broker-probe <detaches-agent-base-url-or-capabilities-url>",
-    "  terminal-request --target <target> --command <command> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url>]",
-    "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url>]",
+    "  terminal-request --target <target> --command <command> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
+    "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
     "",
     "This CLI does not execute tools. It only validates context and emits detaches_agent request blocks."
   ].join("\n");
@@ -144,6 +144,20 @@ function requireOption(args, name) {
   return value.trim();
 }
 
+function optionalString(args, name) {
+  const value = args[name];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readContextOption(args) {
+  const contextPath = optionalString(args, "context");
+  if (!contextPath) return null;
+  const context = JSON.parse(fs.readFileSync(contextPath, "utf8"));
+  const errors = validateContext(context);
+  if (errors.length) fail(`Invalid --context: ${errors.join("; ")}`);
+  return context;
+}
+
 function brokerCapabilitiesUrl(value) {
   const trimmed = String(value || "").trim().replace(/\/+$/, "");
   if (!trimmed) fail("Missing detaches_agent base URL.");
@@ -183,18 +197,20 @@ function emitFence(fence, payload) {
 }
 
 async function emitRequest(args, kind, target, reason, payload, fence) {
+  const context = readContextOption(args);
   const format = typeof args.format === "string" ? args.format : "fence";
-  const submitUrl = typeof args["submit-url"] === "string" && args["submit-url"].trim() ? args["submit-url"].trim() : "";
+  const submitUrl = optionalString(args, "submit-url") || (args.submit === true ? context?.broker?.gatewayEventEndpoint || "" : "");
   if (format === "fence") {
     if (submitUrl) fail("--submit-url requires --format broker-event");
     emitFence(fence, { target, ...payload, reason });
     return;
   }
   if (format !== "broker-event") fail(`Unknown --format: ${format}`);
-  const sessionKey = requireOption(args, "session-key");
+  const sessionKey = optionalString(args, "session-key") || context?.sessionKey;
+  if (!sessionKey) fail("Missing --session-key or --context with sessionKey");
   const sourceEventId = requireOption(args, "source-event-id");
-  const submitToken = typeof args["submit-token"] === "string" && args["submit-token"].trim() ? args["submit-token"].trim() : undefined;
-  const agentId = typeof args["agent-id"] === "string" && args["agent-id"].trim() ? args["agent-id"].trim() : undefined;
+  const submitToken = optionalString(args, "submit-token") || context?.broker?.submitToken;
+  const agentId = optionalString(args, "agent-id") || context?.agentId || undefined;
   const event = {
     kind,
     target,

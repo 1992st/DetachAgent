@@ -98,6 +98,27 @@ assert.equal(parsedTerminalBrokerEvent.sourceEventId, "adapter-test-terminal-1")
 assert.equal(parsedTerminalBrokerEvent.sessionKey, "agent:audio-process:main");
 assert.equal(parsedTerminalBrokerEvent.payload.command, "pwd");
 
+const contextTerminalBrokerEvent = await run([
+  "terminal-request",
+  "--target",
+  "local-user-machine",
+  "--command",
+  "pwd",
+  "--reason",
+  "context broker event",
+  "--format",
+  "broker-event",
+  "--context",
+  "test/valid-context.json",
+  "--source-event-id",
+  "adapter-test-context-terminal-1"
+]);
+assert.equal(contextTerminalBrokerEvent.code, 0);
+const parsedContextTerminalBrokerEvent = JSON.parse(contextTerminalBrokerEvent.stdout);
+assert.equal(parsedContextTerminalBrokerEvent.sessionKey, "agent:audio-process:main");
+assert.equal(parsedContextTerminalBrokerEvent.agentId, "audio-process");
+assert.equal(parsedContextTerminalBrokerEvent.submitToken, "test-submit-token");
+
 const fileRequest = await run([
   "file-transfer-request",
   "--file-id",
@@ -164,20 +185,18 @@ const submittedBrokerEvent = await run([
   "submit structured event",
   "--format",
   "broker-event",
-  "--session-key",
-  "agent:audio-process:main",
+  "--context",
+  "test/valid-context.json",
   "--source-event-id",
   "adapter-test-submit-1",
-  "--submit-token",
-  "submit-secret",
   "--submit-url",
   `http://127.0.0.1:${submitPort}/api/tools/events/gateway`
 ]);
 submitServer.close();
 assert.equal(submittedBrokerEvent.code, 0);
-assert.equal(submittedAuth, "Bearer submit-secret");
+assert.equal(submittedAuth, "Bearer test-submit-token");
 assert.equal(submittedBody.sourceEventId, "adapter-test-submit-1");
-assert.equal(submittedBody.submitToken, "submit-secret");
+assert.equal(submittedBody.submitToken, "test-submit-token");
 assert.equal(submittedBody.payload.command, "pwd");
 assert.equal(JSON.parse(submittedBrokerEvent.stdout).request.id, "submitted-request");
 

@@ -31,8 +31,8 @@
     "validate-context": "Validate a clientContext.detaches JSON object.",
     "inspect-context": "Summarize session identity, adapter readiness, capability targets, and routing warnings without executing tools.",
     "broker-probe": "Verify a detaches_agent Tool Broker capabilities endpoint before submitting requests.",
-    "terminal-request": "Emit a detaches-terminal fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent.",
-    "file-transfer-request": "Emit a detaches-file-transfer fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent."
+    "terminal-request": "Emit a detaches-terminal fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Supports --context to read session and broker fields; use --submit to post with the context endpoint.",
+    "file-transfer-request": "Emit a detaches-file-transfer fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Supports --context to read session and broker fields; use --submit to post with the context endpoint."
   },
   "requestFormats": [
     "fence",

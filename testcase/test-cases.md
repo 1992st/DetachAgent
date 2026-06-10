@@ -61,6 +61,7 @@
 - `broker-probe` 能识别 detaches_agent broker 协议并拒绝不匹配 endpoint。
 - 请求块必须包含 fenced code block、target 和 reason。
 - broker-event JSON 必须包含 `source: gateway-event`、`sourceEventId`、`sessionKey` 和 `payload`。
+- `--context` 必须能自动填充 `sessionKey`、`agentId` 和 broker submit token。
 - `--submit-url` 必须 POST 同一份 broker-event，并输出服务端响应。
 - gateway-event 提交缺少 per-session submit token 时必须返回 401。
 - 未知 target 被拒绝。
