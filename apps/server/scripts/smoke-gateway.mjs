@@ -297,6 +297,7 @@ async function main() {
     assert.match(observed.chatSend.message, /currentLocation: 用户本机 detaches_agent staging 区/);
     assert.match(observed.chatSend.message, /remotePath: not uploaded/);
     assert.match(observed.chatSend.message, /detaches-file-transfer/);
+    assert.match(observed.chatSend.message, /"target":"local-user-machine"/);
     assert.match(observed.chatSend.message, /detaches_agent 接入上下文/);
     assert.equal(observed.chatSend.idempotencyKey, "smoke-idempotency");
     assert.equal(observed.chatSend.attachments, undefined);

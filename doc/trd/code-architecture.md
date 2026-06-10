@@ -134,7 +134,7 @@ tool request
 
 ````text
 ```detaches-terminal
-{"command":"pwd","reason":"查看用户本机当前工作目录"}
+{"target":"local-user-machine","command":"pwd","reason":"查看用户本机当前工作目录"}
 ```
 ````
 
@@ -142,7 +142,7 @@ tool request
 
 ````text
 ```detaches-file-transfer
-{"fileId":"uploaded-file-id","remotePath":"/tmp/input.txt","reason":"需要读取用户上传文件"}
+{"fileId":"uploaded-file-id","target":"local-user-machine","remotePath":"/tmp/input.txt","reason":"需要读取用户上传文件"}
 ```
 ````
 
@@ -165,7 +165,7 @@ Client events：
 
 - 当前环境中 `node-pty` 可能失败，fallback shell 可执行普通命令，但不是完整 TTY。
 - Gateway `chat.send` 参数校验严格，不能传自定义 `routeContext`，所以 detaches 上下文采用 message 注入方式。
-- 当前没有远端 agent host 的执行 adapter；`detaches-terminal` 和 `detaches-file-transfer` 都落在用户本机环境。
+- 当前没有远端 agent host 的执行 adapter；`detaches-terminal` 和 `detaches-file-transfer` 只支持 `local-user-machine`。如果 agent 请求 `remote-agent-host` 或 `gateway-managed`，UI 必须显示不可用并阻断执行。
 - Chat、terminal、file-transfer 的 UI 和协议解析目前集中在 `ChatPanel.tsx`，附件状态集中在 `App.tsx`，拓展性偏弱：
   - 附件缺少按 session 独立的 store，导致不同 agent 页面之间容易串状态。
   - 文件协议提示、审批卡、terminal 执行耦合在聊天组件里，后续增加更多 tool/capability 会继续膨胀。

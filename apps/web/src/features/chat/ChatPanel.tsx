@@ -253,13 +253,31 @@ export function ChatPanel({
 
 interface TerminalCommandRequest {
   command: string;
+  target: ToolTarget;
   reason?: string;
 }
 
 interface FileTransferRequest {
   fileId: string;
   remotePath: string;
+  target: ToolTarget;
   reason?: string;
+}
+
+type ToolTarget = "local-user-machine" | "remote-agent-host" | "gateway-managed";
+
+const targetLabels: Record<ToolTarget, string> = {
+  "local-user-machine": "用户本机",
+  "remote-agent-host": "远端 Agent 机器",
+  "gateway-managed": "Gateway 托管"
+};
+
+function targetIsSupported(target: ToolTarget): boolean {
+  return target === "local-user-machine";
+}
+
+function unsupportedTargetMessage(target: ToolTarget): string {
+  return `${targetLabels[target]} 当前还没有执行 adapter，不能把请求退化到用户本机执行。`;
 }
 
 function FileTransferRequests({
@@ -284,19 +302,22 @@ function FileTransferRequests({
     <div className="terminal-requests">
       {requests.map((request, index) => {
         const state = handled[index];
+        const unsupported = !targetIsSupported(request.target);
         return (
           <div className="terminal-request-card file-transfer-card" key={`${index}-${request.fileId}-${request.remotePath}`}>
             <div>
               <strong>File transfer request</strong>
+              <p className={`target-pill ${request.target}`}>Target: {targetLabels[request.target]}</p>
               {request.reason ? <p>{request.reason}</p> : null}
               <code>{`fileId: ${request.fileId}\nremotePath: ${request.remotePath}`}</code>
+              {unsupported ? <p className="request-error">{unsupportedTargetMessage(request.target)}</p> : null}
               {errors[index] ? <p className="request-error">{errors[index]}</p> : null}
             </div>
             <div className="terminal-request-actions">
               <button
                 type="button"
                 className="secondary-button"
-                disabled={Boolean(state && state !== "error")}
+                disabled={unsupported || Boolean(state && state !== "error")}
                 onClick={() => {
                   setHandled((current) => ({ ...current, [index]: "running" }));
                   onPrepareTransfer(request)
@@ -348,18 +369,21 @@ function TerminalCommandRequests({
     <div className="terminal-requests">
       {requests.map((request, index) => {
         const state = handled[index];
+        const unsupported = !targetIsSupported(request.target);
         return (
           <div className="terminal-request-card" key={`${index}-${request.command}`}>
             <div>
               <strong>Terminal command request</strong>
+              <p className={`target-pill ${request.target}`}>Target: {targetLabels[request.target]}</p>
               {request.reason ? <p>{request.reason}</p> : null}
               <code>{request.command}</code>
+              {unsupported ? <p className="request-error">{unsupportedTargetMessage(request.target)}</p> : null}
             </div>
             <div className="terminal-request-actions">
               <button
                 type="button"
                 className="secondary-button"
-                disabled={Boolean(state)}
+                disabled={unsupported || Boolean(state)}
                 onClick={() => {
                   onApprove(request.command);
                   setHandled((current) => ({ ...current, [index]: "approved" }));
@@ -408,17 +432,23 @@ function parseFileTransferRequests(text: string): FileTransferRequest[] {
     const body = match[1].trim();
     if (!body) continue;
     try {
-      const parsed = JSON.parse(body) as { fileId?: unknown; remotePath?: unknown; target?: { remotePath?: unknown }; reason?: unknown };
+      const parsed = JSON.parse(body) as {
+        fileId?: unknown;
+        remotePath?: unknown;
+        target?: unknown;
+        reason?: unknown;
+      };
       const fileId = typeof parsed.fileId === "string" ? parsed.fileId.trim() : "";
       const remotePath = typeof parsed.remotePath === "string"
         ? parsed.remotePath.trim()
-        : typeof parsed.target?.remotePath === "string"
+        : targetObject(parsed.target) && typeof parsed.target.remotePath === "string"
           ? parsed.target.remotePath.trim()
           : "";
       if (fileId && remotePath) {
         requests.push({
           fileId,
           remotePath,
+          target: parseToolTarget(parsed.target),
           reason: typeof parsed.reason === "string" ? parsed.reason.trim() : undefined
         });
       }
@@ -432,11 +462,12 @@ function parseFileTransferRequests(text: string): FileTransferRequest[] {
 function parseTerminalCommandBody(body: string): TerminalCommandRequest | null {
   if (!body) return null;
   try {
-    const parsed = JSON.parse(body) as { command?: unknown; cmd?: unknown; reason?: unknown };
+    const parsed = JSON.parse(body) as { command?: unknown; cmd?: unknown; target?: unknown; reason?: unknown };
     const command = typeof parsed.command === "string" ? parsed.command : typeof parsed.cmd === "string" ? parsed.cmd : "";
     if (command.trim()) {
       return {
         command: command.trim(),
+        target: parseToolTarget(parsed.target),
         reason: typeof parsed.reason === "string" ? parsed.reason.trim() : undefined
       };
     }
@@ -445,7 +476,18 @@ function parseTerminalCommandBody(body: string): TerminalCommandRequest | null {
   }
   const lines = body.split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean);
   const command = lines.join("\n").trim();
-  return command ? { command } : null;
+  return command ? { command, target: "local-user-machine" } : null;
+}
+
+function parseToolTarget(value: unknown): ToolTarget {
+  const raw = targetObject(value) ? value.environment ?? value.type ?? value.id : value;
+  if (raw === "remote-agent-host" || raw === "remote" || raw === "agent-host") return "remote-agent-host";
+  if (raw === "gateway-managed" || raw === "gateway") return "gateway-managed";
+  return "local-user-machine";
+}
+
+function targetObject(value: unknown): value is { [key: string]: unknown } {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function buildDefaultAttachmentContext(attachments: UploadedFileRef[]): string {
