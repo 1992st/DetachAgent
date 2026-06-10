@@ -90,6 +90,20 @@ readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 
 `broker.submitToken` 是当前服务生命周期内按 `sessionKey` 生成的轻量提交令牌。`POST /api/tools/events/gateway` 必须带 `Authorization: Bearer <submitToken>` 或 body/payload 中的 `submitToken`，否则返回 401。它不是最终身份系统，但能避免公开 broker endpoint 被任意来源直接塞入待审批请求。
 
+为了避免把 `broker.submitToken` 长期暴露在聊天 prompt 或公开只读接口里，服务端提供一次性上下文导出：
+
+- `POST /api/context/exports`：只能由本机回环请求创建，输入 `sessionKey` / `sessionMode`，返回短期 `consumeUrl`。
+- `GET /api/context/exports/:token`：远端 agent host 可访问该 URL 获取完整 `clientContext.detaches`，包含本 session 的 broker submit token；成功读取后 token 立即失效。
+- `GET /api/context/:sessionKey`：用于调试；默认脱敏 `broker.submitToken`，只有本机回环请求显式 `includeSubmitToken=true` 才返回完整 token。
+
+远端 OpenClaw host 安装 adapter 后，推荐用 `context-fetch` 消费一次性 URL：
+
+```sh
+node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs context-fetch "$DETACHES_CONTEXT_EXPORT_URL" --output /tmp/detaches-client-context.json
+```
+
+这条路径是当前替代“把场景和 token 都塞进 prompt”的推荐方案；prompt 仍只作为兼容层和人类可读提示存在。
+
 adapter CLI 的 request 命令支持 `--context <clientContext-or-detaches.json>`，也支持 `--context -` 从 stdin 读取；既可以传完整 `clientContext`，也可以只传 `clientContext.detaches` 子对象。CLI 会自动提取 `sessionKey`、`agentId`、`broker.gatewayEventEndpoint` 和 `broker.submitToken`。默认只生成 broker-event JSON；加 `--submit` 时才使用 context 中的 endpoint 直接提交。显式命令行参数仍可覆盖 context 字段。
 
 ### Gateway 参数兼容

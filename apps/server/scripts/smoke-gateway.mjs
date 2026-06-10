@@ -337,6 +337,20 @@ async function main() {
     assert.equal(exportedContextWithToken.redacted.brokerSubmitToken, false);
     assert.equal(typeof exportedContextWithToken.detaches.broker.submitToken, "string");
     assert.equal(exportedContextWithToken.detaches.broker.submitTokenHeader, "Authorization");
+    const contextExport = await requestJson("/api/context/exports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionKey: chatSessionKey, sessionMode: "main" })
+    });
+    assert.equal(contextExport.sessionKey, chatSessionKey);
+    assert.match(contextExport.consumeUrl, new RegExp(`^${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/context/exports/`));
+    const consumedContextExport = await requestJson(contextExport.consumeUrl.replace(publicBaseUrl, ""));
+    assert.equal(consumedContextExport.sessionKey, chatSessionKey);
+    assert.equal(consumedContextExport.redacted.brokerSubmitToken, false);
+    assert.equal(consumedContextExport.detaches.broker.submitToken, exportedContextWithToken.detaches.broker.submitToken);
+    const consumedContextExportAgain = await fetch(contextExport.consumeUrl);
+    assert.equal(consumedContextExportAgain.status, 404);
+    assert.match(await consumedContextExportAgain.text(), /already consumed|invalid|expired/);
 
     const chat = new WebSocket(`ws://${host}:${serverPort}/api/chat/${encodeURIComponent(chatSessionKey)}`);
     const messages = [];

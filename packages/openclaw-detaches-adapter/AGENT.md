@@ -20,6 +20,16 @@ Before requesting tools, inspect the latest `clientContext.detaches` object or t
 
 If the context is missing, ask the user to resend through detaches_agent or avoid tool requests.
 
+If detaches_agent provides a one-time context export URL, fetch it on the real agent host and save it before requesting tools:
+
+```sh
+node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs context-fetch \
+  "$DETACHES_CONTEXT_EXPORT_URL" \
+  --output /tmp/detaches-client-context.json
+```
+
+The export URL should be consumed once. Treat the saved file as sensitive because it can contain `broker.submitToken` for this session.
+
 ## Adapter CLI
 
 When this adapter is installed on the real OpenClaw agent host, use the CLI as a local protocol inspector:

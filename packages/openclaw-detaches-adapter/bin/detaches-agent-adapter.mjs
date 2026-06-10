@@ -14,6 +14,7 @@ function usage(exitCode = 0) {
     "  manifest",
     "  validate-context <context-json-file>",
     "  inspect-context <context-json-file>",
+    "  context-fetch <one-time-context-export-url> [--output <file> --print client-context|detaches|export]",
     "  broker-probe <detaches-agent-base-url-or-capabilities-url>",
     "  terminal-request --target <target> --command <command> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
     "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
@@ -76,6 +77,13 @@ function detachesContextFrom(value) {
 function readContextFile(file) {
   if (file === "-") return detachesContextFrom(JSON.parse(fs.readFileSync(0, "utf8")));
   return detachesContextFrom(JSON.parse(fs.readFileSync(file, "utf8")));
+}
+
+function printableContextFromExport(payload, mode) {
+  if (mode === "export") return payload;
+  if (mode === "client-context") return payload?.clientContext ?? payload;
+  if (mode === "detaches") return detachesContextFrom(payload);
+  fail(`Unknown --print: ${mode}`);
 }
 
 function listCapabilities(context) {
@@ -202,6 +210,38 @@ async function brokerProbe(value) {
   if (errors.length) process.exit(1);
 }
 
+async function contextFetch(value, args) {
+  const url = String(value || "").trim();
+  if (!url) fail("Missing one-time context export URL.");
+  const response = await fetch(url, { headers: { Accept: "application/json" } });
+  const text = await response.text();
+  let payload;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    fail(`Context fetch returned non-JSON response from ${url}: ${text}`);
+  }
+  if (!response.ok) fail(payload?.error || `HTTP ${response.status}`);
+  const context = detachesContextFrom(payload);
+  const errors = validateContext(context);
+  if (errors.length) fail(`Fetched invalid detaches context: ${errors.join("; ")}`);
+  const printMode = optionalString(args, "print") || "client-context";
+  const selected = printableContextFromExport(payload, printMode);
+  const output = optionalString(args, "output");
+  if (output) {
+    fs.writeFileSync(output, `${JSON.stringify(selected, null, 2)}\n`);
+    console.log(JSON.stringify({
+      ok: true,
+      output,
+      sessionKey: context.sessionKey,
+      agentId: context.agentId ?? null,
+      redacted: payload?.redacted ?? null
+    }, null, 2));
+    return;
+  }
+  console.log(JSON.stringify(selected, null, 2));
+}
+
 function emitFence(fence, payload) {
   console.log(`\`\`\`${fence}`);
   console.log(JSON.stringify(payload));
@@ -290,6 +330,11 @@ async function main() {
     const result = inspectContext(context);
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exit(1);
+    return;
+  }
+
+  if (command === "context-fetch") {
+    await contextFetch(rest[0], parseArgs(rest.slice(1)));
     return;
   }
 

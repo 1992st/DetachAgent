@@ -28,6 +28,7 @@ assert.equal(parsedManifest.id, "detaches_agent.openclaw.adapter");
 assert.equal(parsedManifest.targets["local-user-machine"].status, "supported");
 assert.equal(parsedManifest.targets["remote-agent-host"].status, "reserved");
 assert.equal(parsedManifest.cliCommands["inspect-context"].includes("routing warnings"), true);
+assert.equal(parsedManifest.cliCommands["context-fetch"].includes("one-time"), true);
 
 const validContext = await run(["validate-context", "test/valid-context.json"]);
 assert.equal(validContext.code, 0);
@@ -71,6 +72,37 @@ assert.equal(parsedClientContextInspection.broker.submitToken, "client-context-s
 const inspectedStdinClientContext = await run(["inspect-context", "-"], validClientContextJson);
 assert.equal(inspectedStdinClientContext.code, 0);
 assert.equal(JSON.parse(inspectedStdinClientContext.stdout).broker.submitToken, "client-context-submit-token");
+
+const contextFetchServer = http.createServer((_req, res) => {
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify({
+    sessionKey: "agent:audio-process:main",
+    sessionMode: "main",
+    clientContext: JSON.parse(validClientContextJson),
+    detaches: JSON.parse(validClientContextJson).detaches,
+    redacted: { brokerSubmitToken: false }
+  }));
+});
+contextFetchServer.listen(0, "127.0.0.1");
+await once(contextFetchServer, "listening");
+const contextFetchPort = contextFetchServer.address().port;
+const fetchedContext = await run(["context-fetch", `http://127.0.0.1:${contextFetchPort}/context-export-token`]);
+assert.equal(fetchedContext.code, 0);
+assert.equal(JSON.parse(fetchedContext.stdout).detaches.broker.submitToken, "client-context-submit-token");
+const fetchedContextPath = path.join(adapterDir, "test", ".tmp-fetched-context.json");
+const fetchedContextToFile = await run([
+  "context-fetch",
+  `http://127.0.0.1:${contextFetchPort}/context-export-token-2`,
+  "--output",
+  fetchedContextPath,
+  "--print",
+  "detaches"
+]);
+contextFetchServer.close();
+assert.equal(fetchedContextToFile.code, 0);
+assert.equal(JSON.parse(fetchedContextToFile.stdout).ok, true);
+assert.equal(JSON.parse(await fs.readFile(fetchedContextPath, "utf8")).broker.submitToken, "client-context-submit-token");
+await fs.rm(fetchedContextPath, { force: true });
 
 const invalidContext = await run(["validate-context", "adapter.manifest.json"]);
 assert.equal(invalidContext.code, 1);

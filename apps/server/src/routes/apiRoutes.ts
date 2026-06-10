@@ -17,6 +17,7 @@ import { buildChatClientContext, publicClientIdentity } from "../services/client
 import { toolBrokerService } from "../services/tools/toolBrokerService.js";
 import { brokerTokenService } from "../services/tools/brokerTokenService.js";
 import { openclawDetachesAdapterService } from "../services/adapters/openclawDetachesAdapterService.js";
+import { contextExportService } from "../services/context/contextExportService.js";
 
 const upload = multer({
   dest: path.join(appConfig.storageDir, "cache"),
@@ -36,15 +37,34 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function redactBrokerSubmitToken(clientContext: Record<string, unknown>): { clientContext: Record<string, unknown>; brokerSubmitTokenRedacted: boolean } {
-  const cloned = cloneJson(clientContext);
+async function buildContextExportBody(
+  sessionKey: string,
+  sessionMode: "main" | "device",
+  includeSubmitToken: boolean
+): Promise<DetachesContextExportResponse> {
+  const rawClientContext = await buildChatClientContext(sessionMode, sessionKey);
+  const cloned = cloneJson(rawClientContext);
   const detaches = cloned.detaches as { broker?: { submitToken?: string; submitTokenRedacted?: boolean } } | undefined;
-  if (detaches?.broker?.submitToken) {
-    delete detaches.broker.submitToken;
-    detaches.broker.submitTokenRedacted = true;
-    return { clientContext: cloned, brokerSubmitTokenRedacted: true };
+  if (!detaches || typeof detaches !== "object") {
+    throw new Error("detaches context was not generated.");
   }
-  return { clientContext: cloned, brokerSubmitTokenRedacted: false };
+  let brokerSubmitTokenRedacted = false;
+  if (detaches?.broker?.submitToken) {
+    if (!includeSubmitToken) {
+      delete detaches.broker.submitToken;
+      detaches.broker.submitTokenRedacted = true;
+      brokerSubmitTokenRedacted = true;
+    }
+  }
+  return {
+    sessionKey,
+    sessionMode,
+    clientContext: cloned,
+    detaches: detaches as DetachesContextExportResponse["detaches"],
+    redacted: {
+      brokerSubmitToken: brokerSubmitTokenRedacted
+    }
+  };
 }
 
 function tcpProbe(host: string, port: number, timeoutMs = 2500): Promise<{ ok: boolean; message: string; durationMs: number }> {
@@ -361,26 +381,48 @@ apiRoutes.get("/context/:sessionKey", async (req, res) => {
     return;
   }
 
-  const rawClientContext = await buildChatClientContext(sessionMode, sessionKey);
-  const exported = includeSubmitToken
-    ? { clientContext: cloneJson(rawClientContext), brokerSubmitTokenRedacted: false }
-    : redactBrokerSubmitToken(rawClientContext);
-  const detaches = exported.clientContext.detaches;
-  if (!detaches || typeof detaches !== "object") {
-    res.status(500).json({ error: "detaches context was not generated." });
+  try {
+    res.json(await buildContextExportBody(sessionKey, sessionMode, includeSubmitToken));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/context/exports", async (req, res) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "context exports can only be created from loopback requests." });
     return;
   }
+  const sessionKey = String(req.body?.sessionKey || "").trim();
+  const sessionMode = req.body?.sessionMode === "main" ? "main" : "device";
+  if (!sessionKey) {
+    res.status(400).json({ error: "sessionKey is required." });
+    return;
+  }
+  try {
+    const record = contextExportService.create({ sessionKey, sessionMode });
+    res.json({
+      sessionKey: record.sessionKey,
+      sessionMode: record.sessionMode,
+      expiresAt: new Date(record.expiresAtMs).toISOString(),
+      consumeUrl: `${publicServerBaseUrl(await runtimeConfig())}/api/context/exports/${encodeURIComponent(record.token)}`
+    });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
 
-  const body: DetachesContextExportResponse = {
-    sessionKey,
-    sessionMode,
-    clientContext: exported.clientContext,
-    detaches: detaches as DetachesContextExportResponse["detaches"],
-    redacted: {
-      brokerSubmitToken: exported.brokerSubmitTokenRedacted
-    }
-  };
-  res.json(body);
+apiRoutes.get("/context/exports/:token", async (req, res) => {
+  const record = contextExportService.consume(String(req.params.token || ""));
+  if (!record) {
+    res.status(404).json({ error: "context export token is invalid, expired, or already consumed." });
+    return;
+  }
+  try {
+    res.json(await buildContextExportBody(record.sessionKey, record.sessionMode, true));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 apiRoutes.put("/settings", async (req, res) => {
