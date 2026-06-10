@@ -79,7 +79,7 @@ export function ChatPanel({
   useEffect(() => {
     const nextContext = buildDefaultAttachmentContext(attachments);
     setAttachmentContext(nextContext);
-    setAttachmentContextOpen(Boolean(nextContext));
+    if (!nextContext) setAttachmentContextOpen(false);
   }, [attachments]);
 
   const canSend = useMemo(() => Boolean(sessionKey && draft.trim() && socketRef.current?.readyState === WebSocket.OPEN), [sessionKey, draft, socketState]);
@@ -193,20 +193,31 @@ export function ChatPanel({
       <form className="composer" onSubmit={submit}>
         {attachments.length ? (
           <div className="attachment-context-panel">
-            <div className="attachment-strip">
-              {attachments.map((file) => (
-                <span key={file.id} title={file.localPath ? `Local staging: ${file.localPath}` : "Local staging file"}>
-                  {file.name}
-                </span>
-              ))}
-              <button
-                type="button"
-                className="secondary-button compact"
-                onClick={() => setAttachmentContextOpen((current) => !current)}
-              >
-                <FileText size={15} />
-                {attachmentContextOpen ? "隐藏上下文" : "编辑上下文"}
-              </button>
+            <div className="attachment-tray">
+              <div className="attachment-list">
+                {attachments.map((file) => (
+                  <div className="attachment-card" key={file.id} title={file.localPath ? `Local staging: ${file.localPath}` : "Local staging file"}>
+                    <FileText size={15} />
+                    <div>
+                      <strong>{displayFileName(file)}</strong>
+                      <small>{formatFileSize(file.size)} · 本机暂存</small>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="attachment-actions">
+                <button
+                  type="button"
+                  className="secondary-button compact"
+                  onClick={() => setAttachmentContextOpen((current) => !current)}
+                >
+                  <FileText size={15} />
+                  {attachmentContextOpen ? "隐藏上下文" : "编辑上下文"}
+                </button>
+                <button type="button" className="icon-button small" title="Clear attachments" onClick={onClearAttachments}>
+                  <X size={15} />
+                </button>
+              </div>
             </div>
             {attachmentContextOpen ? (
               <label className="attachment-context-editor">
@@ -463,6 +474,10 @@ function buildDefaultAttachmentContext(attachments: UploadedFileRef[]): string {
     "用户批准后，detaches_agent 会生成一次性下载链接并在本会话 terminal 中执行 curl，把文件传到你指定的 remotePath。",
     "用户批准前不要假装已经读取文件；如果传输失败，请根据 terminal 输出继续处理。"
   ].join("\n").trimEnd();
+}
+
+function displayFileName(file: UploadedFileRef): string {
+  return file.displayName || file.name;
 }
 
 function formatFileSize(size: number): string {

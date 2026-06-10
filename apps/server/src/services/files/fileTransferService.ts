@@ -20,6 +20,20 @@ function sanitizeFileName(name: string): string {
   return name.replace(/[^\w.\- \u4e00-\u9fa5]/g, "_").slice(0, 180) || "upload.bin";
 }
 
+function displayFileName(name: string): string {
+  return repairMultipartFileName(name).replace(/[\0\r\n]/g, " ").trim().slice(0, 240) || "upload.bin";
+}
+
+function repairMultipartFileName(name: string): string {
+  if (!/[\u00c0-\u00ff]/.test(name)) return name;
+  try {
+    const repaired = Buffer.from(name, "latin1").toString("utf8");
+    return repaired.includes("\uFFFD") ? name : repaired;
+  } catch {
+    return name;
+  }
+}
+
 interface StagedFileRecord extends UploadedFileRef {
   localPath: string;
 }
@@ -36,12 +50,15 @@ export class FileTransferService {
 
   async saveUpload(file: Express.Multer.File): Promise<UploadedFileRef> {
     const id = nanoid();
-    const safeName = sanitizeFileName(file.originalname);
-    const localPath = path.join(appConfig.storageDir, "uploads", `${id}-${safeName}`);
+    const originalName = displayFileName(file.originalname);
+    const storageName = sanitizeFileName(originalName);
+    const localPath = path.join(appConfig.storageDir, "uploads", `${id}-${storageName}`);
     await fs.rename(file.path, localPath);
     const ref: StagedFileRecord = {
       id,
-      name: safeName,
+      name: originalName,
+      displayName: originalName,
+      storageName,
       mimeType: file.mimetype || "application/octet-stream",
       size: file.size,
       localPath,
@@ -66,7 +83,7 @@ export class FileTransferService {
     const downloadUrl = `http://${this.localAccessHost()}:${appConfig.serverPort}/api/files/staged/${encodeURIComponent(fileId)}?token=${encodeURIComponent(token)}`;
     return {
       fileId,
-      fileName: file.name,
+      fileName: file.displayName || file.name,
       remotePath: cleanedRemotePath,
       downloadUrl,
       command: buildCurlCommand(downloadUrl, cleanedRemotePath),
@@ -98,7 +115,7 @@ export class FileTransferService {
         // Best effort cleanup after a successful one-time transfer.
       }
     };
-    return { localPath: file.localPath, name: file.name, cleanup };
+    return { localPath: file.localPath, name: file.displayName || file.name, cleanup };
   }
 
   async downloadRemote(remotePath: string): Promise<{ localPath: string; name: string }> {

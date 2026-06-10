@@ -247,13 +247,15 @@ async function main() {
 
     const uploadForm = new FormData();
     uploadForm.append("sessionKey", "agent-alpha-session");
-    uploadForm.append("file", new Blob(["hello"], { type: "text/plain" }), "note.txt");
+    uploadForm.append("file", new Blob(["hello"], { type: "text/plain" }), "P100协议说明-示例.txt");
     const upload = await requestJson("/api/files/upload", { method: "POST", body: uploadForm });
-    assert.equal(upload.file.name, "note.txt");
+    assert.equal(upload.file.name, "P100协议说明-示例.txt");
+    assert.equal(upload.file.displayName, "P100协议说明-示例.txt");
+    assert.equal(upload.file.storageName, "P100协议说明-示例.txt");
     assert.equal(upload.file.mimeType, "text/plain");
     assert.equal(upload.file.contentBase64, undefined);
     assert.equal(upload.file.remotePath, undefined);
-    assert.match(upload.file.localPath, /storage(?:-smoke)?\/uploads\/.+note\.txt$/);
+    assert.match(upload.file.localPath, /storage(?:-smoke)?\/uploads\/.+P100协议说明-示例\.txt$/);
 
     const rejectedDownload = await fetch(`http://${host}:${serverPort}/api/files/download?remotePath=${encodeURIComponent("/etc/passwd")}`);
     assert.equal(rejectedDownload.status, 400);
@@ -288,7 +290,7 @@ async function main() {
     assert.equal(observed.chatSend.sessionKey, "agent-alpha-session");
     assert.match(observed.chatSend.message, /^hello smoke/);
     assert.match(observed.chatSend.message, /detaches_agent 文件上下文/);
-    assert.match(observed.chatSend.message, /note\.txt/);
+    assert.match(observed.chatSend.message, /P100协议说明-示例\.txt/);
     assert.match(observed.chatSend.message, new RegExp(`fileId: ${upload.file.id}`));
     assert.match(observed.chatSend.message, /currentLocation: 用户本机 detaches_agent staging 区/);
     assert.match(observed.chatSend.message, /remotePath: not uploaded/);

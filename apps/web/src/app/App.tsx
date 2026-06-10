@@ -24,7 +24,7 @@ export function App() {
   const [clientError, setClientError] = useState<string | null>(null);
   const [sessionMode, setSessionMode] = useState<ChatSessionMode>("device");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [attachments, setAttachments] = useState<UploadedFileRef[]>([]);
+  const [attachmentsBySession, setAttachmentsBySession] = useState<Record<string, UploadedFileRef[]>>({});
   const [uploading, setUploading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [remotePath, setRemotePath] = useState("");
@@ -87,6 +87,7 @@ export function App() {
 
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
   const selectedSession = selectedAgent ? sessionKeyForAgent(selectedAgent, sessionMode, clientIdentity) : null;
+  const attachments = selectedSession ? attachmentsBySession[selectedSession] ?? [] : [];
 
   async function handleUpload(files: FileList) {
     if (!selectedSession) return;
@@ -98,7 +99,10 @@ export function App() {
         const response = await uploadFile(file, selectedSession);
         uploaded.push(response.file);
       }
-      setAttachments((current) => [...current, ...uploaded]);
+      setAttachmentsBySession((current) => ({
+        ...current,
+        [selectedSession]: [...(current[selectedSession] ?? []), ...uploaded]
+      }));
     } catch (error) {
       setFileError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -129,7 +133,10 @@ export function App() {
             clientIdentity={clientIdentity}
             attachments={attachments}
             onSessionModeChange={setSessionMode}
-            onClearAttachments={() => setAttachments([])}
+            onClearAttachments={() => {
+              if (!selectedSession) return;
+              setAttachmentsBySession((current) => ({ ...current, [selectedSession]: [] }));
+            }}
             onNeedUpload={handleUpload}
           />
           <FilePanel

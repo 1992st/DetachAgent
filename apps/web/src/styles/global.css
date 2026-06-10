@@ -554,6 +554,63 @@ h3 { font-size: 14px; }
   gap: 8px;
 }
 
+.attachment-tray {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 8px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.attachment-list {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachment-card {
+  min-width: 180px;
+  max-width: min(360px, 100%);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+}
+
+.attachment-card strong,
+.attachment-card small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-card strong {
+  font-size: 12px;
+}
+
+.attachment-card small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.attachment-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .composer {
   flex: 0 0 auto;
   min-height: 86px;
@@ -563,6 +620,11 @@ h3 { font-size: 14px; }
   gap: 10px;
   border-top: 1px solid var(--line);
   background: var(--panel);
+}
+
+.icon-button.small {
+  width: 28px;
+  height: 28px;
 }
 
 .attachment-strip {

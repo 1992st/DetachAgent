@@ -1,6 +1,8 @@
 export interface UploadedFileRef {
   id: string;
   name: string;
+  displayName?: string;
+  storageName?: string;
   mimeType: string;
   size: number;
   localPath?: string;

@@ -122,7 +122,7 @@ function buildAttachmentContext(attachments?: UploadedFileRef[], override?: stri
     `本次消息附带 ${attachments.length} 个文件。`,
     "",
     ...attachments.flatMap((file, index) => [
-      `${index + 1}. ${file.name}`,
+      `${index + 1}. ${file.displayName || file.name}`,
       `   fileId: ${file.id}`,
       `   mimeType: ${file.mimeType || "application/octet-stream"}`,
       `   size: ${formatFileSize(file.size)}`,
