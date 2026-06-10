@@ -1,6 +1,6 @@
 import { CheckCircle2, Clipboard, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { OpenClawAdapterInstallPlan, OpenClawAdapterReadiness, ToolRequestRecord } from "@detaches/shared";
+import type { OpenClawAdapterInstallPlan, OpenClawAdapterReadiness, ToolBrokerSocketEvent, ToolRequestRecord } from "@detaches/shared";
 import { createToolRequest, fetchOpenClawAdapterInstallPlan, fetchOpenClawAdapterReadiness, fetchToolRequests } from "../../lib/api.js";
 
 const defaultInstallDir = "~/.openclaw/detaches_agent";
@@ -44,6 +44,27 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!sessionKey) return;
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const params = new URLSearchParams({ sessionKey });
+    if (agentId) params.set("agentId", agentId);
+    const ws = new WebSocket(`${protocol}://${window.location.host}/api/tools/stream?${params}`);
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data) as ToolBrokerSocketEvent;
+      if (data.type !== "request" || data.request.kind !== "adapter-install") return;
+      if (!requestMatchesInstallDir(data.request, installDir)) return;
+      setInstallRequest(data.request);
+      if (data.request.status === "approved" || data.request.status === "failed") {
+        setProbe("remote-ssh");
+        void refresh("remote-ssh");
+      }
+    };
+    ws.onerror = () => ws.close();
+    return () => ws.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionKey, agentId, installDir]);
+
   async function copy(text: string) {
     if (!text) return;
     await navigator.clipboard.writeText(text);
@@ -83,11 +104,7 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
       return;
     }
     const response = await fetchToolRequests({ sessionKey, agentId, limit: 50 });
-    const request = response.requests.find((item) => (
-      item.kind === "adapter-install"
-      && item.target === "remote-agent-host"
-      && (typeof item.payload.installDir !== "string" || item.payload.installDir === installDir)
-    )) ?? null;
+    const request = response.requests.find((item) => requestMatchesInstallDir(item, installDir)) ?? null;
     setInstallRequest(request);
   }
 
@@ -199,4 +216,10 @@ function stateText(readiness: OpenClawAdapterReadiness): string {
 function remoteProbeText(readiness: OpenClawAdapterReadiness): string {
   const remote = [readiness.remoteUser, readiness.remoteHost].filter(Boolean).join("@");
   return remote ? `远端只读 SSH 探测：${remote}` : "远端只读 SSH 探测";
+}
+
+function requestMatchesInstallDir(request: ToolRequestRecord, installDir: string): boolean {
+  return request.kind === "adapter-install"
+    && request.target === "remote-agent-host"
+    && (typeof request.payload.installDir !== "string" || request.payload.installDir === installDir);
 }
