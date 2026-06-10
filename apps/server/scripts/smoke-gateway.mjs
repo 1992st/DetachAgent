@@ -289,6 +289,14 @@ async function main() {
     assert.equal(capabilities.candidateAdapters.includes("gateway-managed"), true);
     assert.equal(capabilities.candidateAdapters.includes("remote-agent-host"), true);
     assert.equal(capabilities.candidateAdapters.includes("local-user-machine"), true);
+    const brokerCapabilities = await requestJson("/api/tools/broker/capabilities");
+    assert.equal(brokerCapabilities.ok, true);
+    assert.equal(brokerCapabilities.protocolVersion, 1);
+    assert.equal(brokerCapabilities.gatewayEventEndpoint, `${publicBaseUrl}/api/tools/events/gateway`);
+    assert.equal(brokerCapabilities.requestFormats.includes("broker-event"), true);
+    const adapterCli = path.resolve(new URL("../../../packages/openclaw-detaches-adapter/bin/detaches-agent-adapter.mjs", import.meta.url).pathname);
+    const adapterProbe = await execFileAsync(process.execPath, [adapterCli, "broker-probe", publicBaseUrl]);
+    assert.equal(JSON.parse(adapterProbe.stdout).ok, true);
 
     const agents = await requestJson("/api/agents");
     assert.equal(agents.agents.length, 2);
@@ -532,7 +540,6 @@ async function main() {
       })
     });
     assert.equal(duplicateGatewayToolEvent.request.id, gatewayToolEvent.request.id);
-    const adapterCli = path.resolve(new URL("../../../packages/openclaw-detaches-adapter/bin/detaches-agent-adapter.mjs", import.meta.url).pathname);
     const adapterEventOutput = await execFileAsync(process.execPath, [
       adapterCli,
       "terminal-request",

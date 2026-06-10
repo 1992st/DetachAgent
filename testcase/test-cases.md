@@ -37,7 +37,7 @@
 
 ## TC-002A OpenClaw detaches adapter
 
-目标：验证远端 agent-side adapter 资产可读取、可校验、可诊断会话上下文、可生成标准请求块、结构化 Tool Broker event，并可直接提交 event。
+目标：验证远端 agent-side adapter 资产可读取、可校验、可诊断会话上下文、可探测 Tool Broker、可生成标准请求块、结构化 Tool Broker event，并可直接提交 event。
 
 步骤：
 
@@ -45,11 +45,12 @@
 2. 读取 adapter manifest。
 3. 校验一个合法 `clientContext.detaches`。
 4. 用 `inspect-context` 输出 capability target 和路由告警。
-5. 生成 `detaches-terminal` 请求块。
-6. 生成 `detaches-file-transfer` 请求块。
-7. 生成 `--format broker-event` JSON。
-8. 用 `--submit-url` 向 mock detaches_agent endpoint 提交 broker-event。
-9. 尝试未知 target。
+5. 用 `broker-probe` 校验 mock broker capabilities endpoint。
+6. 生成 `detaches-terminal` 请求块。
+7. 生成 `detaches-file-transfer` 请求块。
+8. 生成 `--format broker-event` JSON。
+9. 用 `--submit-url` 向 mock detaches_agent endpoint 提交 broker-event。
+10. 尝试未知 target。
 
 期望：
 
@@ -57,6 +58,7 @@
 - manifest 声明 `remote-agent-host` / `gateway-managed` 为 reserved。
 - 合法 context 校验通过。
 - `inspect-context` 能识别 `local-user-machine` 可请求、`remote-agent-host` 不可请求。
+- `broker-probe` 能识别 detaches_agent broker 协议并拒绝不匹配 endpoint。
 - 请求块必须包含 fenced code block、target 和 reason。
 - broker-event JSON 必须包含 `source: gateway-event`、`sourceEventId`、`sessionKey` 和 `payload`。
 - `--submit-url` 必须 POST 同一份 broker-event，并输出服务端响应。

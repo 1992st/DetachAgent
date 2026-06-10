@@ -14,6 +14,7 @@ function usage(exitCode = 0) {
     "  manifest",
     "  validate-context <context-json-file>",
     "  inspect-context <context-json-file>",
+    "  broker-probe <detaches-agent-base-url-or-capabilities-url>",
     "  terminal-request --target <target> --command <command> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-url <url>]",
     "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-url <url>]",
     "",
@@ -143,6 +144,36 @@ function requireOption(args, name) {
   return value.trim();
 }
 
+function brokerCapabilitiesUrl(value) {
+  const trimmed = String(value || "").trim().replace(/\/+$/, "");
+  if (!trimmed) fail("Missing detaches_agent base URL.");
+  if (trimmed.endsWith("/api/tools/broker/capabilities")) return trimmed;
+  return `${trimmed}/api/tools/broker/capabilities`;
+}
+
+async function brokerProbe(value) {
+  const url = brokerCapabilitiesUrl(value);
+  const response = await fetch(url, { headers: { Accept: "application/json" } });
+  const text = await response.text();
+  let payload;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    fail(`Broker probe returned non-JSON response from ${url}: ${text}`);
+  }
+  const errors = [];
+  if (!response.ok) errors.push(`HTTP ${response.status}`);
+  if (payload?.app !== "detaches_agent") errors.push("app must be detaches_agent");
+  if (payload?.protocolVersion !== 1) errors.push("protocolVersion must be 1");
+  if (payload?.eventSource !== "gateway-event") errors.push("eventSource must be gateway-event");
+  if (payload?.idempotencyField !== "sourceEventId") errors.push("idempotencyField must be sourceEventId");
+  if (!Array.isArray(payload?.requestFormats) || !payload.requestFormats.includes("broker-event")) errors.push("requestFormats must include broker-event");
+  if (payload?.adapterId !== "detaches_agent.openclaw.adapter") errors.push("adapterId mismatch");
+  const result = { ok: errors.length === 0, url, errors, capabilities: payload };
+  console.log(JSON.stringify(result, null, 2));
+  if (errors.length) process.exit(1);
+}
+
 function emitFence(fence, payload) {
   console.log(`\`\`\`${fence}`);
   console.log(JSON.stringify(payload));
@@ -224,6 +255,11 @@ async function main() {
     const result = inspectContext(context);
     console.log(JSON.stringify(result, null, 2));
     if (!result.ok) process.exit(1);
+    return;
+  }
+
+  if (command === "broker-probe") {
+    await brokerProbe(rest[0]);
     return;
   }
 

@@ -96,6 +96,7 @@ detaches_agent/
   - 当前仍通过 Gateway `chat.send` 把 `[detaches_agent 工具结果]` 快照回写到同一 session，让 agent 可继续推理；这是过渡层，最终应替换成 OpenClaw/Gateway 原生结构化 tool result。
   - 当前 request/execution 状态持久化到 `storage/cache/tool-broker-state.json`，服务重启后仍可查询请求、执行记录和回写状态。
   - `GET /api/tools/requests` 提供 broker 队列查询，支持 sessionKey、agentId、status、limit 过滤。
+  - `GET /api/tools/broker/capabilities` 提供只读协议握手信息，供远端 adapter/skill 在提交请求前验证 broker endpoint、协议版本、request format、target 和 adapter id。
   - `WS /api/tools/stream` 推送 broker request created/updated/ingested/duplicate 事件。
   - 写入 `storage/logs/tool-broker-audit.jsonl`。
 

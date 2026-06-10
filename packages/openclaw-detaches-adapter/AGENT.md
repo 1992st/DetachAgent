@@ -29,6 +29,12 @@ node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs inspect-context /
 
 `inspect-context` prints session identity, adapter readiness, capability targets, routing warnings, and hard rules as JSON. It does not execute commands or transfer files.
 
+Before submitting structured requests, verify the broker endpoint:
+
+```sh
+node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs broker-probe "$DETACHES_AGENT_BASE_URL"
+```
+
 ## Tool Request Rules
 
 Never claim execution has happened just because you emitted a request block.

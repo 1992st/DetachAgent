@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import express from "express";
 import multer from "multer";
 import type { AppHealth, DiagnosticItem, DiagnosticsResponse, NetworkTestResponse, NetworkTestStep, ToolDecisionActor, ToolTarget } from "@detaches/shared";
-import { appConfig } from "../config/appConfig.js";
+import { appConfig, publicServerBaseUrl } from "../config/appConfig.js";
 import { settingsStore, runtimeConfig } from "../config/settingsStore.js";
 import { sshTunnelService } from "../services/tunnel/sshTunnelService.js";
 import { gatewayClient } from "../services/gateway/gatewayClient.js";
@@ -522,6 +522,23 @@ apiRoutes.post("/tools/events/gateway", async (req, res) => {
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }
+});
+
+apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
+  const config = await runtimeConfig();
+  res.json({
+    ok: true,
+    app: "detaches_agent",
+    protocolVersion: 1,
+    gatewayEventEndpoint: `${publicServerBaseUrl(config)}/api/tools/events/gateway`,
+    eventSource: "gateway-event",
+    idempotencyField: "sourceEventId",
+    requestFormats: ["broker-event", "fence"],
+    requestKinds: ["terminal", "file-transfer", "adapter-install"],
+    targets: ["local-user-machine", "remote-agent-host", "gateway-managed"],
+    approvalRequired: true,
+    adapterId: "detaches_agent.openclaw.adapter"
+  });
 });
 
 apiRoutes.get("/tools/requests", async (req, res) => {

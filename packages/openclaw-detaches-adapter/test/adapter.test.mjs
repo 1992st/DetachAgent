@@ -173,6 +173,44 @@ assert.equal(submittedBody.sourceEventId, "adapter-test-submit-1");
 assert.equal(submittedBody.payload.command, "pwd");
 assert.equal(JSON.parse(submittedBrokerEvent.stdout).request.id, "submitted-request");
 
+const probeServer = http.createServer((_req, res) => {
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify({
+    ok: true,
+    app: "detaches_agent",
+    protocolVersion: 1,
+    gatewayEventEndpoint: "http://127.0.0.1:38888/api/tools/events/gateway",
+    eventSource: "gateway-event",
+    idempotencyField: "sourceEventId",
+    requestFormats: ["broker-event", "fence"],
+    requestKinds: ["terminal", "file-transfer", "adapter-install"],
+    targets: ["local-user-machine", "remote-agent-host", "gateway-managed"],
+    approvalRequired: true,
+    adapterId: "detaches_agent.openclaw.adapter"
+  }));
+});
+probeServer.listen(0, "127.0.0.1");
+await once(probeServer, "listening");
+const probePort = probeServer.address().port;
+const brokerProbe = await run(["broker-probe", `http://127.0.0.1:${probePort}`]);
+probeServer.close();
+assert.equal(brokerProbe.code, 0);
+const parsedBrokerProbe = JSON.parse(brokerProbe.stdout);
+assert.equal(parsedBrokerProbe.ok, true);
+assert.equal(parsedBrokerProbe.capabilities.gatewayEventEndpoint, "http://127.0.0.1:38888/api/tools/events/gateway");
+
+const badProbeServer = http.createServer((_req, res) => {
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify({ ok: true, app: "other_app", protocolVersion: 99 }));
+});
+badProbeServer.listen(0, "127.0.0.1");
+await once(badProbeServer, "listening");
+const badProbePort = badProbeServer.address().port;
+const badBrokerProbe = await run(["broker-probe", `http://127.0.0.1:${badProbePort}`]);
+badProbeServer.close();
+assert.equal(badBrokerProbe.code, 1);
+assert.equal(JSON.parse(badBrokerProbe.stdout).ok, false);
+
 const unknownTarget = await run([
   "terminal-request",
   "--target",

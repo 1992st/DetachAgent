@@ -38,6 +38,20 @@ export interface ToolRequestCreateInput {
   payload: Record<string, unknown>;
 }
 
+export interface ToolBrokerCapabilities {
+  ok: true;
+  app: "detaches_agent";
+  protocolVersion: 1;
+  gatewayEventEndpoint: string;
+  eventSource: "gateway-event";
+  idempotencyField: "sourceEventId";
+  requestFormats: Array<"broker-event" | "fence">;
+  requestKinds: ToolRequestKind[];
+  targets: ToolTarget[];
+  approvalRequired: true;
+  adapterId: "detaches_agent.openclaw.adapter";
+}
+
 export interface ToolRequestRecord extends ToolRequestCreateInput {
   id: string;
   status: ToolRequestStatus;

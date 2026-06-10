@@ -86,6 +86,8 @@ readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 
 `broker.gatewayEventEndpoint` 是 adapter/skill 发起结构化待审批请求的入口，对应 `/api/tools/events/gateway`。adapter CLI 的 `--submit-url` 应优先使用这个值，`sourceEventId` 负责幂等。该 endpoint 来自 `publicBaseUrl` 配置，远端 agent host 访问不到 `127.0.0.1` 时应在设置页填入 Tailscale/LAN/反向代理地址。
 
+`GET /api/tools/broker/capabilities` 是配套握手接口，adapter CLI 的 `broker-probe` 会校验 `app`、`protocolVersion`、`eventSource`、`idempotencyField`、`requestFormats` 和 `adapterId` 后再允许把该 endpoint 当作可信 broker 使用。
+
 ### Gateway 参数兼容
 
 Gateway 曾拒绝顶层 `routeContext` 参数，所以当前只把 detaches 信息放入 `clientContext` 字段，不再向 `chat.send` 顶层添加未知字段。
