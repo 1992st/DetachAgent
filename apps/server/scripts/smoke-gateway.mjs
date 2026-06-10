@@ -479,12 +479,28 @@ async function main() {
       source: "detaches-ui"
     };
     const brokerSubmitToken = userChatSend.clientContext.detaches.broker.submitToken;
-    const autoContextExport = await requestJson(userChatSend.clientContext.detaches.contextExport.consumeUrl.replace(publicBaseUrl, ""));
-    assert.equal(autoContextExport.sessionKey, chatSessionKey);
-    assert.equal(autoContextExport.redacted.brokerSubmitToken, false);
-    assert.equal(autoContextExport.detaches.files.staged.length, 1);
-    assert.equal(autoContextExport.detaches.files.staged[0].fileId, upload.file.id);
-    assert.equal(autoContextExport.detaches.contextExport.consumeUrl, undefined);
+    const autoDoctorContextPath = path.resolve(new URL("../../..", import.meta.url).pathname, "storage-smoke/cache/auto-doctor-context.json");
+    const autoDoctor = await execFileAsync(process.execPath, [
+      adapterCli,
+      "doctor",
+      "--url",
+      userChatSend.clientContext.detaches.contextExport.consumeUrl,
+      "--output-context",
+      autoDoctorContextPath
+    ]);
+    const parsedAutoDoctor = JSON.parse(autoDoctor.stdout);
+    assert.equal(parsedAutoDoctor.ok, true);
+    assert.equal(parsedAutoDoctor.contextSource.type, "one-time-url");
+    assert.equal(parsedAutoDoctor.session.sessionKey, chatSessionKey);
+    assert.equal(parsedAutoDoctor.session.agentId, "agent-alpha");
+    assert.equal(parsedAutoDoctor.broker.submitTokenAvailable, true);
+    assert.equal(parsedAutoDoctor.stagedFiles.length, 1);
+    assert.equal(parsedAutoDoctor.stagedFiles[0].fileId, upload.file.id);
+    assert.match(parsedAutoDoctor.commands.fileTransferBrokerEvent, /file-transfer-request/);
+    const autoDoctorContext = JSON.parse(await fs.readFile(autoDoctorContextPath, "utf8"));
+    assert.equal(autoDoctorContext.sessionKey, chatSessionKey);
+    assert.equal(autoDoctorContext.files.staged[0].fileId, upload.file.id);
+    assert.equal(autoDoctorContext.contextExport.consumeUrl, undefined);
     const repeatedAutoContextExport = await fetch(userChatSend.clientContext.detaches.contextExport.consumeUrl);
     assert.equal(repeatedAutoContextExport.status, 404);
 
