@@ -66,6 +66,16 @@ detaches_agent/
   - 支持 ready、data、status、error。
   - 支持 input 和 resize。
 
+### Tool Broker
+
+- `apps/server/src/services/tools/toolBrokerService.ts`
+  - 记录 agent 请求的 `detaches-terminal` / `detaches-file-transfer` 工具调用。
+  - 分配服务端 `requestId`。
+  - 阻断不可用 target，禁止把 `remote-agent-host` / `gateway-managed` 退化成本机执行。
+  - 审批本机 terminal 请求时返回待写入 terminal 的 command。
+  - 审批文件传输请求时复用 `fileTransferService.prepareTransfer` 生成一次性 curl 命令。
+  - 写入 `storage/logs/tool-broker-audit.jsonl`。
+
 ### 文件
 
 - `apps/server/src/services/files/fileTransferService.ts`
@@ -93,9 +103,9 @@ detaches_agent/
   - 建立 `/api/chat/:sessionKey` WebSocket。
   - 渲染历史、用户消息、assistant 流式消息。
   - 合并流式响应，避免重复打印。
-  - 解析 `detaches-terminal` 命令块并渲染审批卡。
-  - 解析 `detaches-file-transfer` 文件传输请求并渲染审批卡。
-  - 用户 Run 后调用 TerminalPanel 写入命令。
+  - 解析 `detaches-terminal` 命令块并向 Tool Broker 注册请求，再渲染审批卡。
+  - 解析 `detaches-file-transfer` 文件传输请求并向 Tool Broker 注册请求，再渲染审批卡。
+  - 用户 Run/Transfer 后先调用 Tool Broker 审批；Broker 返回 command 后才调用 TerminalPanel 写入命令。
 
 ### Terminal
 
@@ -129,6 +139,8 @@ tool request
 ```
 
 路由层负责检查目标环境是否可用、生成审批卡、执行对应 adapter，并把结果回写给 agent。UI 审批卡必须展示 target，避免“归档到你的电脑”这类语义被误执行到本机 staging workspace。
+
+当前已加入服务端 Tool Broker 作为执行路由入口。UI 仍负责从 assistant 文本中提取 fenced request，但工具请求的登记、target 阻断、审批状态和审计日志已经由服务端负责。后续应继续把解析也移到服务端或 Gateway adapter 中，让前端只渲染 broker 状态。
 
 当前后端暴露 `/api/gateway/capabilities`，从 Gateway hello/features 中提炼可用能力。已观察到的候选能力包括：
 

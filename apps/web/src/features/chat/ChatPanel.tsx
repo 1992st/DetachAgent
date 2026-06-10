@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, FileText, Paperclip, Send, Square, X } from "lucide-react";
 import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, ToolTarget, UploadedFileRef } from "@detaches/shared";
-import { prepareFileTransfer } from "../../lib/api.js";
+import { approveToolRequest, createToolRequest, rejectToolRequest } from "../../lib/api.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
 
 interface Props {
@@ -120,7 +120,7 @@ export function ChatPanel({
     await navigator.clipboard.writeText(messageText(message));
   }
 
-  function approveTerminalCommand(command: string) {
+  function runBrokerCommand(command: string) {
     const ok = terminalRef.current?.runCommand(command) ?? false;
     terminalRef.current?.reveal();
     if (!ok) {
@@ -128,15 +128,6 @@ export function ChatPanel({
         ...current,
         { id: crypto.randomUUID(), role: "system", text: "Terminal is not connected yet. Open Agent Terminal and try again.", timestamp: new Date().toISOString() }
       ]);
-    }
-  }
-
-  async function prepareAndRunFileTransfer(request: FileTransferRequest) {
-    const response = await prepareFileTransfer(request.fileId, request.target, request.remotePath, { agentId, sessionKey });
-    const ok = terminalRef.current?.runCommand(response.command) ?? false;
-    terminalRef.current?.reveal();
-    if (!ok) {
-      throw new Error("Terminal is not connected yet. Open Agent Terminal and try again.");
     }
   }
 
@@ -182,8 +173,8 @@ export function ChatPanel({
               </button>
             </div>
             <p>{messageText(message)}</p>
-            <FileTransferRequests text={messageText(message)} onPrepareTransfer={prepareAndRunFileTransfer} onReveal={() => terminalRef.current?.reveal()} />
-            <TerminalCommandRequests text={messageText(message)} onApprove={approveTerminalCommand} onReveal={() => terminalRef.current?.reveal()} />
+            <FileTransferRequests text={messageText(message)} sessionKey={sessionKey} agentId={agentId} onRunCommand={runBrokerCommand} onReveal={() => terminalRef.current?.reveal()} />
+            <TerminalCommandRequests text={messageText(message)} sessionKey={sessionKey} agentId={agentId} onRunCommand={runBrokerCommand} onReveal={() => terminalRef.current?.reveal()} />
             {message.attachments?.map((attachment) => (
               <small className="attachment-chip" key={`${message.id}-${attachment.name}`}>{attachment.name}</small>
             ))}
@@ -282,20 +273,45 @@ function unsupportedTargetMessage(target: ToolTarget): string {
 
 function FileTransferRequests({
   text,
-  onPrepareTransfer,
+  sessionKey,
+  agentId,
+  onRunCommand,
   onReveal
 }: {
   text: string;
-  onPrepareTransfer: (request: FileTransferRequest) => Promise<void>;
+  sessionKey: string | null;
+  agentId: string | null;
+  onRunCommand: (command: string) => void;
   onReveal: () => void;
 }) {
   const requests = parseFileTransferRequests(text);
-  const [handled, setHandled] = useState<Record<number, "approved" | "rejected" | "running" | "error">>({});
+  const [brokerIds, setBrokerIds] = useState<Record<number, string>>({});
+  const [handled, setHandled] = useState<Record<number, "approved" | "rejected" | "running" | "error" | "blocked">>({});
   const [errors, setErrors] = useState<Record<number, string>>({});
   useEffect(() => {
+    if (!sessionKey) return;
     setHandled({});
     setErrors({});
-  }, [text]);
+    setBrokerIds({});
+    requests.forEach((request, index) => {
+      void createToolRequest({
+        kind: "file-transfer",
+        target: request.target,
+        sessionKey,
+        agentId: agentId ?? undefined,
+        reason: request.reason,
+        payload: { fileId: request.fileId, remotePath: request.remotePath }
+      })
+        .then((response) => {
+          setBrokerIds((current) => ({ ...current, [index]: response.request.id }));
+          if (response.request.status === "blocked") {
+            setHandled((current) => ({ ...current, [index]: "blocked" }));
+            setErrors((current) => ({ ...current, [index]: response.request.error || "Tool request is blocked." }));
+          }
+        })
+        .catch((error) => setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) })));
+    });
+  }, [text, sessionKey, agentId]);
   if (!requests.length) return null;
 
   return (
@@ -310,6 +326,7 @@ function FileTransferRequests({
               <p className={`target-pill ${request.target}`}>Target: {targetLabels[request.target]}</p>
               {request.reason ? <p>{request.reason}</p> : null}
               <code>{`fileId: ${request.fileId}\nremotePath: ${request.remotePath}`}</code>
+              {brokerIds[index] ? <small>requestId: {brokerIds[index]}</small> : null}
               {unsupported ? <p className="request-error">{unsupportedTargetMessage(request.target)}</p> : null}
               {errors[index] ? <p className="request-error">{errors[index]}</p> : null}
             </div>
@@ -320,8 +337,18 @@ function FileTransferRequests({
                 disabled={unsupported || Boolean(state && state !== "error")}
                 onClick={() => {
                   setHandled((current) => ({ ...current, [index]: "running" }));
-                  onPrepareTransfer(request)
-                    .then(() => setHandled((current) => ({ ...current, [index]: "approved" })))
+                  const brokerId = brokerIds[index];
+                  if (!brokerId) {
+                    setHandled((current) => ({ ...current, [index]: "error" }));
+                    setErrors((current) => ({ ...current, [index]: "Tool request is not registered yet." }));
+                    return;
+                  }
+                  approveToolRequest(brokerId)
+                    .then((response) => {
+                      if (!response.command) throw new Error(response.message || "Broker did not return a command.");
+                      onRunCommand(response.command);
+                      setHandled((current) => ({ ...current, [index]: "approved" }));
+                    })
                     .catch((error) => {
                       setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
                       setHandled((current) => ({ ...current, [index]: "error" }));
@@ -335,7 +362,11 @@ function FileTransferRequests({
                 type="button"
                 className="secondary-button"
                 disabled={Boolean(state && state !== "error")}
-                onClick={() => setHandled((current) => ({ ...current, [index]: "rejected" }))}
+                onClick={() => {
+                  const brokerId = brokerIds[index];
+                  if (brokerId) void rejectToolRequest(brokerId);
+                  setHandled((current) => ({ ...current, [index]: "rejected" }));
+                }}
               >
                 <X size={15} />
                 {state === "rejected" ? "Rejected" : "Reject"}
@@ -353,16 +384,45 @@ function FileTransferRequests({
 
 function TerminalCommandRequests({
   text,
-  onApprove,
+  sessionKey,
+  agentId,
+  onRunCommand,
   onReveal
 }: {
   text: string;
-  onApprove: (command: string) => void;
+  sessionKey: string | null;
+  agentId: string | null;
+  onRunCommand: (command: string) => void;
   onReveal: () => void;
 }) {
   const requests = parseTerminalCommandRequests(text);
-  const [handled, setHandled] = useState<Record<number, "approved" | "rejected">>({});
-  useEffect(() => setHandled({}), [text]);
+  const [brokerIds, setBrokerIds] = useState<Record<number, string>>({});
+  const [handled, setHandled] = useState<Record<number, "approved" | "rejected" | "running" | "error" | "blocked">>({});
+  const [errors, setErrors] = useState<Record<number, string>>({});
+  useEffect(() => {
+    if (!sessionKey) return;
+    setHandled({});
+    setErrors({});
+    setBrokerIds({});
+    requests.forEach((request, index) => {
+      void createToolRequest({
+        kind: "terminal",
+        target: request.target,
+        sessionKey,
+        agentId: agentId ?? undefined,
+        reason: request.reason,
+        payload: { command: request.command }
+      })
+        .then((response) => {
+          setBrokerIds((current) => ({ ...current, [index]: response.request.id }));
+          if (response.request.status === "blocked") {
+            setHandled((current) => ({ ...current, [index]: "blocked" }));
+            setErrors((current) => ({ ...current, [index]: response.request.error || "Tool request is blocked." }));
+          }
+        })
+        .catch((error) => setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) })));
+    });
+  }, [text, sessionKey, agentId]);
   if (!requests.length) return null;
 
   return (
@@ -377,7 +437,9 @@ function TerminalCommandRequests({
               <p className={`target-pill ${request.target}`}>Target: {targetLabels[request.target]}</p>
               {request.reason ? <p>{request.reason}</p> : null}
               <code>{request.command}</code>
+              {brokerIds[index] ? <small>requestId: {brokerIds[index]}</small> : null}
               {unsupported ? <p className="request-error">{unsupportedTargetMessage(request.target)}</p> : null}
+              {errors[index] ? <p className="request-error">{errors[index]}</p> : null}
             </div>
             <div className="terminal-request-actions">
               <button
@@ -385,18 +447,37 @@ function TerminalCommandRequests({
                 className="secondary-button"
                 disabled={unsupported || Boolean(state)}
                 onClick={() => {
-                  onApprove(request.command);
-                  setHandled((current) => ({ ...current, [index]: "approved" }));
+                  const brokerId = brokerIds[index];
+                  if (!brokerId) {
+                    setHandled((current) => ({ ...current, [index]: "error" }));
+                    setErrors((current) => ({ ...current, [index]: "Tool request is not registered yet." }));
+                    return;
+                  }
+                  setHandled((current) => ({ ...current, [index]: "running" }));
+                  approveToolRequest(brokerId)
+                    .then((response) => {
+                      if (!response.command) throw new Error(response.message || "Broker did not return a command.");
+                      onRunCommand(response.command);
+                      setHandled((current) => ({ ...current, [index]: "approved" }));
+                    })
+                    .catch((error) => {
+                      setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
+                      setHandled((current) => ({ ...current, [index]: "error" }));
+                    });
                 }}
               >
                 <Check size={15} />
-                {state === "approved" ? "Approved" : "Run"}
+                {state === "approved" ? "Approved" : state === "running" ? "Approving" : "Run"}
               </button>
               <button
                 type="button"
                 className="secondary-button"
                 disabled={Boolean(state)}
-                onClick={() => setHandled((current) => ({ ...current, [index]: "rejected" }))}
+                onClick={() => {
+                  const brokerId = brokerIds[index];
+                  if (brokerId) void rejectToolRequest(brokerId);
+                  setHandled((current) => ({ ...current, [index]: "rejected" }));
+                }}
               >
                 <X size={15} />
                 {state === "rejected" ? "Rejected" : "Reject"}

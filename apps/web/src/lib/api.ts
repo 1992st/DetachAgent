@@ -8,6 +8,10 @@ import type {
   NetworkTestResponse,
   PublicSettings,
   SettingsUpdate,
+  ToolRequestCreateInput,
+  ToolRequestCreateResponse,
+  ToolRequestDecisionResponse,
+  ToolRequestRecord,
   ToolTarget
 } from "@detaches/shared";
 
@@ -65,6 +69,28 @@ export async function prepareFileTransfer(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fileId, target, remotePath, agentId: context?.agentId, sessionKey: context?.sessionKey })
   });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function createToolRequest(input: ToolRequestCreateInput): Promise<ToolRequestCreateResponse> {
+  const res = await fetch("/api/tools/requests", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function approveToolRequest(requestId: string): Promise<ToolRequestDecisionResponse> {
+  const res = await fetch(`/api/tools/requests/${encodeURIComponent(requestId)}/approve`, { method: "POST" });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function rejectToolRequest(requestId: string): Promise<{ request: ToolRequestRecord }> {
+  const res = await fetch(`/api/tools/requests/${encodeURIComponent(requestId)}/reject`, { method: "POST" });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }

@@ -8,3 +8,4 @@ export * from "./fileTypes.js";
 export * from "./controlTypes.js";
 export * from "./settingsTypes.js";
 export * from "./terminalTypes.js";
+export * from "./toolBrokerTypes.js";

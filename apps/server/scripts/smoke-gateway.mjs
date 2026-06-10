@@ -367,6 +367,56 @@ async function main() {
     assert.match(preparedTransfer.command, /curl -fL/);
     assert.match(preparedTransfer.command, /detaches-note\.txt/);
 
+    const terminalTool = await requestJson("/api/tools/requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "terminal",
+        target: "local-user-machine",
+        sessionKey: chatSessionKey,
+        agentId: "agent-alpha",
+        reason: "smoke terminal broker",
+        payload: { command: "pwd" }
+      })
+    });
+    assert.equal(terminalTool.request.status, "pending");
+    const approvedTerminalTool = await requestJson(`/api/tools/requests/${terminalTool.request.id}/approve`, { method: "POST" });
+    assert.equal(approvedTerminalTool.request.status, "approved");
+    assert.equal(approvedTerminalTool.command, "pwd");
+
+    const blockedTerminalTool = await requestJson("/api/tools/requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "terminal",
+        target: "remote-agent-host",
+        sessionKey: chatSessionKey,
+        agentId: "agent-alpha",
+        reason: "smoke blocked remote terminal",
+        payload: { command: "pwd" }
+      })
+    });
+    assert.equal(blockedTerminalTool.request.status, "blocked");
+    assert.match(blockedTerminalTool.request.error, /cannot fallback/);
+
+    const brokerTransfer = await requestJson("/api/tools/requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "file-transfer",
+        target: "local-user-machine",
+        sessionKey: chatSessionKey,
+        agentId: "agent-alpha",
+        reason: "smoke file broker",
+        payload: { fileId: upload.file.id, remotePath: "/tmp/detaches-note-via-broker.txt" }
+      })
+    });
+    assert.equal(brokerTransfer.request.status, "pending");
+    const approvedBrokerTransfer = await requestJson(`/api/tools/requests/${brokerTransfer.request.id}/approve`, { method: "POST" });
+    assert.equal(approvedBrokerTransfer.request.status, "approved");
+    assert.match(approvedBrokerTransfer.command, /curl -fL/);
+    assert.match(approvedBrokerTransfer.command, /detaches-note-via-broker\.txt/);
+
     const validRemoteTransfer = await fetch(`http://${host}:${serverPort}/api/files/transfer/prepare`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -399,6 +449,16 @@ async function main() {
     assert.equal(auditEvents.some((event) => event.type === "transfer.download.start" && event.fileId === upload.file.id && event.target === "local-user-machine"), true);
     assert.equal(auditEvents.some((event) => event.type === "transfer.download.cleanup" && event.fileId === upload.file.id && event.target === "local-user-machine" && event.deleted === true), true);
     assert.equal(auditEvents.some((event) => event.type === "transfer.error" && event.fileId === upload.file.id && event.target === "remote-agent-host" && event.agentId === "agent-alpha" && event.workspace === "/tmp/openclaw/workspace/agent-alpha"), true);
+
+    const toolAuditPath = path.resolve(new URL("../../..", import.meta.url).pathname, "storage-smoke/logs/tool-broker-audit.jsonl");
+    const toolAuditEvents = (await fs.readFile(toolAuditPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "terminal" && event.request.target === "local-user-machine"), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "terminal" && event.request.target === "remote-agent-host" && event.request.status === "blocked"), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.command === "pwd"), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && /detaches-note-via-broker\.txt/.test(event.command || "")), true);
 
     chat.send(JSON.stringify({ type: "abort", runId: "run-smoke-1" }));
     while (!observed.abort) {

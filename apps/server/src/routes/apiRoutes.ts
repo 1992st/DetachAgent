@@ -14,6 +14,7 @@ import { loadOrCreateDeviceIdentity } from "../services/gateway/deviceIdentitySe
 import { listAgents } from "../services/gateway/agentDirectoryService.js";
 import { fileTransferService } from "../services/files/fileTransferService.js";
 import { publicClientIdentity } from "../services/clientContextService.js";
+import { toolBrokerService } from "../services/tools/toolBrokerService.js";
 
 const upload = multer({
   dest: path.join(appConfig.storageDir, "cache"),
@@ -389,6 +390,42 @@ apiRoutes.post("/files/transfer/prepare", async (req, res) => {
       return;
     }
     res.json(await fileTransferService.prepareTransfer({ fileId, target, remotePath, agentId, sessionKey }));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/tools/requests", async (req, res) => {
+  try {
+    const kind = req.body.kind === "file-transfer" ? "file-transfer" : req.body.kind === "terminal" ? "terminal" : null;
+    const target = parseToolTarget(req.body.target);
+    const sessionKey = typeof req.body.sessionKey === "string" ? req.body.sessionKey.trim() : "";
+    const agentId = typeof req.body.agentId === "string" ? req.body.agentId.trim() : undefined;
+    const reason = typeof req.body.reason === "string" ? req.body.reason.trim() : undefined;
+    const payload = req.body.payload && typeof req.body.payload === "object" && !Array.isArray(req.body.payload)
+      ? req.body.payload
+      : {};
+    if (!kind || !sessionKey) {
+      res.status(400).json({ error: "Missing kind or sessionKey." });
+      return;
+    }
+    res.json({ request: await toolBrokerService.create({ kind, target, sessionKey, agentId, reason, payload }) });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/tools/requests/:requestId/approve", async (req, res) => {
+  try {
+    res.json(await toolBrokerService.approve(req.params.requestId));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/tools/requests/:requestId/reject", async (req, res) => {
+  try {
+    res.json({ request: await toolBrokerService.reject(req.params.requestId) });
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }

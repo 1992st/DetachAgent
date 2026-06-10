@@ -43,10 +43,15 @@
 
 ### 执行审计日志
 
-- 记录每一次 agent 请求执行的命令。
-- 记录用户审批结果。
-- 记录命令写入 terminal 的时间、sessionKey、agentId。
-- 保存路径建议：`storage/logs/terminal-audit.jsonl`。
+- 已有基础 Tool Broker 审计：
+  - 记录每一次 agent 工具请求创建。
+  - 记录 target、sessionKey、agentId、审批、拒绝、失败原因。
+  - 保存路径：`storage/logs/tool-broker-audit.jsonl`。
+- 后续还需要补齐：
+  - 命令真正写入 terminal 的时间和 terminalId。
+  - terminal 输出摘要。
+  - 用户审批 UI 的操作者身份。
+  - 与聊天消息 id / runId 的关联。
 
 ### 命令风险提示
 
