@@ -88,6 +88,8 @@ readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 
 `GET /api/tools/broker/capabilities` 是配套握手接口，adapter CLI 的 `broker-probe` 会校验 `app`、`protocolVersion`、`eventSource`、`idempotencyField`、`requestFormats` 和 `adapterId` 后再允许把该 endpoint 当作可信 broker 使用。
 
+`broker.submitToken` 是当前服务生命周期内按 `sessionKey` 生成的轻量提交令牌。`POST /api/tools/events/gateway` 必须带 `Authorization: Bearer <submitToken>` 或 body/payload 中的 `submitToken`，否则返回 401。它不是最终身份系统，但能避免公开 broker endpoint 被任意来源直接塞入待审批请求。
+
 ### Gateway 参数兼容
 
 Gateway 曾拒绝顶层 `routeContext` 参数，所以当前只把 detaches 信息放入 `clientContext` 字段，不再向 `chat.send` 顶层添加未知字段。

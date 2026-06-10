@@ -416,6 +416,8 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.currentLocation, "user-local-staging");
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.requestFence, "detaches-file-transfer");
     assert.equal(userChatSend.clientContext?.detaches?.broker?.gatewayEventEndpoint, `${publicBaseUrl}/api/tools/events/gateway`);
+    assert.equal(typeof userChatSend.clientContext?.detaches?.broker?.submitToken, "string");
+    assert.equal(userChatSend.clientContext?.detaches?.broker?.submitTokenHeader, "Authorization");
     assert.equal(userChatSend.clientContext?.detaches?.broker?.requestFormats?.includes("broker-event"), true);
     assert.equal(userChatSend.clientContext?.detaches?.capabilities?.some((capability) => capability.name === "terminal" && capability.supportedTargets.includes("local-user-machine")), true);
     assert.equal(userChatSend.clientContext?.routeContext?.origin?.provider, "detaches_agent");
@@ -426,6 +428,7 @@ async function main() {
       displayName: userChatSend.clientContext.detaches.userDevice.displayName,
       source: "detaches-ui"
     };
+    const brokerSubmitToken = userChatSend.clientContext.detaches.broker.submitToken;
 
     const preparedTransfer = await requestJson("/api/files/transfer/prepare", {
       method: "POST",
@@ -511,9 +514,23 @@ async function main() {
       await wait(50);
     }
 
-    const gatewayToolEvent = await requestJson("/api/tools/events/gateway", {
+    const rejectedGatewayToolEvent = await fetch(`http://${host}:${serverPort}/api/tools/events/gateway`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "terminal",
+        target: "local-user-machine",
+        sessionKey: chatSessionKey,
+        agentId: "agent-alpha",
+        sourceEventId: "gateway-tool-event-smoke-1",
+        reason: "structured gateway tool event",
+        payload: { command: "echo gateway-event" }
+      })
+    });
+    assert.equal(rejectedGatewayToolEvent.status, 401);
+    const gatewayToolEvent = await requestJson("/api/tools/events/gateway", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${brokerSubmitToken}` },
       body: JSON.stringify({
         kind: "terminal",
         target: "local-user-machine",
@@ -528,7 +545,7 @@ async function main() {
     assert.equal(gatewayToolEvent.request.sourceEventId, "gateway-tool-event-smoke-1");
     const duplicateGatewayToolEvent = await requestJson("/api/tools/events/gateway", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${brokerSubmitToken}` },
       body: JSON.stringify({
         kind: "terminal",
         target: "local-user-machine",
@@ -556,13 +573,13 @@ async function main() {
       "--agent-id",
       "agent-alpha",
       "--source-event-id",
-      "adapter-tool-event-smoke-1"
+      "adapter-tool-event-smoke-1",
+      "--submit-token",
+      brokerSubmitToken,
+      "--submit-url",
+      `${publicBaseUrl}/api/tools/events/gateway`
     ]);
-    const adapterGeneratedToolEvent = await requestJson("/api/tools/events/gateway", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: adapterEventOutput.stdout
-    });
+    const adapterGeneratedToolEvent = JSON.parse(adapterEventOutput.stdout);
     assert.equal(adapterGeneratedToolEvent.request.source, "gateway-event");
     assert.equal(adapterGeneratedToolEvent.request.sourceEventId, "adapter-tool-event-smoke-1");
     assert.equal(adapterGeneratedToolEvent.request.payload.command, "echo adapter-event");

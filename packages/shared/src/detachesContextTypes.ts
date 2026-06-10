@@ -57,6 +57,8 @@ export interface DetachesSessionContext {
     gatewayEventEndpoint: string;
     eventSource: "gateway-event";
     idempotencyField: "sourceEventId";
+    submitToken: string;
+    submitTokenHeader: "Authorization";
     requestFormats: Array<"broker-event" | "fence">;
   };
   capabilities: DetachesToolCapability[];

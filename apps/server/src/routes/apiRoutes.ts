@@ -15,6 +15,7 @@ import { listAgents } from "../services/gateway/agentDirectoryService.js";
 import { fileTransferService } from "../services/files/fileTransferService.js";
 import { publicClientIdentity } from "../services/clientContextService.js";
 import { toolBrokerService } from "../services/tools/toolBrokerService.js";
+import { brokerTokenService } from "../services/tools/brokerTokenService.js";
 import { openclawDetachesAdapterService } from "../services/adapters/openclawDetachesAdapterService.js";
 
 const upload = multer({
@@ -457,6 +458,17 @@ function parseToolDecisionActor(value: unknown): ToolDecisionActor | undefined {
   };
 }
 
+function extractBrokerSubmitToken(req: express.Request): string {
+  const auth = req.header("authorization") || "";
+  if (/^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, "").trim();
+  if (typeof req.body.submitToken === "string") return req.body.submitToken.trim();
+  if (req.body.payload && typeof req.body.payload === "object" && !Array.isArray(req.body.payload)) {
+    const payload = req.body.payload as Record<string, unknown>;
+    if (typeof payload.submitToken === "string") return payload.submitToken.trim();
+  }
+  return "";
+}
+
 apiRoutes.post("/files/transfer/prepare", async (req, res) => {
   try {
     const fileId = String(req.body.fileId || "");
@@ -509,6 +521,10 @@ apiRoutes.post("/tools/events/gateway", async (req, res) => {
       res.status(400).json({ error: "Missing kind, sessionKey, or sourceEventId." });
       return;
     }
+    if (!brokerTokenService.verify(sessionKey, extractBrokerSubmitToken(req))) {
+      res.status(401).json({ error: "Invalid or missing broker submit token." });
+      return;
+    }
     res.json(await toolBrokerService.ingestGatewayEvent({
       kind,
       target,
@@ -533,6 +549,8 @@ apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
     gatewayEventEndpoint: `${publicServerBaseUrl(config)}/api/tools/events/gateway`,
     eventSource: "gateway-event",
     idempotencyField: "sourceEventId",
+    submitTokenRequired: true,
+    submitTokenHeader: "Authorization",
     requestFormats: ["broker-event", "fence"],
     requestKinds: ["terminal", "file-transfer", "adapter-install"],
     targets: ["local-user-machine", "remote-agent-host", "gateway-managed"],

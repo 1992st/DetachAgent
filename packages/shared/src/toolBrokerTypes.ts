@@ -45,6 +45,8 @@ export interface ToolBrokerCapabilities {
   gatewayEventEndpoint: string;
   eventSource: "gateway-event";
   idempotencyField: "sourceEventId";
+  submitTokenRequired: true;
+  submitTokenHeader: "Authorization";
   requestFormats: Array<"broker-event" | "fence">;
   requestKinds: ToolRequestKind[];
   targets: ToolTarget[];

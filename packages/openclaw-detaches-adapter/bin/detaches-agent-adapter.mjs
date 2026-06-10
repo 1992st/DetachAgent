@@ -15,8 +15,8 @@ function usage(exitCode = 0) {
     "  validate-context <context-json-file>",
     "  inspect-context <context-json-file>",
     "  broker-probe <detaches-agent-base-url-or-capabilities-url>",
-    "  terminal-request --target <target> --command <command> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-url <url>]",
-    "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-url <url>]",
+    "  terminal-request --target <target> --command <command> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url>]",
+    "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url>]",
     "",
     "This CLI does not execute tools. It only validates context and emits detaches_agent request blocks."
   ].join("\n");
@@ -167,6 +167,8 @@ async function brokerProbe(value) {
   if (payload?.protocolVersion !== 1) errors.push("protocolVersion must be 1");
   if (payload?.eventSource !== "gateway-event") errors.push("eventSource must be gateway-event");
   if (payload?.idempotencyField !== "sourceEventId") errors.push("idempotencyField must be sourceEventId");
+  if (payload?.submitTokenRequired !== true) errors.push("submitTokenRequired must be true");
+  if (payload?.submitTokenHeader !== "Authorization") errors.push("submitTokenHeader must be Authorization");
   if (!Array.isArray(payload?.requestFormats) || !payload.requestFormats.includes("broker-event")) errors.push("requestFormats must include broker-event");
   if (payload?.adapterId !== "detaches_agent.openclaw.adapter") errors.push("adapterId mismatch");
   const result = { ok: errors.length === 0, url, errors, capabilities: payload };
@@ -191,6 +193,7 @@ async function emitRequest(args, kind, target, reason, payload, fence) {
   if (format !== "broker-event") fail(`Unknown --format: ${format}`);
   const sessionKey = requireOption(args, "session-key");
   const sourceEventId = requireOption(args, "source-event-id");
+  const submitToken = typeof args["submit-token"] === "string" && args["submit-token"].trim() ? args["submit-token"].trim() : undefined;
   const agentId = typeof args["agent-id"] === "string" && args["agent-id"].trim() ? args["agent-id"].trim() : undefined;
   const event = {
     kind,
@@ -200,6 +203,7 @@ async function emitRequest(args, kind, target, reason, payload, fence) {
     reason,
     source: "gateway-event",
     sourceEventId,
+    submitToken,
     payload
   };
   if (!submitUrl) {
@@ -208,7 +212,10 @@ async function emitRequest(args, kind, target, reason, payload, fence) {
   }
   const response = await fetch(submitUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(submitToken ? { Authorization: `Bearer ${submitToken}` } : {})
+    },
     body: JSON.stringify(event)
   });
   const text = await response.text();

@@ -42,6 +42,8 @@ assert.equal(parsedInspection.files.staged[0].fileId, "file-123");
 assert.equal(parsedInspection.files.staged[0].transfer.requestFence, "detaches-file-transfer");
 assert.equal(parsedInspection.broker.gatewayEventEndpoint, "http://127.0.0.1:38888/api/tools/events/gateway");
 assert.equal(parsedInspection.broker.idempotencyField, "sourceEventId");
+assert.equal(parsedInspection.broker.submitToken, "test-submit-token");
+assert.equal(parsedInspection.broker.submitTokenHeader, "Authorization");
 assert.equal(parsedInspection.broker.requestFormats.includes("broker-event"), true);
 assert.deepEqual(parsedInspection.targetSupport["local-user-machine"].supportedBy, ["terminal"]);
 assert.equal(parsedInspection.targetSupport["local-user-machine"].requestable, true);
@@ -138,8 +140,10 @@ assert.equal(parsedFileBrokerEvent.payload.fileId, "file-123");
 assert.equal(parsedFileBrokerEvent.payload.remotePath, "/tmp/input.pdf");
 
 let submittedBody = null;
+let submittedAuth = null;
 const submitServer = http.createServer((req, res) => {
   let body = "";
+  submittedAuth = req.headers.authorization;
   req.on("data", (chunk) => { body += chunk.toString("utf8"); });
   req.on("end", () => {
     submittedBody = JSON.parse(body);
@@ -164,12 +168,16 @@ const submittedBrokerEvent = await run([
   "agent:audio-process:main",
   "--source-event-id",
   "adapter-test-submit-1",
+  "--submit-token",
+  "submit-secret",
   "--submit-url",
   `http://127.0.0.1:${submitPort}/api/tools/events/gateway`
 ]);
 submitServer.close();
 assert.equal(submittedBrokerEvent.code, 0);
+assert.equal(submittedAuth, "Bearer submit-secret");
 assert.equal(submittedBody.sourceEventId, "adapter-test-submit-1");
+assert.equal(submittedBody.submitToken, "submit-secret");
 assert.equal(submittedBody.payload.command, "pwd");
 assert.equal(JSON.parse(submittedBrokerEvent.stdout).request.id, "submitted-request");
 
@@ -182,6 +190,8 @@ const probeServer = http.createServer((_req, res) => {
     gatewayEventEndpoint: "http://127.0.0.1:38888/api/tools/events/gateway",
     eventSource: "gateway-event",
     idempotencyField: "sourceEventId",
+    submitTokenRequired: true,
+    submitTokenHeader: "Authorization",
     requestFormats: ["broker-event", "fence"],
     requestKinds: ["terminal", "file-transfer", "adapter-install"],
     targets: ["local-user-machine", "remote-agent-host", "gateway-managed"],

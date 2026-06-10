@@ -32,6 +32,8 @@
     "gatewayEventEndpoint": "http://127.0.0.1:38888/api/tools/events/gateway",
     "eventSource": "gateway-event",
     "idempotencyField": "sourceEventId",
+    "submitToken": "test-submit-token",
+    "submitTokenHeader": "Authorization",
     "requestFormats": ["broker-event", "fence"]
   },
   "capabilities": [
