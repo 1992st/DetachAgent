@@ -15,6 +15,7 @@ const observed = {
   connect: null,
   methods: [],
   chatSend: null,
+  chatSends: [],
   abort: null
 };
 
@@ -183,6 +184,7 @@ function createMockGateway() {
 
       if (frame.method === "chat.send") {
         observed.chatSend = frame.params;
+        observed.chatSends.push(frame.params);
         socket.send(JSON.stringify({ type: "res", id: frame.id, ok: true, payload: { runId: "run-smoke-1" } }));
         socket.send(JSON.stringify({
           type: "event",
@@ -332,28 +334,29 @@ async function main() {
       if (Date.now() - started > 8000) throw new Error("Timed out waiting for chat send response.");
       await wait(50);
     }
-    assert.equal(observed.chatSend.sessionKey, chatSessionKey);
-    assert.match(observed.chatSend.message, /^hello smoke/);
-    assert.match(observed.chatSend.message, /detaches_agent 文件上下文/);
-    assert.match(observed.chatSend.message, /P100协议说明-示例\.txt/);
-    assert.match(observed.chatSend.message, new RegExp(`fileId: ${upload.file.id}`));
-    assert.match(observed.chatSend.message, /currentLocation: 用户本机 detaches_agent staging 区/);
-    assert.match(observed.chatSend.message, /remotePath: not uploaded/);
-    assert.match(observed.chatSend.message, /detaches-file-transfer/);
-    assert.match(observed.chatSend.message, /"target":"local-user-machine"/);
-    assert.match(observed.chatSend.message, /detaches_agent 接入上下文/);
-    assert.match(observed.chatSend.message, /agentId: agent-alpha/);
-    assert.match(observed.chatSend.message, /terminal targets: supported=local-user-machine; unavailable=remote-agent-host,gateway-managed/);
-    assert.match(observed.chatSend.message, /file-transfer targets: supported=local-user-machine; unavailable=remote-agent-host,gateway-managed/);
-    assert.equal(observed.chatSend.idempotencyKey, "smoke-idempotency");
-    assert.equal(observed.chatSend.clientContext?.app, "detaches_agent");
-    assert.equal(observed.chatSend.clientContext?.detaches?.app, "detaches_agent");
-    assert.equal(observed.chatSend.clientContext?.detaches?.version, 1);
-    assert.equal(observed.chatSend.clientContext?.detaches?.sessionKey, chatSessionKey);
-    assert.equal(observed.chatSend.clientContext?.detaches?.agentId, "agent-alpha");
-    assert.equal(observed.chatSend.clientContext?.detaches?.capabilities?.some((capability) => capability.name === "terminal" && capability.supportedTargets.includes("local-user-machine")), true);
-    assert.equal(observed.chatSend.clientContext?.routeContext?.origin?.provider, "detaches_agent");
-    assert.equal(observed.chatSend.attachments, undefined);
+    const userChatSend = observed.chatSend;
+    assert.equal(userChatSend.sessionKey, chatSessionKey);
+    assert.match(userChatSend.message, /^hello smoke/);
+    assert.match(userChatSend.message, /detaches_agent 文件上下文/);
+    assert.match(userChatSend.message, /P100协议说明-示例\.txt/);
+    assert.match(userChatSend.message, new RegExp(`fileId: ${upload.file.id}`));
+    assert.match(userChatSend.message, /currentLocation: 用户本机 detaches_agent staging 区/);
+    assert.match(userChatSend.message, /remotePath: not uploaded/);
+    assert.match(userChatSend.message, /detaches-file-transfer/);
+    assert.match(userChatSend.message, /"target":"local-user-machine"/);
+    assert.match(userChatSend.message, /detaches_agent 接入上下文/);
+    assert.match(userChatSend.message, /agentId: agent-alpha/);
+    assert.match(userChatSend.message, /terminal targets: supported=local-user-machine; unavailable=remote-agent-host,gateway-managed/);
+    assert.match(userChatSend.message, /file-transfer targets: supported=local-user-machine; unavailable=remote-agent-host,gateway-managed/);
+    assert.equal(userChatSend.idempotencyKey, "smoke-idempotency");
+    assert.equal(userChatSend.clientContext?.app, "detaches_agent");
+    assert.equal(userChatSend.clientContext?.detaches?.app, "detaches_agent");
+    assert.equal(userChatSend.clientContext?.detaches?.version, 1);
+    assert.equal(userChatSend.clientContext?.detaches?.sessionKey, chatSessionKey);
+    assert.equal(userChatSend.clientContext?.detaches?.agentId, "agent-alpha");
+    assert.equal(userChatSend.clientContext?.detaches?.capabilities?.some((capability) => capability.name === "terminal" && capability.supportedTargets.includes("local-user-machine")), true);
+    assert.equal(userChatSend.clientContext?.routeContext?.origin?.provider, "detaches_agent");
+    assert.equal(userChatSend.attachments, undefined);
 
     const preparedTransfer = await requestJson("/api/files/transfer/prepare", {
       method: "POST",
@@ -395,6 +398,15 @@ async function main() {
     assert.equal(terminalToolResult.result.sessionKey, chatSessionKey);
     assert.equal(typeof terminalToolResult.result.output, "string");
     assert.equal(terminalToolResult.result.outputBytes >= 0, true);
+    while (!observed.chatSends.some((item) => item.idempotencyKey === `detaches-tool-result:${approvedTerminalTool.execution.executionId}`)) {
+      if (Date.now() - started > 12000) throw new Error("Timed out waiting for tool result forward.");
+      await wait(50);
+    }
+    const forwardedToolResult = observed.chatSends.find((item) => item.idempotencyKey === `detaches-tool-result:${approvedTerminalTool.execution.executionId}`);
+    assert.equal(forwardedToolResult.sessionKey, chatSessionKey);
+    assert.match(forwardedToolResult.message, /detaches_agent 工具结果/);
+    assert.match(forwardedToolResult.message, new RegExp(terminalTool.request.id));
+    assert.equal(forwardedToolResult.clientContext?.toolResult, true);
 
     const blockedTerminalTool = await requestJson("/api/tools/requests", {
       method: "POST",

@@ -13,11 +13,13 @@ import type {
 } from "@detaches/shared";
 import { appConfig } from "../../config/appConfig.js";
 import { fileTransferService } from "../files/fileTransferService.js";
+import { gatewayClient } from "../gateway/gatewayClient.js";
 import { terminalService } from "../terminal/terminalService.js";
 
 type AuditEvent =
   | { type: "tool.create"; request: ToolRequestRecord }
   | { type: "tool.approve"; requestId: string; status: ToolRequestStatus; command?: string; terminalId?: string; executionId?: string; error?: string }
+  | { type: "tool.result.forward"; requestId: string; executionId: string; ok: boolean; error?: string }
   | { type: "tool.reject"; requestId: string; status: ToolRequestStatus };
 
 interface ToolExecutionRecord {
@@ -82,6 +84,7 @@ class ToolBrokerService {
       const execution = await this.runInTerminal(request, command);
       const updated = this.update(request, "approved");
       await this.audit({ type: "tool.approve", requestId, status: updated.status, command, terminalId: execution.terminalId, executionId: execution.executionId });
+      void this.forwardResultToAgent(updated.id);
       return {
         request: updated,
         command,
@@ -112,6 +115,7 @@ class ToolBrokerService {
         const execution = await this.runInTerminal(request, prepared.command);
         const updated = this.update(request, "approved");
         await this.audit({ type: "tool.approve", requestId, status: updated.status, command: prepared.command, terminalId: execution.terminalId, executionId: execution.executionId });
+        void this.forwardResultToAgent(updated.id);
         return {
           request: updated,
           command: prepared.command,
@@ -215,6 +219,58 @@ class ToolBrokerService {
     };
     this.executions.set(execution.executionId, execution);
     return execution;
+  }
+
+  private async forwardResultToAgent(requestId: string): Promise<void> {
+    const request = this.requireRequest(requestId);
+    const execution = [...this.executions.values()].find((item) => item.requestId === requestId);
+    if (!execution) return;
+    await delay(600);
+    try {
+      const result = await this.result(requestId);
+      const output = result.result.output.trim();
+      const message = [
+        "[detaches_agent 工具结果]",
+        "Tool request execution snapshot from the user's local detaches_agent broker.",
+        "",
+        "```json",
+        JSON.stringify({
+          requestId,
+          executionId: result.result.executionId,
+          kind: request.kind,
+          target: request.target,
+          status: request.status,
+          terminalId: result.result.terminalId,
+          sessionKey: result.result.sessionKey,
+          outputBytes: result.result.outputBytes,
+          outputTail: output.slice(-4000)
+        }, null, 2),
+        "```",
+        "",
+        "This is a terminal replay snapshot, not a guaranteed command-completion signal."
+      ].join("\n");
+      await gatewayClient.sendChat({
+        sessionKey: request.sessionKey,
+        message,
+        idempotencyKey: `detaches-tool-result:${execution.executionId}`,
+        clientContext: {
+          app: "detaches_agent",
+          channel: "detaches_tool_result",
+          toolResult: true,
+          requestId,
+          executionId: execution.executionId
+        }
+      });
+      await this.audit({ type: "tool.result.forward", requestId, executionId: execution.executionId, ok: true });
+    } catch (error) {
+      await this.audit({
+        type: "tool.result.forward",
+        requestId,
+        executionId: execution.executionId,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 
   private async audit(event: AuditEvent): Promise<void> {
@@ -326,4 +382,8 @@ function unsupportedTargetMessage(kind: ToolRequestKind, target: ToolTarget): st
 
 function targetObject(value: unknown): value is { [key: string]: unknown } {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
