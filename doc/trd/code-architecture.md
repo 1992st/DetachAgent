@@ -91,6 +91,18 @@ detaches_agent/
   - `WS /api/tools/stream` 推送 broker request created/updated/ingested/duplicate 事件。
   - 写入 `storage/logs/tool-broker-audit.jsonl`。
 
+### Adapter Distribution
+
+- `apps/server/src/services/adapters/openclawDetachesAdapterService.ts`
+  - 读取 `packages/openclaw-detaches-adapter` 的 manifest、AGENT.md、CLI 和 package metadata。
+  - 计算每个文件与 bundle 的 sha256。
+  - 生成 `openclaw-detaches-adapter.tar.gz`，供真实 OpenClaw agent host 下载。
+
+- API：
+  - `GET /api/adapters/openclaw-detaches`
+  - `GET /api/adapters/openclaw-detaches/files/<path>`
+  - `GET /api/adapters/openclaw-detaches/bundle`
+
 ### 文件
 
 - `apps/server/src/services/files/fileTransferService.ts`

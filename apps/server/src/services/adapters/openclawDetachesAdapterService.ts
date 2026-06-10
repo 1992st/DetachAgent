@@ -1,0 +1,165 @@
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
+import zlib from "node:zlib";
+import { promisify } from "node:util";
+import { repoRoot } from "../../config/appConfig.js";
+
+const gzip = promisify(zlib.gzip);
+
+const adapterRoot = path.join(repoRoot, "packages", "openclaw-detaches-adapter");
+const adapterFiles = [
+  { path: "package.json", mode: 0o644, mimeType: "application/json" },
+  { path: "adapter.manifest.json", mode: 0o644, mimeType: "application/json" },
+  { path: "AGENT.md", mode: 0o644, mimeType: "text/markdown; charset=utf-8" },
+  { path: "bin/detaches-agent-adapter.mjs", mode: 0o755, mimeType: "text/javascript; charset=utf-8" }
+] as const;
+
+export interface OpenClawAdapterFile {
+  path: string;
+  size: number;
+  sha256: string;
+  mode: string;
+  mimeType: string;
+  downloadUrl: string;
+}
+
+export interface OpenClawAdapterInfo {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  manifest: unknown;
+  files: OpenClawAdapterFile[];
+  bundle: {
+    fileName: string;
+    downloadUrl: string;
+    sha256: string;
+    size: number;
+  };
+  install: {
+    shell: string;
+    notes: string[];
+  };
+}
+
+function sha256(buffer: Buffer): string {
+  return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
+function adapterFileSpec(filePath: string): (typeof adapterFiles)[number] | undefined {
+  const normalized = filePath.replace(/^\/+/, "").replace(/\\/g, "/");
+  return adapterFiles.find((file) => file.path === normalized);
+}
+
+async function readAdapterFile(filePath: string): Promise<{ spec: (typeof adapterFiles)[number]; buffer: Buffer }> {
+  const spec = adapterFileSpec(filePath);
+  if (!spec) throw new Error("Adapter file is not distributable.");
+  const absolutePath = path.join(adapterRoot, spec.path);
+  const buffer = await fs.readFile(absolutePath);
+  return { spec, buffer };
+}
+
+function writeString(header: Buffer, value: string, offset: number, length: number): void {
+  header.fill(0, offset, offset + length);
+  Buffer.from(value).copy(header, offset, 0, Math.min(Buffer.byteLength(value), length));
+}
+
+function writeOctal(header: Buffer, value: number, offset: number, length: number): void {
+  const encoded = value.toString(8).padStart(length - 1, "0").slice(-(length - 1));
+  writeString(header, `${encoded}\0`, offset, length);
+}
+
+function tarHeader(name: string, size: number, mode: number): Buffer {
+  const header = Buffer.alloc(512, 0);
+  writeString(header, name, 0, 100);
+  writeOctal(header, mode, 100, 8);
+  writeOctal(header, 0, 108, 8);
+  writeOctal(header, 0, 116, 8);
+  writeOctal(header, size, 124, 12);
+  writeOctal(header, Math.floor(Date.now() / 1000), 136, 12);
+  header.fill(0x20, 148, 156);
+  writeString(header, "0", 156, 1);
+  writeString(header, "ustar", 257, 6);
+  writeString(header, "00", 263, 2);
+  const checksum = header.reduce((sum, byte) => sum + byte, 0);
+  writeString(header, `${checksum.toString(8).padStart(6, "0")}\0 `, 148, 8);
+  return header;
+}
+
+function tarEntry(name: string, buffer: Buffer, mode: number): Buffer {
+  const paddingLength = (512 - (buffer.length % 512)) % 512;
+  return Buffer.concat([
+    tarHeader(name, buffer.length, mode),
+    buffer,
+    Buffer.alloc(paddingLength, 0)
+  ]);
+}
+
+async function buildBundle(): Promise<Buffer> {
+  const entries = await Promise.all(adapterFiles.map(async (file) => {
+    const buffer = await fs.readFile(path.join(adapterRoot, file.path));
+    return tarEntry(`openclaw-detaches-adapter/${file.path}`, buffer, file.mode);
+  }));
+  return gzip(Buffer.concat([...entries, Buffer.alloc(1024, 0)]));
+}
+
+export const openclawDetachesAdapterService = {
+  async info(basePath = "/api/adapters/openclaw-detaches"): Promise<OpenClawAdapterInfo> {
+    const manifestBuffer = await fs.readFile(path.join(adapterRoot, "adapter.manifest.json"));
+    const packageBuffer = await fs.readFile(path.join(adapterRoot, "package.json"));
+    const manifest = JSON.parse(manifestBuffer.toString("utf8"));
+    const packageJson = JSON.parse(packageBuffer.toString("utf8"));
+    const files = await Promise.all(adapterFiles.map(async (file) => {
+      const buffer = await fs.readFile(path.join(adapterRoot, file.path));
+      return {
+        path: file.path,
+        size: buffer.length,
+        sha256: sha256(buffer),
+        mode: `0${file.mode.toString(8)}`,
+        mimeType: file.mimeType,
+        downloadUrl: `${basePath}/files/${encodeURIComponent(file.path)}`
+      };
+    }));
+    const bundleBuffer = await buildBundle();
+    return {
+      id: manifest.id,
+      name: manifest.name,
+      version: packageJson.version,
+      description: manifest.description,
+      manifest,
+      files,
+      bundle: {
+        fileName: "openclaw-detaches-adapter.tar.gz",
+        downloadUrl: `${basePath}/bundle`,
+        sha256: sha256(bundleBuffer),
+        size: bundleBuffer.length
+      },
+      install: {
+        shell: [
+          "curl -fL http://127.0.0.1:38888/api/adapters/openclaw-detaches/bundle -o /tmp/openclaw-detaches-adapter.tar.gz",
+          "mkdir -p ~/.openclaw/detaches_agent",
+          "tar -xzf /tmp/openclaw-detaches-adapter.tar.gz -C ~/.openclaw/detaches_agent --strip-components=1",
+          "node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs manifest"
+        ].join("\n"),
+        notes: [
+          "Run this on the real OpenClaw agent host when it can reach the detaches_agent local server.",
+          "The adapter only emits/validates detaches_agent requests; it does not bypass UI approval."
+        ]
+      }
+    };
+  },
+
+  async file(filePath: string): Promise<{ buffer: Buffer; path: string; mimeType: string }> {
+    const { spec, buffer } = await readAdapterFile(filePath);
+    return { buffer, path: spec.path, mimeType: spec.mimeType };
+  },
+
+  async bundle(): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
+    return {
+      buffer: await buildBundle(),
+      fileName: "openclaw-detaches-adapter.tar.gz",
+      mimeType: "application/gzip"
+    };
+  }
+};

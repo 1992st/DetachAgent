@@ -325,6 +325,19 @@ async function main() {
     assert.equal(history.payload.messages[0].text, "history ok");
     assert.equal(history.payload.messages[0].runId, "run-history-smoke-1");
 
+    const adapterInfo = await requestJson("/api/adapters/openclaw-detaches");
+    assert.equal(adapterInfo.id, "detaches_agent.openclaw.adapter");
+    assert.equal(adapterInfo.manifest.targets["local-user-machine"].status, "supported");
+    assert.equal(adapterInfo.files.some((file) => file.path === "AGENT.md" && /^[a-f0-9]{64}$/.test(file.sha256)), true);
+    assert.match(adapterInfo.bundle.downloadUrl, /\/api\/adapters\/openclaw-detaches\/bundle$/);
+    const adapterAgentDoc = await fetch(`http://${host}:${serverPort}/api/adapters/openclaw-detaches/files/${encodeURIComponent("AGENT.md")}`);
+    assert.equal(adapterAgentDoc.status, 200);
+    assert.match(await adapterAgentDoc.text(), /detaches_agent OpenClaw Adapter/);
+    const adapterBundle = await fetch(`http://${host}:${serverPort}${adapterInfo.bundle.downloadUrl}`);
+    assert.equal(adapterBundle.status, 200);
+    assert.equal(adapterBundle.headers.get("content-type"), "application/gzip");
+    assert.equal((await adapterBundle.arrayBuffer()).byteLength, adapterInfo.bundle.size);
+
     chat.send(JSON.stringify({
       type: "send",
       message: "hello smoke",

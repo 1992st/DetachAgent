@@ -15,6 +15,7 @@ import { listAgents } from "../services/gateway/agentDirectoryService.js";
 import { fileTransferService } from "../services/files/fileTransferService.js";
 import { publicClientIdentity } from "../services/clientContextService.js";
 import { toolBrokerService } from "../services/tools/toolBrokerService.js";
+import { openclawDetachesAdapterService } from "../services/adapters/openclawDetachesAdapterService.js";
 
 const upload = multer({
   dest: path.join(appConfig.storageDir, "cache"),
@@ -347,6 +348,39 @@ apiRoutes.get("/gateway/capabilities", async (_req, res) => {
     res.json(await gatewayClient.capabilitySummary());
   } catch (error) {
     res.status(503).json({ connected: false, error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.get("/adapters/openclaw-detaches", async (_req, res) => {
+  try {
+    res.json(await openclawDetachesAdapterService.info());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.get("/adapters/openclaw-detaches/bundle", async (_req, res) => {
+  try {
+    const bundle = await openclawDetachesAdapterService.bundle();
+    res.setHeader("Content-Type", bundle.mimeType);
+    res.setHeader("Content-Disposition", `attachment; filename="${bundle.fileName}"`);
+    res.send(bundle.buffer);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.get("/adapters/openclaw-detaches/files/*", async (req, res) => {
+  try {
+    const params = req.params as Record<string, string | string[] | undefined>;
+    const rawFilePath = params[0] ?? params[""];
+    const filePath = Array.isArray(rawFilePath) ? rawFilePath.join("/") : rawFilePath || "";
+    const file = await openclawDetachesAdapterService.file(filePath);
+    res.setHeader("Content-Type", file.mimeType);
+    res.setHeader("Content-Disposition", `inline; filename="${path.basename(file.path)}"`);
+    res.send(file.buffer);
+  } catch (error) {
+    res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
 

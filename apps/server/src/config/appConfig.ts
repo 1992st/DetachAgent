@@ -7,7 +7,7 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, "../../../..");
+export const repoRoot = path.resolve(__dirname, "../../../..");
 export const DEFAULT_OPENCLAW_REMOTE_HOST = "100.74.38.97";
 
 function intEnv(name: string, fallback: number): number {

@@ -22,6 +22,14 @@
 
 它本身不执行命令、不传输文件，也不绕过 detaches_agent UI 审批。它的作用是让真实 agent 机器拥有稳定、可测试、可安装的协议入口，后续再按 OpenClaw 官方 skill/plugin 目录规范包装。
 
+本地 server 暴露 adapter 分发接口：
+
+- `GET /api/adapters/openclaw-detaches`：返回 manifest、文件清单、sha256、bundle 元信息和安装提示。
+- `GET /api/adapters/openclaw-detaches/files/<path>`：下载白名单内的单个 adapter 文件。
+- `GET /api/adapters/openclaw-detaches/bundle`：下载 `openclaw-detaches-adapter.tar.gz`。
+
+这让远端 agent host 可以从 detaches_agent 获取同一份协议资产。它仍不是最终的 OpenClaw 原生 skill 安装器，但已经把“agent 需要知道当前 detaches 场景”从聊天 prompt 推进为可分发、可校验的 adapter 包。
+
 ### 结构化 manifest
 
 服务端通过 `apps/server/src/services/clientContextService.ts` 生成 `DetachesSessionContext`：
