@@ -354,6 +354,11 @@ async function main() {
     assert.equal(missingAdapterReadiness.target, "remote-agent-host");
     assert.equal(missingAdapterReadiness.state, "missing");
     assert.equal(missingAdapterReadiness.checks.some((check) => check.id === "install-dir" && check.state === "missing"), true);
+    const remoteProbeWithoutUser = await requestJson(`/api/adapters/openclaw-detaches/readiness?probe=remote-ssh&installDir=${encodeURIComponent("~/.openclaw/detaches_agent")}`);
+    assert.equal(remoteProbeWithoutUser.target, "remote-agent-host");
+    assert.equal(remoteProbeWithoutUser.probe, "remote-ssh");
+    assert.equal(remoteProbeWithoutUser.state, "error");
+    assert.equal(remoteProbeWithoutUser.checks.some((check) => check.id === "ssh-config" || check.id === "ssh"), true);
 
     chat.send(JSON.stringify({
       type: "send",

@@ -177,10 +177,11 @@ export async function testNetwork(): Promise<NetworkTestResponse> {
   return res.json();
 }
 
-export async function fetchOpenClawAdapterReadiness(input: { target?: "local-distribution" | "remote-agent-host"; installDir?: string } = {}): Promise<OpenClawAdapterReadiness> {
+export async function fetchOpenClawAdapterReadiness(input: { target?: "local-distribution" | "remote-agent-host"; installDir?: string; probe?: "local-fs" | "remote-ssh" } = {}): Promise<OpenClawAdapterReadiness> {
   const params = new URLSearchParams();
   if (input.target) params.set("target", input.target);
   if (input.installDir) params.set("installDir", input.installDir);
+  if (input.probe) params.set("probe", input.probe);
   const query = params.toString();
   const res = await fetch(`/api/adapters/openclaw-detaches/readiness${query ? `?${query}` : ""}`);
   if (!res.ok) throw new Error(await errorMessage(res));

@@ -3,10 +3,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import zlib from "node:zlib";
 import { promisify } from "node:util";
+import { execFile } from "node:child_process";
 import type { OpenClawAdapterInstallPlan, OpenClawAdapterReadiness, OpenClawAdapterReadinessCheck, OpenClawAdapterReadinessState } from "@detaches/shared";
 import { repoRoot } from "../../config/appConfig.js";
+import { runtimeConfig } from "../../config/settingsStore.js";
 
 const gzip = promisify(zlib.gzip);
+const execFileAsync = promisify(execFile);
 
 const adapterRoot = path.join(repoRoot, "packages", "openclaw-detaches-adapter");
 const adapterFiles = [
@@ -134,6 +137,80 @@ function aggregateReadiness(checks: OpenClawAdapterReadinessCheck[]): OpenClawAd
 
 async function readJsonFile(filePath: string): Promise<unknown> {
   return JSON.parse(await fs.readFile(filePath, "utf8"));
+}
+
+function remoteReadinessScript(installDir: string, expectedAdapterId: string, expectedVersion: string): string {
+  const manifestPath = `${installDir}/adapter.manifest.json`;
+  const packagePath = `${installDir}/package.json`;
+  const cliPath = `${installDir}/bin/detaches-agent-adapter.mjs`;
+  return [
+    "set +e",
+    `INSTALL_DIR=${shellQuote(installDir)}`,
+    `EXPECTED_ADAPTER_ID=${shellQuote(expectedAdapterId)}`,
+    `EXPECTED_VERSION=${shellQuote(expectedVersion)}`,
+    `MANIFEST_PATH=${shellQuote(manifestPath)}`,
+    `PACKAGE_PATH=${shellQuote(packagePath)}`,
+    `CLI_PATH=${shellQuote(cliPath)}`,
+    "STATE=ready",
+    "json_escape() { printf '%s' \"$1\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'; }",
+    "emit_check() {",
+    "  CHECK_ID=$(json_escape \"$1\")",
+    "  CHECK_STATE=$(json_escape \"$2\")",
+    "  CHECK_MESSAGE=$(json_escape \"$3\")",
+    "  if [ -n \"$CHECKS\" ]; then CHECKS=\"$CHECKS,\"; fi",
+    "  CHECKS=\"$CHECKS{\\\"id\\\":\\\"$CHECK_ID\\\",\\\"state\\\":\\\"$CHECK_STATE\\\",\\\"message\\\":\\\"$CHECK_MESSAGE\\\"}\"",
+    "  if [ \"$2\" = error ]; then STATE=error; elif [ \"$STATE\" != error ] && [ \"$2\" = invalid ]; then STATE=invalid; elif [ \"$STATE\" = ready ] && [ \"$2\" = missing ]; then STATE=missing; fi",
+    "}",
+    "if [ -d \"$INSTALL_DIR\" ]; then",
+    "  emit_check install-dir ready \"Adapter install directory exists: $INSTALL_DIR\"",
+    "elif [ -e \"$INSTALL_DIR\" ]; then",
+    "  emit_check install-dir invalid \"Adapter install path exists but is not a directory: $INSTALL_DIR\"",
+    "else",
+    "  emit_check install-dir missing \"Adapter install directory does not exist: $INSTALL_DIR\"",
+    "fi",
+    "if [ -f \"$MANIFEST_PATH\" ]; then",
+    "  if grep -q \"\\\"id\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_ADAPTER_ID\\\"\" \"$MANIFEST_PATH\"; then",
+    "    emit_check manifest ready \"Adapter manifest id is $EXPECTED_ADAPTER_ID.\"",
+    "  else",
+    "    emit_check manifest invalid \"Adapter manifest id mismatch: expected $EXPECTED_ADAPTER_ID.\"",
+    "  fi",
+    "else",
+    "  emit_check manifest missing \"Adapter manifest is missing at $MANIFEST_PATH.\"",
+    "fi",
+    "if [ -f \"$PACKAGE_PATH\" ]; then",
+    "  if grep -q \"\\\"version\\\"[[:space:]]*:[[:space:]]*\\\"$EXPECTED_VERSION\\\"\" \"$PACKAGE_PATH\"; then",
+    "    emit_check version ready \"Adapter package version is $EXPECTED_VERSION.\"",
+    "  else",
+    "    emit_check version invalid \"Adapter package version mismatch: expected $EXPECTED_VERSION.\"",
+    "  fi",
+    "else",
+    "  emit_check version missing \"Adapter package metadata is missing at $PACKAGE_PATH.\"",
+    "fi",
+    "if [ -f \"$CLI_PATH\" ]; then",
+    "  emit_check cli ready \"Adapter CLI exists at $CLI_PATH.\"",
+    "else",
+    "  emit_check cli missing \"Adapter CLI is missing at $CLI_PATH.\"",
+    "fi",
+    "printf '{\"state\":\"%s\",\"checks\":[%s]}\\n' \"$STATE\" \"$CHECKS\""
+  ].join("\n");
+}
+
+function sshArgs(config: Awaited<ReturnType<typeof runtimeConfig>>, command: string): string[] {
+  const args = [
+    "-p",
+    String(config.remoteSshPort),
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=5",
+    "-o",
+    "ServerAliveInterval=10",
+    "-o",
+    "ServerAliveCountMax=1"
+  ];
+  if (config.remoteIdentityPath) args.push("-i", config.remoteIdentityPath);
+  args.push(`${config.remoteUser}@${config.remoteHost}`, command);
+  return args;
 }
 
 export const openclawDetachesAdapterService = {
@@ -317,6 +394,7 @@ export const openclawDetachesAdapterService = {
     return {
       target,
       installDir,
+      probe: "local-fs",
       expectedAdapterId: info.id,
       expectedVersion: info.version,
       state: aggregateReadiness(checks),
@@ -329,6 +407,63 @@ export const openclawDetachesAdapterService = {
         "node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest | grep -q 'detaches_agent.openclaw.adapter'"
       ]
     };
+  },
+
+  async remoteReadiness(input: { installDir?: string } = {}): Promise<OpenClawAdapterReadiness> {
+    const info = await this.info();
+    const config = await runtimeConfig();
+    const installDir = normalizeInstallDir(input.installDir);
+    const base: OpenClawAdapterReadiness = {
+      target: "remote-agent-host",
+      installDir,
+      probe: "remote-ssh",
+      remoteHost: config.remoteHost,
+      remoteUser: config.remoteUser || undefined,
+      expectedAdapterId: info.id,
+      expectedVersion: info.version,
+      state: "error",
+      checks: [],
+      verifyCommands: [
+        `INSTALL_DIR=${shellQuote(installDir)}`,
+        "test -d \"$INSTALL_DIR\"",
+        "test -f \"$INSTALL_DIR/adapter.manifest.json\"",
+        "test -x \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" || test -f \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\"",
+        "node \"$INSTALL_DIR/bin/detaches-agent-adapter.mjs\" manifest | grep -q 'detaches_agent.openclaw.adapter'"
+      ]
+    };
+    if (!config.remoteUser) {
+      return {
+        ...base,
+        checks: [{ id: "ssh-config", state: "error", message: "Remote SSH user is not configured." }]
+      };
+    }
+    try {
+      const script = remoteReadinessScript(installDir, info.id, info.version);
+      const { stdout, stderr } = await execFileAsync("ssh", sshArgs(config, script), { timeout: 12000, maxBuffer: 1024 * 256 });
+      const line = stdout.trim().split("\n").filter(Boolean).at(-1);
+      if (!line) throw new Error(stderr.trim() || "Remote readiness probe returned no output.");
+      const parsed = JSON.parse(line) as { state?: OpenClawAdapterReadinessState; checks?: OpenClawAdapterReadinessCheck[] };
+      const checks = Array.isArray(parsed.checks) ? parsed.checks : [];
+      return {
+        ...base,
+        state: parsed.state ?? aggregateReadiness(checks),
+        checks: [
+          { id: "ssh", state: "ready", message: `SSH probe reached ${config.remoteUser}@${config.remoteHost}.` },
+          ...checks
+        ]
+      };
+    } catch (error: any) {
+      const output = `${error?.stdout ?? ""}${error?.stderr ?? ""}`.trim();
+      return {
+        ...base,
+        checks: [{
+          id: "ssh",
+          state: "error",
+          message: output || error?.message || "Remote SSH readiness probe failed.",
+          details: { code: error?.code, signal: error?.signal }
+        }]
+      };
+    }
   },
 
   async file(filePath: string): Promise<{ buffer: Buffer; path: string; mimeType: string }> {

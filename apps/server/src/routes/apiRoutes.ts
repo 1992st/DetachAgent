@@ -386,7 +386,10 @@ apiRoutes.get("/adapters/openclaw-detaches/readiness", async (req, res) => {
     const target = req.query.target === "remote-agent-host" || req.query.target === "local-distribution"
       ? req.query.target
       : undefined;
-    res.json(await openclawDetachesAdapterService.readiness({ installDir, target }));
+    const probe = req.query.probe === "remote-ssh" ? "remote-ssh" : "local-fs";
+    res.json(probe === "remote-ssh"
+      ? await openclawDetachesAdapterService.remoteReadiness({ installDir })
+      : await openclawDetachesAdapterService.readiness({ installDir, target }));
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }

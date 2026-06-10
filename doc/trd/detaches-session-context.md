@@ -46,6 +46,7 @@ readiness 接口给出 `ready` / `missing` / `invalid` / `error` 状态：
 - 默认不传 `installDir` 时，检查本仓库内 adapter distribution 是否完整。
 - 传入 `installDir` 时，检查该目录中的 `adapter.manifest.json`、`package.json` 和 CLI 文件。
 - 返回 verify commands，可作为后续远端 SSH/agent-side skill 的健康检查脚本。
+- 传 `probe=remote-ssh` 时，通过当前 SSH 配置在远端 agent host 执行只读检查脚本；不安装、不写文件、不改变远端状态。
 
 ### 结构化 manifest
 

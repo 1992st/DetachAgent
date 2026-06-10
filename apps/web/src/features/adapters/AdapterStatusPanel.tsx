@@ -9,6 +9,7 @@ export function AdapterStatusPanel() {
   const [installDir, setInstallDir] = useState(defaultInstallDir);
   const [readiness, setReadiness] = useState<OpenClawAdapterReadiness | null>(null);
   const [installPlan, setInstallPlan] = useState<OpenClawAdapterInstallPlan | null>(null);
+  const [probe, setProbe] = useState<"local-fs" | "remote-ssh">("local-fs");
   const [loading, setLoading] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -16,12 +17,14 @@ export function AdapterStatusPanel() {
   const installCommands = useMemo(() => installPlan?.commands.join("\n") ?? "", [installPlan]);
   const remoteVerifyCommands = useMemo(() => installPlan?.verifyCommands.join("\n") ?? "", [installPlan]);
 
-  async function refresh() {
+  async function refresh(nextProbe = probe) {
     setLoading(true);
     setError(null);
     try {
       const [nextReadiness, nextPlan] = await Promise.all([
-        fetchOpenClawAdapterReadiness(),
+        fetchOpenClawAdapterReadiness(nextProbe === "remote-ssh"
+          ? { probe: "remote-ssh", target: "remote-agent-host", installDir }
+          : { probe: "local-fs" }),
         fetchOpenClawAdapterInstallPlan({ installDir })
       ]);
       setReadiness(nextReadiness);
@@ -55,6 +58,20 @@ export function AdapterStatusPanel() {
         </button>
       </div>
       {error ? <div className="panel-error tight">{error}</div> : null}
+      <div className="adapter-probe-toggle" aria-label="Adapter probe">
+        <button type="button" className={probe === "local-fs" ? "active" : ""} onClick={() => {
+          setProbe("local-fs");
+          void refresh("local-fs");
+        }}>
+          本地分发包
+        </button>
+        <button type="button" className={probe === "remote-ssh" ? "active" : ""} onClick={() => {
+          setProbe("remote-ssh");
+          void refresh("remote-ssh");
+        }}>
+          远端 SSH 探测
+        </button>
+      </div>
       <label className="adapter-field">
         <span>远端安装目录（用于安装计划）</span>
         <input value={installDir} onChange={(event) => setInstallDir(event.target.value)} onBlur={() => void refresh()} />
@@ -65,7 +82,7 @@ export function AdapterStatusPanel() {
             <ShieldCheck size={16} />
             <strong>{readiness.state}</strong>
           </div>
-          <small>本地分发包检查，不代表远端机器已安装。</small>
+          <small>{readiness.probe === "remote-ssh" ? remoteProbeText(readiness) : "本地分发包检查，不代表远端机器已安装。"}</small>
           <small>{readiness.expectedAdapterId} · v{readiness.expectedVersion}</small>
           <ul>
             {readiness.checks.map((check) => (
@@ -109,8 +126,19 @@ export function AdapterStatusPanel() {
 }
 
 function stateText(readiness: OpenClawAdapterReadiness): string {
+  if (readiness.probe === "remote-ssh") {
+    if (readiness.state === "ready") return "远端 adapter 已就绪";
+    if (readiness.state === "missing") return "远端 adapter 未安装";
+    if (readiness.state === "invalid") return "远端 adapter 不匹配";
+    return "远端 adapter 探测失败";
+  }
   if (readiness.state === "ready") return "本地分发包已就绪";
   if (readiness.state === "missing") return "本地分发包缺失";
   if (readiness.state === "invalid") return "本地分发包不匹配";
   return "本地分发包检查失败";
+}
+
+function remoteProbeText(readiness: OpenClawAdapterReadiness): string {
+  const remote = [readiness.remoteUser, readiness.remoteHost].filter(Boolean).join("@");
+  return remote ? `远端只读 SSH 探测：${remote}` : "远端只读 SSH 探测";
 }

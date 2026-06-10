@@ -114,6 +114,7 @@ detaches_agent/
   - 默认检查仓库内 adapter distribution 是否完整。
   - 传入 `installDir` 时检查目标目录中的 manifest、package version 和 CLI 文件。
   - 返回 ready/missing/invalid/error 与可在远端执行的 verify commands。
+  - `probe=remote-ssh` 会使用当前 SSH 配置在远端运行只读检查脚本，用于证明真实 agent host 是否已经安装 adapter；该探测不安装、不修改远端文件。
 
 ### 文件
 

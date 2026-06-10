@@ -10,6 +10,9 @@ export interface OpenClawAdapterReadinessCheck {
 export interface OpenClawAdapterReadiness {
   target: "local-distribution" | "remote-agent-host";
   installDir: string;
+  probe?: "local-fs" | "remote-ssh";
+  remoteHost?: string;
+  remoteUser?: string;
   expectedAdapterId: string;
   expectedVersion: string;
   state: OpenClawAdapterReadinessState;
