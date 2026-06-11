@@ -52,8 +52,8 @@ export async function buildDetachesSessionContext(
     remotePath: file.remotePath,
     transfer: {
       requestFence: "detaches-file-transfer" as const,
-      supportedTargets: ["local-user-machine"],
-      defaultTarget: "local-user-machine" as const,
+      supportedTargets: ["remote-agent-host", "local-user-machine"],
+      defaultTarget: "remote-agent-host" as const,
       requiresApproval: true
     }
   }));
@@ -116,10 +116,10 @@ export async function buildDetachesSessionContext(
       {
         name: "file-transfer",
         requestFence: "detaches-file-transfer",
-        supportedTargets: ["local-user-machine"],
-        unavailableTargets: ["remote-agent-host", "gateway-managed"],
+        supportedTargets: ["remote-agent-host", "local-user-machine"],
+        unavailableTargets: ["gateway-managed"],
         approvalRequired: true,
-        executionHost: "user-local-machine"
+        executionHost: "remote-agent-host"
       }
     ],
     invariants: [

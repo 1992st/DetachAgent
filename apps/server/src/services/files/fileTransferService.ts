@@ -65,6 +65,8 @@ type FileTransferAuditEvent =
       downloadUrl: string;
       command: string;
       expiresAt: string;
+      agentId?: string;
+      workspace?: string;
     }
   | {
       type: "transfer.download.start";
@@ -205,15 +207,40 @@ export class FileTransferService {
       });
       throw new Error(`remotePath is outside the remote agent workspace: ${workspace}`);
     }
+    const token = nanoid(32);
+    const expiresAtMs = Date.now() + 10 * 60 * 1000;
+    this.transferTokens.set(token, { fileId: input.fileId, target: input.target, token, expiresAtMs });
+    const config = await runtimeConfig();
+    const publicBaseUrl = publicServerBaseUrl(config);
+    if (!isRemoteReachablePublicBaseUrl(publicBaseUrl)) {
+      this.transferTokens.delete(token);
+      const reason = "remote-agent-host transfer requires DETACHES_PUBLIC_BASE_URL to be reachable from the remote host; 127.0.0.1/localhost only works for local-user-machine.";
+      await this.audit({ type: "transfer.error", fileId: input.fileId, target: input.target, agentId, workspace, reason });
+      throw new Error(reason);
+    }
+    const downloadUrl = `${publicBaseUrl}/api/files/staged/${encodeURIComponent(input.fileId)}?token=${encodeURIComponent(token)}`;
+    const response = {
+      fileId: input.fileId,
+      target: input.target,
+      fileName: file.displayName || file.name,
+      remotePath,
+      downloadUrl,
+      command: buildRemoteAgentCurlCommand(config, downloadUrl, remotePath),
+      expiresAt: new Date(expiresAtMs).toISOString()
+    };
     await this.audit({
-      type: "transfer.error",
+      type: "transfer.prepare",
       fileId: input.fileId,
       target: input.target,
       agentId,
       workspace,
-      reason: "remote-agent-host transfer path validated, but transfer adapter is not implemented yet."
+      fileName: response.fileName,
+      remotePath: response.remotePath,
+      downloadUrl: response.downloadUrl,
+      command: response.command,
+      expiresAt: response.expiresAt
     });
-    throw new Error(`remote-agent-host path is valid under ${workspace}, but the transfer adapter is not implemented yet.`);
+    return response;
   }
 
   private async agentWorkspace(agentId: string): Promise<string> {
@@ -347,6 +374,36 @@ function buildCurlCommand(downloadUrl: string, remotePath: string): string {
     "-o",
     shellQuote(remotePath)
   ].join(" ");
+}
+
+function buildRemoteAgentCurlCommand(
+  config: Awaited<ReturnType<typeof runtimeConfig>>,
+  downloadUrl: string,
+  remotePath: string
+): string {
+  if (!config.remoteUser) {
+    throw new Error("OPENCLAW_REMOTE_USER is not configured.");
+  }
+  const remoteScript = buildCurlCommand(downloadUrl, remotePath);
+  return [
+    "ssh",
+    "-p",
+    String(config.remoteSshPort),
+    ...(config.remoteIdentityPath ? ["-i", shellQuote(config.remoteIdentityPath)] : []),
+    shellQuote(`${config.remoteUser}@${config.remoteHost}`),
+    shellQuote(remoteScript)
+  ].join(" ");
+}
+
+function isRemoteReachablePublicBaseUrl(value: string): boolean {
+  if (!value.trim()) return false;
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    return host !== "127.0.0.1" && host !== "localhost" && host !== "::1";
+  } catch {
+    return false;
+  }
 }
 
 function shellQuote(value: string): string {

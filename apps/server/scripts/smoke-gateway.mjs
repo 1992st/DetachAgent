@@ -452,7 +452,7 @@ async function main() {
     assert.match(userChatSend.message, /currentLocation: 用户本机 detaches_agent staging 区/);
     assert.match(userChatSend.message, /remotePath: not uploaded/);
     assert.match(userChatSend.message, /detaches-file-transfer/);
-    assert.match(userChatSend.message, /"target":"local-user-machine"/);
+    assert.match(userChatSend.message, /"target":"remote-agent-host"/);
     assert.match(userChatSend.message, /detaches_agent 接入上下文/);
     assert.match(userChatSend.message, /agentId: agent-alpha/);
     assert.match(userChatSend.message, /remoteAdapter: state=error/);
@@ -472,6 +472,8 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.displayName, "P100协议说明-示例.txt");
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.currentLocation, "user-local-staging");
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.requestFence, "detaches-file-transfer");
+    assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.defaultTarget, "remote-agent-host");
+    assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.supportedTargets?.includes("remote-agent-host"), true);
     assert.equal(userChatSend.clientContext?.detaches?.broker?.gatewayEventEndpoint, `${publicBaseUrl}/api/tools/events/gateway`);
     assert.equal(typeof userChatSend.clientContext?.detaches?.broker?.submitToken, "string");
     assert.equal(userChatSend.clientContext?.detaches?.broker?.submitToken, exportedContextWithToken.detaches.broker.submitToken);
@@ -855,7 +857,29 @@ async function main() {
       body: JSON.stringify({ fileId: upload.file.id, target: "remote-agent-host", agentId: "agent-alpha", remotePath: "docs/detaches-note.txt" })
     });
     assert.equal(validRemoteTransfer.status, 400);
-    assert.match(await validRemoteTransfer.text(), /remote-agent-host path is valid under \/tmp\/openclaw\/workspace\/agent-alpha/);
+    assert.match(await validRemoteTransfer.text(), /requires DETACHES_PUBLIC_BASE_URL to be reachable from the remote host/);
+
+    await requestJson("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ publicBaseUrl: "http://100.64.0.10:39888", remoteUser: "smoke-user" })
+    });
+    const preparedRemoteTransfer = await requestJson("/api/files/transfer/prepare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId: upload.file.id, target: "remote-agent-host", agentId: "agent-alpha", remotePath: "docs/detaches-note.txt" })
+    });
+    assert.equal(preparedRemoteTransfer.target, "remote-agent-host");
+    assert.equal(preparedRemoteTransfer.remotePath, "/tmp/openclaw/workspace/agent-alpha/docs/detaches-note.txt");
+    assert.match(preparedRemoteTransfer.downloadUrl, /^http:\/\/100\.64\.0\.10:39888\/api\/files\/staged\//);
+    assert.match(preparedRemoteTransfer.command, /ssh/);
+    assert.match(preparedRemoteTransfer.command, /smoke-user@100\.74\.38\.97/);
+    assert.match(preparedRemoteTransfer.command, /curl -fL/);
+    await requestJson("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ publicBaseUrl, remoteUser: "" })
+    });
 
     const escapedRemoteTransfer = await fetch(`http://${host}:${serverPort}/api/files/transfer/prepare`, {
       method: "POST",

@@ -175,13 +175,14 @@ const targetLabels: Record<ToolTarget, string> = {
 
 function toolRequestSupported(request: ToolRequestRecord): boolean {
   if (request.kind === "adapter-install") return request.target === "remote-agent-host";
-  if (request.kind === "terminal" || request.kind === "file-transfer") return request.target === "local-user-machine";
+  if (request.kind === "file-transfer") return request.target === "local-user-machine" || request.target === "remote-agent-host";
+  if (request.kind === "terminal") return request.target === "local-user-machine";
   return false;
 }
 
 function unsupportedTargetMessage(request: ToolRequestRecord): string {
   if (request.target === "remote-agent-host") {
-    return `${toolRequestTitle(request)} 当前只支持 adapter-install 这种远端受控操作，不能退化到用户本机执行。`;
+    return `${toolRequestTitle(request)} 当前不支持直接在远端执行，不能退化到用户本机执行。`;
   }
   return `${targetLabels[request.target]} 当前还没有执行 adapter，不能把请求退化到用户本机执行。`;
 }

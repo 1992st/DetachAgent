@@ -324,7 +324,8 @@ class ToolBrokerService {
 
   private targetSupported(kind: ToolRequestKind, target: ToolTarget): boolean {
     if (kind === "adapter-install") return target === "remote-agent-host";
-    return (kind === "terminal" || kind === "file-transfer") && target === "local-user-machine";
+    if (kind === "file-transfer") return target === "local-user-machine" || target === "remote-agent-host";
+    return kind === "terminal" && target === "local-user-machine";
   }
 
   private requireRequest(requestId: string): ToolRequestRecord {
