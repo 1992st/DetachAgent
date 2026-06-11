@@ -5,7 +5,7 @@ import zlib from "node:zlib";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import type { OpenClawAdapterInstallPlan, OpenClawAdapterReadiness, OpenClawAdapterReadinessCheck, OpenClawAdapterReadinessState } from "@detaches/shared";
-import { repoRoot } from "../../config/appConfig.js";
+import { repoRoot, reverseBridgeBaseUrl } from "../../config/appConfig.js";
 import { runtimeConfig } from "../../config/settingsStore.js";
 
 const gzip = promisify(zlib.gzip);
@@ -365,7 +365,7 @@ export const openclawDetachesAdapterService = {
           "node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs manifest"
         ].join("\n"),
         notes: [
-          "Run this on the real OpenClaw agent host when it can reach the detaches_agent local server.",
+        "Run this on the real OpenClaw agent host through the detaches_agent SSH reverse bridge.",
           "The adapter only emits/validates detaches_agent requests; it does not bypass UI approval."
         ]
       }
@@ -432,7 +432,7 @@ export const openclawDetachesAdapterService = {
       ],
       notes: [
         "Run these commands on the real OpenClaw agent host, not inside the user's local detaches_agent terminal.",
-        "The remote host must be able to reach the detaches_agent server baseUrl.",
+        "The baseUrl should normally be the SSH reverse bridge URL on the remote host, for example http://127.0.0.1:38999.",
         "The adapter only validates/emits detaches_agent protocol requests; it does not bypass UI approval."
       ]
     };
@@ -683,7 +683,7 @@ export const openclawDetachesAdapterService = {
   async prepareRemoteInstallCommand(input: { installDir?: string; workspaceDir?: string } = {}): Promise<OpenClawAdapterRemoteInstallCommand> {
     const config = await runtimeConfig();
     if (!config.remoteUser) throw new Error("Remote SSH user is not configured.");
-    const baseUrl = `http://127.0.0.1:${config.serverPort}`;
+    const baseUrl = reverseBridgeBaseUrl(config);
     const plan = await this.installPlan({ baseUrl, installDir: input.installDir, workspaceDir: input.workspaceDir });
     const args = sshArgs(config, remoteInstallScript(plan));
     const bundleUrl = `${baseUrl}/api/adapters/openclaw-detaches/bundle`;

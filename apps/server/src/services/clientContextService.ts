@@ -1,6 +1,6 @@
 import os from "node:os";
 import type { ChatSessionMode, ClientIdentity, DetachesSessionContext, DetachesStagedFileContext, UploadedFileRef } from "@detaches/shared";
-import { publicServerBaseUrl } from "../config/appConfig.js";
+import { reverseBridgeBaseUrl } from "../config/appConfig.js";
 import { runtimeConfig } from "../config/settingsStore.js";
 import { loadOrCreateDeviceIdentity } from "./gateway/deviceIdentityService.js";
 import { openclawDetachesAdapterService } from "./adapters/openclawDetachesAdapterService.js";
@@ -37,7 +37,12 @@ export async function buildDetachesSessionContext(
   const agentId = agentIdFromSessionKey(sessionKey);
   const remoteAdapter = openclawDetachesAdapterService.lastRemoteReadiness();
   const config = await runtimeConfig();
-  const baseUrl = publicServerBaseUrl(config);
+  const baseUrl = reverseBridgeBaseUrl(config);
+  const remoteUser = config.remoteUser || "remote-user";
+  const remoteHome = remoteUser === "root" ? "/root" : `/home/${remoteUser}`;
+  const remoteWorkspace = config.remoteWorkspaceRoot.startsWith("/")
+    ? config.remoteWorkspaceRoot
+    : `${remoteHome}/${config.remoteWorkspaceRoot.replace(/^~\/?/, "").replace(/^\/+/, "")}`;
   const contextExportRecord = options.createContextExport
     ? contextExportService.create({ sessionKey, sessionMode, attachments })
     : null;
@@ -54,7 +59,8 @@ export async function buildDetachesSessionContext(
       requestFence: "detaches-file-transfer" as const,
       supportedTargets: ["remote-agent-host", "local-user-machine"],
       defaultTarget: "remote-agent-host" as const,
-      requiresApproval: true
+      requiresApproval: true,
+      remotePathRule: `For target=remote-agent-host, remotePath must be an absolute path on ${remoteUser}@${config.remoteHost} inside the remote agent workspace (${remoteWorkspace}) or remote user home (${remoteHome}). Prefer ${remoteWorkspace.replace(/\/+$/, "")}/attachments/<file>; do not use relative paths, other users' home directories, or /Volumes external drives.`
     }
   }));
   return {
@@ -93,7 +99,7 @@ export async function buildDetachesSessionContext(
       consumeUrl: contextExportRecord
         ? `${baseUrl}/api/context/exports/${encodeURIComponent(contextExportRecord.token)}`
         : undefined,
-      createdBy: "detaches-ui-loopback",
+      createdBy: "detaches-ui-reverse-bridge",
       consumedBy: "remote-agent-host",
       oneTime: true,
       ttlSeconds: 300,
@@ -101,7 +107,7 @@ export async function buildDetachesSessionContext(
       doctorCommand: "doctor",
       generatedForMessage: Boolean(contextExportRecord),
       note: contextExportRecord
-        ? "A one-time context URL was generated for this message. Remote agent hosts should prefer doctor --url and must treat the URL as sensitive."
+        ? "A one-time context URL was generated for this message. It is reachable from the remote agent host through the SSH reverse bridge and must be treated as sensitive."
         : "Ask the user to generate a one-time context URL in the detaches_agent Adapter panel when the remote agent host needs a fresh full clientContext. Do not invent or request broker tokens in chat."
     },
     capabilities: [
@@ -183,6 +189,7 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
     `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}`,
     "完整机器可读上下文已随 chat.send.clientContext.detaches 发送；请优先读取结构化 context，不要只依赖本段文字。",
+    "本机 detaches_agent 已通过 SSH reverse bridge 暴露给远端 agent host；远端请使用 clientContext.detaches.broker.gatewayEventEndpoint / contextExport.consumeUrl 访问，不要要求用户手动 scp 或寻找本机局域网 IP。",
     "若远端已安装 detaches-agent skill，请读取 clientContext.detaches.contextExport.consumeUrl，并在真实 OpenClaw agent host 上运行 `node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --url \"$CONSUME_URL\" --output-context /tmp/detaches-client-context.json`；如果已经保存 context，则运行 `doctor --context <context-json>`。",
     "工具请求必须经过 detaches_agent 审批；不要声称命令、文件读取、传输或归档已完成，除非已收到 approved tool output。",
     "不要把 remote-agent-host/gateway-managed 请求退化成本机 local-user-machine。"
@@ -200,6 +207,7 @@ export function renderDetachesClientContextFallback(context: DetachesSessionCont
     `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}`,
     consumeUrl ? `contextExport.consumeUrl: ${consumeUrl}` : "contextExport.consumeUrl: unavailable",
+    "contextExport.consumeUrl 是远端 agent host 上可访问的 SSH reverse bridge 地址；不要要求用户手动 scp 或寻找本机局域网 IP。",
     "如果需要本机控制、文件传输或完整机器可读上下文，请在真实 OpenClaw agent host 上运行：",
     "node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --url \"$CONSUME_URL\" --output-context /tmp/detaches-client-context.json",
     "这个 consumeUrl 是一次性的，包含本会话工具 broker 能力；只在本次任务需要时消费，不要泄露或重复使用。",

@@ -300,7 +300,7 @@ function ToolRequests({
     setRequests([]);
     const loadRequests = () => extractToolRequests({ text, sessionKey, agentId, sourceMessageId, sourceRunId })
       .then((response) => {
-        const visibleRequests = keepLastFileTransferPerFile(response.requests);
+        const visibleRequests = keepLastFileTransferPerFile(response.requests).filter(isInlineToolRequestVisible);
         const extractedIds = new Set(visibleRequests.map((request) => request.id));
         return fetchToolRequests({ sessionKey, agentId, limit: 100 })
           .then((listed) => mergeToolRequests(visibleRequests, listed.requests.filter((request) => extractedIds.has(request.id))))
@@ -441,6 +441,18 @@ function keepLastFileTransferPerFile(requests: ToolRequestRecord[]): ToolRequest
   });
 }
 
+function isInlineToolRequestVisible(request: ToolRequestRecord): boolean {
+  if (request.status === "approved" || request.status === "succeeded" || request.status === "rejected") return false;
+  if (
+    request.kind === "file-transfer"
+    && request.status === "failed"
+    && /staged file not found|already transferred/i.test(request.error || "")
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function toolResultSummary(response: ToolExecutionResultResponse): string {
   const result = response.result;
   const status = result.completed
@@ -496,14 +508,15 @@ function buildDefaultAttachmentContext(attachments: UploadedFileRef[]): string {
       ""
     ]),
     "这些文件目前只在用户本机，尚未自动上传到远端。",
-    "重要：local-user-machine 只代表用户当前运行 detaches_agent 的本机 MacBook，不代表 OpenClaw Gateway 主机，也不代表远端 Mac mini。",
-    "如果你的目标是让远端 Agent/Gateway 主机读取文件，请使用 target=remote-agent-host，并把 remotePath 写成远端 agent workspace 内的相对路径或 workspace 内绝对路径；不要让用户手动 scp。",
+    "重要：local-user-machine 只代表用户当前运行 detaches_agent 的本机，不代表 OpenClaw Gateway 主机，也不代表远端 Agent 主机。",
+    "如果你的目标是让远端 Agent/Gateway 主机读取文件，请使用 target=remote-agent-host，并且 remotePath 必须是当前生效远端账号下的绝对路径。",
+    "优先选择远端 workspace 或远端用户 home 下的可写路径，例如 /home/<remote-user>/.openclaw/workspace/attachments/<file>；不要使用相对路径，不要使用其他用户目录，不要默认写入 /Volumes 外部卷。",
     "如果你只是要把文件保存到用户本机，才使用 target=local-user-machine。",
     "请求格式必须是唯一一个 fenced code block：",
     "```detaches-file-transfer",
-    "{\"fileId\":\"上面的文件 id\",\"target\":\"remote-agent-host\",\"remotePath\":\"references/target-file\",\"reason\":\"说明为什么远端 agent 需要读取这个文件\"}",
+    "{\"fileId\":\"上面的文件 id\",\"target\":\"remote-agent-host\",\"remotePath\":\"/home/<remote-user>/.openclaw/workspace/attachments/target-file\",\"reason\":\"说明为什么远端 agent 需要读取这个文件\"}",
     "```",
-    "用户批准后，detaches_agent 会生成一次性下载链接；target=remote-agent-host 时会通过 SSH 让远端主机自己 curl 下载到 workspace，target=local-user-machine 时会保存到用户本机。",
+    "用户批准后，detaches_agent 会生成一次性下载链接；target=remote-agent-host 时远端主机会通过 reverse bridge curl 下载到 workspace，target=local-user-machine 时会保存到用户本机。",
     "用户批准前不要假装已经读取文件；如果传输失败，请根据 terminal 输出继续处理。"
   ].join("\n").trimEnd();
 }

@@ -36,6 +36,7 @@ export interface FileTransferPrepareResponse {
   downloadUrl: string;
   command: string;
   expiresAt: string;
+  timeoutMs?: number;
 }
 
 export interface DownloadableArtifact {

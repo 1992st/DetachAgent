@@ -17,6 +17,8 @@ export interface AppHealth {
     gatewayDirectHost: string;
     gatewayLocalPort: number;
     gatewayRemotePort: number;
+    reverseBridgeRemoteHost: string;
+    reverseBridgeRemotePort: number;
     authMode: "token" | "password" | "none";
   };
   checkedAt: string;

@@ -3,7 +3,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import SftpClient from "ssh2-sftp-client";
 import type { FileTransferPrepareResponse, ToolTarget, UploadedFileRef } from "@detaches/shared";
-import { appConfig, publicServerBaseUrl } from "../../config/appConfig.js";
+import { appConfig, publicServerBaseUrl, reverseBridgeBaseUrl } from "../../config/appConfig.js";
 import { runtimeConfig } from "../../config/settingsStore.js";
 import { gatewayClient } from "../gateway/gatewayClient.js";
 
@@ -37,6 +37,13 @@ function repairMultipartFileName(name: string): string {
 
 interface StagedFileRecord extends UploadedFileRef {
   localPath: string;
+  state?: "available" | "consumed";
+  consumedAt?: string;
+}
+
+interface StagedFilesState {
+  version: 1;
+  files: StagedFileRecord[];
 }
 
 interface TransferTokenRecord {
@@ -95,8 +102,11 @@ type FileTransferAuditEvent =
 export class FileTransferService {
   private stagedFiles = new Map<string, StagedFileRecord>();
   private transferTokens = new Map<string, TransferTokenRecord>();
+  private loaded = false;
+  private saveChain: Promise<void> = Promise.resolve();
 
   async saveUpload(file: Express.Multer.File): Promise<UploadedFileRef> {
+    await this.load();
     const id = nanoid();
     const originalName = displayFileName(file.originalname);
     const storageName = sanitizeFileName(originalName);
@@ -110,9 +120,11 @@ export class FileTransferService {
       mimeType: file.mimetype || "application/octet-stream",
       size: file.size,
       localPath,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      state: "available"
     };
     this.stagedFiles.set(id, ref);
+    await this.save();
     await this.audit({
       type: "upload",
       fileId: ref.id,
@@ -132,6 +144,7 @@ export class FileTransferService {
     agentId?: string;
     sessionKey?: string;
   }): Promise<FileTransferPrepareResponse> {
+    await this.load();
     const { fileId, target } = input;
     if (target === "gateway-managed") {
       await this.audit({ type: "transfer.error", fileId, target, reason: "gateway-managed transfer adapter is not implemented yet." });
@@ -140,11 +153,7 @@ export class FileTransferService {
     if (target === "remote-agent-host") {
       return this.prepareRemoteAgentTransfer(input);
     }
-    const file = this.stagedFiles.get(fileId);
-    if (!file) {
-      void this.audit({ type: "transfer.error", fileId, target, reason: "Staged file not found or already transferred." });
-      throw new Error("Staged file not found or already transferred.");
-    }
+    const file = await this.requireAvailableFile(fileId, target);
     const cleanedRemotePath = input.remotePath.trim();
     if (!cleanedRemotePath || cleanedRemotePath.includes("\0") || cleanedRemotePath.endsWith("/")) {
       void this.audit({ type: "transfer.error", fileId, target, reason: "remotePath must be a target file path." });
@@ -162,7 +171,8 @@ export class FileTransferService {
       remotePath: cleanedRemotePath,
       downloadUrl,
       command: buildCurlCommand(downloadUrl, cleanedRemotePath),
-      expiresAt: new Date(expiresAtMs).toISOString()
+      expiresAt: new Date(expiresAtMs).toISOString(),
+      timeoutMs: transferTimeoutMs(file.size)
     };
     await this.audit({
       type: "transfer.prepare",
@@ -189,13 +199,11 @@ export class FileTransferService {
       await this.audit({ type: "transfer.error", fileId: input.fileId, target: input.target, reason: "remote-agent-host transfer requires agentId or sessionKey." });
       throw new Error("remote-agent-host transfer requires agentId or sessionKey.");
     }
-    const file = this.stagedFiles.get(input.fileId);
-    if (!file) {
-      await this.audit({ type: "transfer.error", fileId: input.fileId, target: input.target, agentId, reason: "Staged file not found or already transferred." });
-      throw new Error("Staged file not found or already transferred.");
-    }
+    const file = await this.requireAvailableFile(input.fileId, input.target, agentId);
     const workspace = await this.agentWorkspace(agentId);
-    const remotePath = normalizeAgentWorkspacePath(input.remotePath, workspace);
+    const config = await runtimeConfig();
+    const remoteHomeCandidates = remoteHomeCandidatesForUser(config.remoteUser);
+    const remotePath = normalizeRemoteAgentPath(input.remotePath, { workspace, remoteHomeCandidates });
     if (!remotePath) {
       await this.audit({
         type: "transfer.error",
@@ -203,22 +211,20 @@ export class FileTransferService {
         target: input.target,
         agentId,
         workspace,
-        reason: "remotePath is outside the remote agent workspace."
+        reason: "remotePath must be an absolute path inside the remote agent workspace or remote user home."
       });
-      throw new Error(`remotePath is outside the remote agent workspace: ${workspace}`);
+      throw new Error(`remote-agent-host remotePath must be an absolute path inside the remote agent workspace (${workspace}) or remote user home (${remoteHomeCandidates.join(", ") || "configured remote user home"}).`);
     }
     const token = nanoid(32);
     const expiresAtMs = Date.now() + 10 * 60 * 1000;
     this.transferTokens.set(token, { fileId: input.fileId, target: input.target, token, expiresAtMs });
-    const config = await runtimeConfig();
-    const publicBaseUrl = publicServerBaseUrl(config);
-    if (!isRemoteReachablePublicBaseUrl(publicBaseUrl)) {
+    if (!config.remoteUser) {
       this.transferTokens.delete(token);
-      const reason = "remote-agent-host transfer requires DETACHES_PUBLIC_BASE_URL to be reachable from the remote host; 127.0.0.1/localhost only works for local-user-machine.";
+      const reason = "remote-agent-host transfer requires OPENCLAW_REMOTE_USER.";
       await this.audit({ type: "transfer.error", fileId: input.fileId, target: input.target, agentId, workspace, reason });
       throw new Error(reason);
     }
-    const downloadUrl = `${publicBaseUrl}/api/files/staged/${encodeURIComponent(input.fileId)}?token=${encodeURIComponent(token)}`;
+    const downloadUrl = `${reverseBridgeBaseUrl(config)}/api/files/staged/${encodeURIComponent(input.fileId)}?token=${encodeURIComponent(token)}`;
     const response = {
       fileId: input.fileId,
       target: input.target,
@@ -226,7 +232,8 @@ export class FileTransferService {
       remotePath,
       downloadUrl,
       command: buildRemoteAgentCurlCommand(config, downloadUrl, remotePath),
-      expiresAt: new Date(expiresAtMs).toISOString()
+      expiresAt: new Date(expiresAtMs).toISOString(),
+      timeoutMs: transferTimeoutMs(file.size)
     };
     await this.audit({
       type: "transfer.prepare",
@@ -253,6 +260,7 @@ export class FileTransferService {
   }
 
   async consumeStagedDownload(fileId: string, token: string): Promise<{ localPath: string; name: string; cleanup: () => Promise<void> }> {
+    await this.load();
     const tokenRecord = this.transferTokens.get(token);
     if (!tokenRecord || tokenRecord.fileId !== fileId) {
       await this.audit({ type: "transfer.error", fileId, reason: "Invalid staged file token." });
@@ -264,7 +272,7 @@ export class FileTransferService {
       throw new Error("Staged file token expired.");
     }
     const file = this.stagedFiles.get(fileId);
-    if (!file) {
+    if (!file || file.state === "consumed") {
       this.transferTokens.delete(token);
       await this.audit({ type: "transfer.error", fileId, reason: "Staged file not found or already transferred." });
       throw new Error("Staged file not found or already transferred.");
@@ -278,25 +286,43 @@ export class FileTransferService {
       localPath: file.localPath
     });
     const cleanup = async () => {
-      this.transferTokens.delete(token);
-      this.stagedFiles.delete(fileId);
-      let deleted = false;
-      try {
-        await fs.unlink(file.localPath);
-        deleted = true;
-      } catch {
-        // Best effort cleanup after a successful one-time transfer.
-      }
+      await this.save();
       await this.audit({
         type: "transfer.download.cleanup",
         fileId,
         target: tokenRecord.target,
         fileName: file.displayName || file.name,
         localPath: file.localPath,
-        deleted
+        deleted: false
       });
     };
     return { localPath: file.localPath, name: file.displayName || file.name, cleanup };
+  }
+
+  async markTransferred(fileId: string): Promise<void> {
+    await this.load();
+    const file = this.stagedFiles.get(fileId);
+    if (!file) return;
+    this.stagedFiles.set(fileId, { ...file, state: "consumed", consumedAt: new Date().toISOString() });
+    for (const [token, record] of this.transferTokens.entries()) {
+      if (record.fileId === fileId) this.transferTokens.delete(token);
+    }
+    await this.save();
+  }
+
+  private async requireAvailableFile(fileId: string, target: ToolTarget, agentId?: string): Promise<StagedFileRecord> {
+    const file = this.stagedFiles.get(fileId);
+    if (!file || file.state === "consumed") {
+      await this.audit({ type: "transfer.error", fileId, target, agentId, reason: "Staged file not found or already transferred." });
+      throw new Error("Staged file not found or already transferred.");
+    }
+    try {
+      await fs.access(file.localPath);
+    } catch {
+      await this.audit({ type: "transfer.error", fileId, target, agentId, reason: "Staged file exists in registry but is missing on disk." });
+      throw new Error("Staged file exists in registry but is missing on disk.");
+    }
+    return file;
   }
 
   async downloadRemote(remotePath: string): Promise<{ localPath: string; name: string }> {
@@ -354,6 +380,38 @@ export class FileTransferService {
     }
   }
 
+  private async load(): Promise<void> {
+    if (this.loaded) return;
+    this.loaded = true;
+    try {
+      const raw = await fs.readFile(this.statePath(), "utf8");
+      const parsed = JSON.parse(raw) as Partial<StagedFilesState>;
+      if (parsed.version !== 1 || !Array.isArray(parsed.files)) return;
+      this.stagedFiles = new Map(parsed.files.filter(isStagedFileRecord).map((file) => [file.id, file]));
+    } catch {
+      this.stagedFiles = new Map();
+    }
+  }
+
+  private async save(): Promise<void> {
+    const state: StagedFilesState = {
+      version: 1,
+      files: [...this.stagedFiles.values()]
+    };
+    this.saveChain = this.saveChain.then(async () => {
+      const filePath = this.statePath();
+      const tempPath = `${filePath}.${process.pid}.tmp`;
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+      await fs.rename(tempPath, filePath);
+    });
+    return this.saveChain;
+  }
+
+  private statePath(): string {
+    return path.join(appConfig.storageDir, "cache", "staged-files.json");
+  }
+
   private async audit(event: FileTransferAuditEvent): Promise<void> {
     const entry = { ts: new Date().toISOString(), ...event };
     const logPath = path.join(appConfig.storageDir, "logs", "file-transfer-audit.jsonl");
@@ -370,10 +428,20 @@ function buildCurlCommand(downloadUrl: string, remotePath: string): string {
     shellQuote(path.posix.dirname(remotePath)),
     "&&",
     "curl -fL",
+    "--speed-limit 1024",
+    "--speed-time 45",
     shellQuote(downloadUrl),
     "-o",
     shellQuote(remotePath)
   ].join(" ");
+}
+
+function transferTimeoutMs(sizeBytes: number): number {
+  const minMs = 60_000;
+  const maxMs = 600_000;
+  const bytesPerSecondFloor = 8 * 1024;
+  const estimatedMs = Math.ceil((Math.max(sizeBytes, 1) / bytesPerSecondFloor) * 1000) + 30_000;
+  return Math.min(maxMs, Math.max(minMs, estimatedMs));
 }
 
 function buildRemoteAgentCurlCommand(
@@ -395,17 +463,6 @@ function buildRemoteAgentCurlCommand(
   ].join(" ");
 }
 
-function isRemoteReachablePublicBaseUrl(value: string): boolean {
-  if (!value.trim()) return false;
-  try {
-    const url = new URL(value);
-    const host = url.hostname.toLowerCase();
-    return host !== "127.0.0.1" && host !== "localhost" && host !== "::1";
-  } catch {
-    return false;
-  }
-}
-
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
@@ -415,12 +472,29 @@ function agentIdFromSessionKey(sessionKey?: string): string {
   return match?.[1] || "";
 }
 
-function normalizeAgentWorkspacePath(remotePath: string, workspace: string): string | null {
+function normalizeRemoteAgentPath(remotePath: string, input: { workspace: string; remoteHomeCandidates: string[] }): string | null {
   const cleaned = remotePath.trim();
   if (!cleaned || cleaned.includes("\0") || cleaned.endsWith("/")) return null;
-  const root = path.posix.normalize(workspace);
-  const candidate = path.posix.isAbsolute(cleaned)
-    ? path.posix.normalize(cleaned)
-    : path.posix.normalize(path.posix.join(root, cleaned));
-  return candidate === root || candidate.startsWith(`${root}/`) ? candidate : null;
+  if (!path.posix.isAbsolute(cleaned)) return null;
+  const workspace = path.posix.normalize(input.workspace);
+  const candidate = path.posix.normalize(cleaned);
+  const allowedRoots = [workspace, ...input.remoteHomeCandidates].filter(Boolean);
+  return allowedRoots.some((root) => candidate === root || candidate.startsWith(`${root}/`)) ? candidate : null;
+}
+
+function remoteHomeCandidatesForUser(remoteUser: string): string[] {
+  const user = remoteUser.trim();
+  if (!user) return [];
+  return [`/Users/${user}`, `/home/${user}`].map((item) => path.posix.normalize(item));
+}
+
+function isStagedFileRecord(value: unknown): value is StagedFileRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Partial<StagedFileRecord>;
+  return typeof record.id === "string"
+    && typeof record.name === "string"
+    && typeof record.mimeType === "string"
+    && typeof record.size === "number"
+    && typeof record.localPath === "string"
+    && typeof record.createdAt === "string";
 }

@@ -161,6 +161,7 @@ export class GatewayClient extends EventEmitter {
   }
 
   disconnect(): void {
+    this.socket?.removeAllListeners("error");
     this.socket?.close();
     this.socket = null;
     this.connected = false;
@@ -233,8 +234,9 @@ export class GatewayClient extends EventEmitter {
       this.emit("disconnected");
     });
     socket.on("error", (error) => {
+      this.lastError = error.message;
       this.rejectAll(error);
-      this.emit("error", error);
+      this.emit("gateway.error", error);
     });
   }
 

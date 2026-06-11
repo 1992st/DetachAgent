@@ -14,6 +14,7 @@ const gatewayPort = Number(process.env.SMOKE_GATEWAY_PORT ?? 19879);
 const serverPort = Number(process.env.SMOKE_SERVER_PORT ?? 39888);
 const host = "127.0.0.1";
 const publicBaseUrl = `http://${host}:${serverPort}`;
+const reverseBridgeBaseUrl = `http://${host}:${serverPort}`;
 
 const observed = {
   connect: null,
@@ -264,6 +265,8 @@ async function main() {
       OPENCLAW_AUTH_TOKEN: "smoke-token",
       DETACHES_PUBLIC_HOST: "unused-public-host.invalid",
       DETACHES_PUBLIC_BASE_URL: publicBaseUrl,
+      DETACHES_REVERSE_BRIDGE_REMOTE_HOST: host,
+      DETACHES_REVERSE_BRIDGE_REMOTE_PORT: String(serverPort),
       DETACHES_STORAGE_DIR: "./storage-smoke"
     }
   });
@@ -278,7 +281,38 @@ async function main() {
     const settings = await requestJson("/api/settings");
     assert.equal(settings.remoteHost, DEFAULT_OPENCLAW_REMOTE_HOST);
     assert.equal(settings.publicBaseUrl, publicBaseUrl);
+    assert.equal(settings.reverseBridgeRemoteHost, host);
+    assert.equal(settings.reverseBridgeRemotePort, serverPort);
     assert.equal(settings.hasAuthToken, true);
+    assert.equal(settings.activeProfileId, "default");
+    assert.equal(settings.profiles.length, 1);
+    assert.equal(settings.profiles[0].remoteHost, DEFAULT_OPENCLAW_REMOTE_HOST);
+
+    const createdProfile = await requestJson("/api/settings/profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Office Gateway", copyFromProfileId: "default", remoteHost: "10.12.7.139", gatewayDirectHost: "10.12.7.139" })
+    });
+    assert.equal(createdProfile.remoteHost, "10.12.7.139");
+    const officeProfile = createdProfile.profiles.find((profile) => profile.name === "Office Gateway");
+    assert.ok(officeProfile);
+    assert.equal(createdProfile.activeProfileId, officeProfile.id);
+    const defaultProfile = createdProfile.profiles.find((profile) => profile.id === "default");
+    assert.ok(defaultProfile);
+    const defaultProfileId = defaultProfile.id;
+    const reactivatedDefault = await requestJson(`/api/settings/profiles/${defaultProfileId}/activate`, { method: "POST" });
+    assert.equal(reactivatedDefault.activeProfileId, "default");
+    const officeProfileId = officeProfile.id;
+    const deletedProfile = await requestJson(`/api/settings/profiles/${officeProfileId}`, { method: "DELETE" });
+    assert.equal(deletedProfile.profiles.some((profile) => profile.id === officeProfileId), false);
+    assert.equal(deletedProfile.activeProfileId, "default");
+    const emptyPasswordBootstrap = await fetch(`http://${host}:${serverPort}/api/settings/profiles/default/bootstrap-ssh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "" })
+    });
+    assert.equal(emptyPasswordBootstrap.status, 400);
+    assert.match(await emptyPasswordBootstrap.text(), /SSH (user|password) is required/);
 
     const health = await requestJson("/api/health");
     assert.equal(health.server.state, "ok");
@@ -304,12 +338,12 @@ async function main() {
     const brokerCapabilities = await requestJson("/api/tools/broker/capabilities");
     assert.equal(brokerCapabilities.ok, true);
     assert.equal(brokerCapabilities.protocolVersion, 1);
-    assert.equal(brokerCapabilities.gatewayEventEndpoint, `${publicBaseUrl}/api/tools/events/gateway`);
+    assert.equal(brokerCapabilities.gatewayEventEndpoint, `${reverseBridgeBaseUrl}/api/tools/events/gateway`);
     assert.equal(brokerCapabilities.requestFormats.includes("broker-event"), true);
     assert.equal(brokerCapabilities.contextExport.oneTime, true);
     assert.equal(brokerCapabilities.contextExport.adapterCommand, "context-fetch");
     assert.equal(brokerCapabilities.contextExport.doctorCommand, "doctor");
-    assert.equal(brokerCapabilities.contextExport.createEndpoint, `${publicBaseUrl}/api/context/exports`);
+    assert.equal(brokerCapabilities.contextExport.createEndpoint, `${reverseBridgeBaseUrl}/api/context/exports`);
     const adapterCli = path.resolve(new URL("../../../packages/openclaw-detaches-adapter/bin/detaches-agent-adapter.mjs", import.meta.url).pathname);
     const adapterProbe = await execFileAsync(process.execPath, [adapterCli, "broker-probe", publicBaseUrl]);
     assert.equal(JSON.parse(adapterProbe.stdout).ok, true);
@@ -359,7 +393,7 @@ async function main() {
       body: JSON.stringify({ sessionKey: chatSessionKey, sessionMode: "main" })
     });
     assert.equal(contextExport.sessionKey, chatSessionKey);
-    assert.match(contextExport.consumeUrl, new RegExp(`^${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/context/exports/`));
+    assert.match(contextExport.consumeUrl, new RegExp(`^${reverseBridgeBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/context/exports/`));
     const consumedContextExport = await requestJson(contextExport.consumeUrl.replace(publicBaseUrl, ""));
     assert.equal(consumedContextExport.sessionKey, chatSessionKey);
     assert.equal(consumedContextExport.redacted.brokerSubmitToken, false);
@@ -474,7 +508,7 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.requestFence, "detaches-file-transfer");
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.defaultTarget, "remote-agent-host");
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.supportedTargets?.includes("remote-agent-host"), true);
-    assert.equal(userChatSend.clientContext?.detaches?.broker?.gatewayEventEndpoint, `${publicBaseUrl}/api/tools/events/gateway`);
+    assert.equal(userChatSend.clientContext?.detaches?.broker?.gatewayEventEndpoint, `${reverseBridgeBaseUrl}/api/tools/events/gateway`);
     assert.equal(typeof userChatSend.clientContext?.detaches?.broker?.submitToken, "string");
     assert.equal(userChatSend.clientContext?.detaches?.broker?.submitToken, exportedContextWithToken.detaches.broker.submitToken);
     assert.equal(userChatSend.clientContext?.detaches?.broker?.submitTokenHeader, "Authorization");
@@ -482,9 +516,9 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.oneTime, true);
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.adapterCommand, "context-fetch");
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.doctorCommand, "doctor");
-    assert.equal(userChatSend.clientContext?.detaches?.contextExport?.createdBy, "detaches-ui-loopback");
+    assert.equal(userChatSend.clientContext?.detaches?.contextExport?.createdBy, "detaches-ui-reverse-bridge");
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.generatedForMessage, true);
-    assert.match(userChatSend.clientContext?.detaches?.contextExport?.consumeUrl, new RegExp(`^${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/context/exports/`));
+    assert.match(userChatSend.clientContext?.detaches?.contextExport?.consumeUrl, new RegExp(`^${reverseBridgeBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/context/exports/`));
     assert.equal(userChatSend.clientContext?.detaches?.capabilities?.some((capability) => capability.name === "terminal" && capability.supportedTargets.includes("local-user-machine")), true);
     assert.equal(userChatSend.clientContext?.routeContext?.origin?.provider, "detaches_agent");
     assert.equal(userChatSend.attachments, undefined);
@@ -802,10 +836,11 @@ async function main() {
     });
     assert.equal(brokerTransfer.request.status, "pending");
     const approvedBrokerTransfer = await requestJson(`/api/tools/requests/${brokerTransfer.request.id}/approve`, { method: "POST" });
-    assert.equal(approvedBrokerTransfer.request.status, "approved");
+    assert.equal(approvedBrokerTransfer.request.status, "succeeded");
     assert.match(approvedBrokerTransfer.command, /curl -fL/);
     assert.match(approvedBrokerTransfer.command, /detaches-note-via-broker\.txt/);
-    assert.equal(approvedBrokerTransfer.execution.wroteToTerminal, true);
+    assert.equal(approvedBrokerTransfer.execution.wroteToTerminal, false);
+    assert.ok(approvedBrokerTransfer.execution.terminalId);
     assert.equal(approvedBrokerTransfer.execution.completed, true);
     assert.equal(approvedBrokerTransfer.execution.exitCode, 0);
     assert.equal(approvedBrokerTransfer.execution.sessionKey, chatSessionKey);
@@ -822,6 +857,41 @@ async function main() {
       if (Date.now() - started > 12000) throw new Error("Timed out waiting for broker transfer result forward.");
       await wait(50);
     }
+
+    const failingUploadForm = new FormData();
+    failingUploadForm.append("sessionKey", chatSessionKey);
+    failingUploadForm.append("file", new Blob(["retry-after-failure"], { type: "text/plain" }), "retry-after-failure.txt");
+    const failingUpload = await requestJson("/api/files/upload", { method: "POST", body: failingUploadForm });
+    const failingBrokerTransfer = await requestJson("/api/tools/requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "file-transfer",
+        target: "local-user-machine",
+        sessionKey: chatSessionKey,
+        agentId: "agent-alpha",
+        reason: "smoke file broker failure keeps staged file retryable",
+        payload: { fileId: failingUpload.file.id, remotePath: "/tmp" }
+      })
+    });
+    const approvedFailingBrokerTransfer = await requestJson(`/api/tools/requests/${failingBrokerTransfer.request.id}/approve`, { method: "POST" });
+    assert.equal(approvedFailingBrokerTransfer.request.status, "failed");
+    assert.equal(approvedFailingBrokerTransfer.execution.completed, true);
+    assert.notEqual(approvedFailingBrokerTransfer.execution.exitCode, 0);
+    assert.match(approvedFailingBrokerTransfer.request.error, /curl|Failed|directory|exited/i);
+    const retryAfterFailure = await requestJson("/api/files/transfer/prepare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileId: failingUpload.file.id,
+        target: "local-user-machine",
+        remotePath: "/tmp/detaches-retry-after-failure.txt",
+        sessionKey: chatSessionKey,
+        agentId: "agent-alpha"
+      })
+    });
+    assert.equal(retryAfterFailure.target, "local-user-machine");
+    assert.match(retryAfterFailure.command, /detaches-retry-after-failure\.txt/);
 
     const extractedTools = await requestJson("/api/tools/requests/extract", {
       method: "POST",
@@ -851,13 +921,21 @@ async function main() {
     assert.equal(extractedTools.requests[1].target, "remote-agent-host");
     assert.equal(extractedTools.requests[1].status, "blocked");
 
-    const validRemoteTransfer = await fetch(`http://${host}:${serverPort}/api/files/transfer/prepare`, {
+    const relativeRemoteTransfer = await fetch(`http://${host}:${serverPort}/api/files/transfer/prepare`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fileId: upload.file.id, target: "remote-agent-host", agentId: "agent-alpha", remotePath: "docs/detaches-note.txt" })
     });
-    assert.equal(validRemoteTransfer.status, 400);
-    assert.match(await validRemoteTransfer.text(), /requires DETACHES_PUBLIC_BASE_URL to be reachable from the remote host/);
+    assert.equal(relativeRemoteTransfer.status, 400);
+    assert.match(await relativeRemoteTransfer.text(), /remotePath must be an absolute path/);
+
+    const missingUserRemoteTransfer = await fetch(`http://${host}:${serverPort}/api/files/transfer/prepare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId: upload.file.id, target: "remote-agent-host", agentId: "agent-alpha", remotePath: "/tmp/openclaw/workspace/agent-alpha/docs/detaches-note.txt" })
+    });
+    assert.equal(missingUserRemoteTransfer.status, 400);
+    assert.match(await missingUserRemoteTransfer.text(), /requires OPENCLAW_REMOTE_USER/);
 
     await requestJson("/api/settings", {
       method: "PUT",
@@ -867,14 +945,15 @@ async function main() {
     const preparedRemoteTransfer = await requestJson("/api/files/transfer/prepare", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileId: upload.file.id, target: "remote-agent-host", agentId: "agent-alpha", remotePath: "docs/detaches-note.txt" })
+      body: JSON.stringify({ fileId: upload.file.id, target: "remote-agent-host", agentId: "agent-alpha", remotePath: "/tmp/openclaw/workspace/agent-alpha/docs/detaches-note.txt" })
     });
     assert.equal(preparedRemoteTransfer.target, "remote-agent-host");
     assert.equal(preparedRemoteTransfer.remotePath, "/tmp/openclaw/workspace/agent-alpha/docs/detaches-note.txt");
-    assert.match(preparedRemoteTransfer.downloadUrl, /^http:\/\/100\.64\.0\.10:39888\/api\/files\/staged\//);
+    assert.match(preparedRemoteTransfer.downloadUrl, new RegExp(`^${reverseBridgeBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/files/staged/`));
     assert.match(preparedRemoteTransfer.command, /ssh/);
     assert.match(preparedRemoteTransfer.command, /smoke-user@100\.74\.38\.97/);
     assert.match(preparedRemoteTransfer.command, /curl -fL/);
+    assert.doesNotMatch(preparedRemoteTransfer.command, /100\.64\.0\.10:39888/);
     await requestJson("/api/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -887,13 +966,14 @@ async function main() {
       body: JSON.stringify({ fileId: upload.file.id, target: "remote-agent-host", agentId: "agent-alpha", remotePath: "/etc/passwd" })
     });
     assert.equal(escapedRemoteTransfer.status, 400);
-    assert.match(await escapedRemoteTransfer.text(), /outside the remote agent workspace/);
+    assert.match(await escapedRemoteTransfer.text(), /remotePath must be an absolute path inside the remote agent workspace/);
 
     const stagedDownload = await fetch(preparedTransfer.downloadUrl);
     assert.equal(stagedDownload.status, 200);
     assert.equal(await stagedDownload.text(), "hello");
     const repeatedDownload = await fetch(preparedTransfer.downloadUrl);
-    assert.equal(repeatedDownload.status, 404);
+    assert.equal(repeatedDownload.status, 200);
+    assert.equal(await repeatedDownload.text(), "hello");
 
     const auditPath = path.resolve(new URL("../../..", import.meta.url).pathname, "storage-smoke/logs/file-transfer-audit.jsonl");
     const auditEvents = (await fs.readFile(auditPath, "utf8"))
@@ -903,7 +983,7 @@ async function main() {
     assert.equal(auditEvents.some((event) => event.type === "upload" && event.fileId === upload.file.id), true);
     assert.equal(auditEvents.some((event) => event.type === "transfer.prepare" && event.fileId === upload.file.id && event.target === "local-user-machine" && event.remotePath === "/tmp/detaches-note.txt"), true);
     assert.equal(auditEvents.some((event) => event.type === "transfer.download.start" && event.fileId === upload.file.id && event.target === "local-user-machine"), true);
-    assert.equal(auditEvents.some((event) => event.type === "transfer.download.cleanup" && event.fileId === upload.file.id && event.target === "local-user-machine" && event.deleted === true), true);
+    assert.equal(auditEvents.some((event) => event.type === "transfer.download.cleanup" && event.fileId === upload.file.id && event.target === "local-user-machine" && event.deleted === false), true);
     assert.equal(auditEvents.some((event) => event.type === "transfer.error" && event.fileId === upload.file.id && event.target === "remote-agent-host" && event.agentId === "agent-alpha" && event.workspace === "/tmp/openclaw/workspace/agent-alpha"), true);
 
     const toolAuditPath = path.resolve(new URL("../../..", import.meta.url).pathname, "storage-smoke/logs/tool-broker-audit.jsonl");

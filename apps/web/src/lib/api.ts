@@ -10,6 +10,7 @@ import type {
   OpenClawAdapterInstallPlan,
   OpenClawAdapterReadiness,
   PublicSettings,
+  RemoteProfileUpdate,
   SettingsUpdate,
   ToolGatewayEventInput,
   ToolRequestApproveInput,
@@ -177,6 +178,48 @@ export async function saveSettings(settings: SettingsUpdate): Promise<PublicSett
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(settings)
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function createRemoteProfile(profile: RemoteProfileUpdate & { copyFromProfileId?: string }): Promise<PublicSettings> {
+  const res = await fetch("/api/settings/profiles", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile)
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function saveRemoteProfile(id: string, profile: RemoteProfileUpdate): Promise<PublicSettings> {
+  const res = await fetch(`/api/settings/profiles/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile)
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function activateRemoteProfile(id: string): Promise<PublicSettings> {
+  const res = await fetch(`/api/settings/profiles/${encodeURIComponent(id)}/activate`, { method: "POST" });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function deleteRemoteProfile(id: string): Promise<PublicSettings> {
+  const res = await fetch(`/api/settings/profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function bootstrapRemoteProfileSsh(id: string, input: { password: string; identityPath?: string }): Promise<{ ok: boolean; identityPath: string; publicKeyPath: string; message: string; settings: PublicSettings }> {
+  const res = await fetch(`/api/settings/profiles/${encodeURIComponent(id)}/bootstrap-ssh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();

@@ -25,6 +25,7 @@ export interface DetachesStagedFileContext {
     supportedTargets: ToolTarget[];
     defaultTarget: ToolTarget;
     requiresApproval: boolean;
+    remotePathRule?: string;
   };
 }
 
@@ -65,7 +66,7 @@ export interface DetachesSessionContext {
     createEndpoint: string;
     consumeEndpointPattern: string;
     consumeUrl?: string;
-    createdBy: "detaches-ui-loopback";
+    createdBy: "detaches-ui-loopback" | "detaches-ui-reverse-bridge";
     consumedBy: "remote-agent-host";
     oneTime: true;
     ttlSeconds: number;

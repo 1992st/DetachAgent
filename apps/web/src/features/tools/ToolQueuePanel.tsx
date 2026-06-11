@@ -26,7 +26,7 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
     setError(null);
     try {
       const response = await fetchToolRequests({ sessionKey, agentId, limit: 50 });
-      setRequests(response.requests);
+      setRequests(response.requests.filter(isQueueToolRequestVisible));
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : String(refreshError));
     } finally {
@@ -47,7 +47,9 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data) as ToolBrokerSocketEvent;
       if (data.type === "request") {
-        setRequests((current) => upsertToolRequest(current, data.request));
+        setRequests((current) => isQueueToolRequestVisible(data.request)
+          ? upsertToolRequest(current, data.request)
+          : current.filter((request) => request.id !== data.request.id));
         void refresh();
       }
     };
@@ -117,7 +119,7 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
       <div className="tool-queue-list">
         {requests.map((request) => {
           const unsupported = !toolRequestSupported(request);
-          const disabled = busy[request.id] || request.status === "rejected" || unsupported;
+          const disabled = busy[request.id] || (request.status !== "pending" && request.status !== "failed") || unsupported;
           return (
             <div className={`terminal-request-card ${request.kind === "file-transfer" ? "file-transfer-card" : ""}`} key={request.id}>
               <div>
@@ -219,6 +221,18 @@ function upsertToolRequest(current: ToolRequestRecord[], next: ToolRequestRecord
   const index = current.findIndex((request) => request.id === next.id);
   if (index === -1) return [next, ...current];
   return current.map((request, itemIndex) => itemIndex === index ? next : request);
+}
+
+function isQueueToolRequestVisible(request: ToolRequestRecord): boolean {
+  if (request.status === "pending" || request.status === "running" || request.status === "blocked") return true;
+  if (request.status !== "failed") return false;
+  if (
+    request.kind === "file-transfer"
+    && /staged file not found|already transferred/i.test(request.error || "")
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function toolResultSummary(response: ToolExecutionResultResponse): string {

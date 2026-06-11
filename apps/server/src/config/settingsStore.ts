@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { nanoid } from "nanoid";
+import type { PublicSettings, RemoteProfile } from "@detaches/shared";
 import { appConfig, type AppConfig } from "./appConfig.js";
 
 export interface RuntimeSettings {
@@ -7,6 +9,8 @@ export interface RuntimeSettings {
   remoteSshPort: number;
   remoteUser: string;
   remoteIdentityPath: string;
+  reverseBridgeRemoteHost: string;
+  reverseBridgeRemotePort: number;
   gatewayTransport: "ssh" | "direct";
   gatewayDirectHost: string;
   gatewayRemotePort: number;
@@ -18,7 +22,17 @@ export interface RuntimeSettings {
   publicBaseUrl: string;
 }
 
-type PersistedSettings = Partial<RuntimeSettings>;
+type PersistedProfile = RuntimeSettings & {
+  id: string;
+  name: string;
+  lastTestedAt?: string;
+  lastStatus?: "ok" | "error";
+};
+
+type PersistedSettings = Partial<RuntimeSettings> & {
+  activeProfileId?: string;
+  profiles?: Partial<PersistedProfile>[];
+};
 
 const settingsPath = path.join(appConfig.storageDir, "cache", "settings.json");
 
@@ -41,9 +55,43 @@ function sanitizeGatewayTransport(value: unknown): RuntimeSettings["gatewayTrans
   return value === "ssh" || value === "direct" ? value : undefined;
 }
 
+function defaultProfile(): PersistedProfile {
+  return {
+    id: "default",
+    name: "Default",
+    remoteHost: appConfig.remoteHost,
+    remoteSshPort: appConfig.remoteSshPort,
+    remoteUser: appConfig.remoteUser,
+    remoteIdentityPath: appConfig.remoteIdentityPath,
+    reverseBridgeRemoteHost: appConfig.reverseBridgeRemoteHost,
+    reverseBridgeRemotePort: appConfig.reverseBridgeRemotePort,
+    gatewayTransport: appConfig.gatewayTransport,
+    gatewayDirectHost: appConfig.gatewayDirectHost,
+    gatewayRemotePort: appConfig.gatewayRemotePort,
+    gatewayLocalPort: appConfig.gatewayLocalPort,
+    authMode: appConfig.authMode,
+    authToken: appConfig.authToken,
+    authPassword: appConfig.authPassword,
+    remoteWorkspaceRoot: appConfig.remoteWorkspaceRoot,
+    publicBaseUrl: appConfig.publicBaseUrl
+  };
+}
+
+function publicProfile(profile: PersistedProfile): RemoteProfile {
+  const { authToken: _authToken, authPassword: _authPassword, ...rest } = profile;
+  return {
+    ...rest,
+    hasAuthToken: Boolean(profile.authToken),
+    hasAuthPassword: Boolean(profile.authPassword)
+  };
+}
+
 export class SettingsStore {
   private loaded = false;
-  private persisted: PersistedSettings = {};
+  private persisted: { activeProfileId: string; profiles: PersistedProfile[] } = {
+    activeProfileId: "default",
+    profiles: [defaultProfile()]
+  };
 
   async load(): Promise<void> {
     if (this.loaded) return;
@@ -51,74 +99,139 @@ export class SettingsStore {
     try {
       const raw = await fs.readFile(settingsPath, "utf8");
       const parsed = JSON.parse(raw) as PersistedSettings;
-      this.persisted = this.sanitize(parsed);
+      this.persisted = this.normalizePersisted(parsed);
     } catch {
-      this.persisted = {};
+      this.persisted = { activeProfileId: "default", profiles: [defaultProfile()] };
     }
   }
 
   async get(): Promise<RuntimeSettings> {
     await this.load();
-    return {
-      remoteHost: this.persisted.remoteHost ?? appConfig.remoteHost,
-      remoteSshPort: this.persisted.remoteSshPort ?? appConfig.remoteSshPort,
-      remoteUser: this.persisted.remoteUser ?? appConfig.remoteUser,
-      remoteIdentityPath: this.persisted.remoteIdentityPath ?? appConfig.remoteIdentityPath,
-      gatewayTransport: this.persisted.gatewayTransport ?? appConfig.gatewayTransport,
-      gatewayDirectHost: this.persisted.gatewayDirectHost ?? appConfig.gatewayDirectHost,
-      gatewayRemotePort: this.persisted.gatewayRemotePort ?? appConfig.gatewayRemotePort,
-      gatewayLocalPort: this.persisted.gatewayLocalPort ?? appConfig.gatewayLocalPort,
-      authMode: this.persisted.authMode ?? appConfig.authMode,
-      authToken: this.persisted.authToken ?? appConfig.authToken,
-      authPassword: this.persisted.authPassword ?? appConfig.authPassword,
-      remoteWorkspaceRoot: this.persisted.remoteWorkspaceRoot ?? appConfig.remoteWorkspaceRoot,
-      publicBaseUrl: this.persisted.publicBaseUrl ?? appConfig.publicBaseUrl
-    };
+    return this.activeProfile();
   }
 
-  async publicSettings(): Promise<Omit<RuntimeSettings, "authToken" | "authPassword"> & {
-    hasAuthToken: boolean;
-    hasAuthPassword: boolean;
-  }> {
-    const settings = await this.get();
+  async publicSettings(): Promise<PublicSettings> {
+    await this.load();
+    const active = this.activeProfile();
     return {
-      remoteHost: settings.remoteHost,
-      remoteSshPort: settings.remoteSshPort,
-      remoteUser: settings.remoteUser,
-      remoteIdentityPath: settings.remoteIdentityPath,
-      gatewayTransport: settings.gatewayTransport,
-      gatewayDirectHost: settings.gatewayDirectHost,
-      gatewayRemotePort: settings.gatewayRemotePort,
-      gatewayLocalPort: settings.gatewayLocalPort,
-      authMode: settings.authMode,
-      remoteWorkspaceRoot: settings.remoteWorkspaceRoot,
-      publicBaseUrl: settings.publicBaseUrl,
-      hasAuthToken: Boolean(settings.authToken),
-      hasAuthPassword: Boolean(settings.authPassword)
+      ...publicProfile(active),
+      activeProfileId: active.id,
+      profiles: this.persisted.profiles.map(publicProfile)
     };
   }
 
   async update(input: Record<string, unknown>): Promise<void> {
     await this.load();
-    const next = this.sanitize(input);
-    this.persisted = { ...this.persisted, ...next };
-    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
-    await fs.writeFile(settingsPath, `${JSON.stringify(this.persisted, null, 2)}\n`, { mode: 0o600 });
-    try {
-      await fs.chmod(settingsPath, 0o600);
-    } catch {
-      // best effort
+    if (typeof input.activeProfileId === "string" && this.persisted.profiles.some((profile) => profile.id === input.activeProfileId)) {
+      this.persisted.activeProfileId = input.activeProfileId;
     }
+    const next = this.sanitizeProfileUpdate(input);
+    this.persisted.profiles = this.persisted.profiles.map((profile) => {
+      if (profile.id !== this.persisted.activeProfileId) return profile;
+      return { ...profile, ...next };
+    });
+    await this.save();
   }
 
-  private sanitize(input: Record<string, unknown>): PersistedSettings {
-    const output: PersistedSettings = {};
+  async createProfile(input: Record<string, unknown>): Promise<PersistedProfile> {
+    await this.load();
+    const baseId = sanitizeString(input.copyFromProfileId);
+    const base = baseId ? this.persisted.profiles.find((profile) => profile.id === baseId) : this.activeProfile();
+    const profile: PersistedProfile = {
+      ...(base ?? defaultProfile()),
+      ...this.sanitizeProfileUpdate(input),
+      id: nanoid(),
+      name: sanitizeString(input.name) || "New remote"
+    };
+    this.persisted.profiles.push(profile);
+    this.persisted.activeProfileId = profile.id;
+    await this.save();
+    return profile;
+  }
+
+  async updateProfile(id: string, input: Record<string, unknown>): Promise<PersistedProfile> {
+    await this.load();
+    const profile = this.requireProfile(id);
+    const updated = { ...profile, ...this.sanitizeProfileUpdate(input) };
+    this.persisted.profiles = this.persisted.profiles.map((item) => item.id === id ? updated : item);
+    await this.save();
+    return updated;
+  }
+
+  async activateProfile(id: string): Promise<void> {
+    await this.load();
+    this.requireProfile(id);
+    this.persisted.activeProfileId = id;
+    await this.save();
+  }
+
+  async deleteProfile(id: string): Promise<void> {
+    await this.load();
+    if (this.persisted.profiles.length <= 1) {
+      throw new Error("At least one remote profile is required.");
+    }
+    this.requireProfile(id);
+    this.persisted.profiles = this.persisted.profiles.filter((profile) => profile.id !== id);
+    if (this.persisted.activeProfileId === id) {
+      this.persisted.activeProfileId = this.persisted.profiles[0]?.id ?? "default";
+    }
+    await this.save();
+  }
+
+  async markProfileTested(id: string, status: "ok" | "error"): Promise<void> {
+    await this.load();
+    const profile = this.requireProfile(id);
+    const updated = { ...profile, lastStatus: status, lastTestedAt: new Date().toISOString() };
+    this.persisted.profiles = this.persisted.profiles.map((item) => item.id === id ? updated : item);
+    await this.save();
+  }
+
+  private activeProfile(): PersistedProfile {
+    return this.persisted.profiles.find((profile) => profile.id === this.persisted.activeProfileId)
+      ?? this.persisted.profiles[0]
+      ?? defaultProfile();
+  }
+
+  private requireProfile(id: string): PersistedProfile {
+    const profile = this.persisted.profiles.find((item) => item.id === id);
+    if (!profile) throw new Error(`Remote profile not found: ${id}`);
+    return profile;
+  }
+
+  private normalizePersisted(input: PersistedSettings): { activeProfileId: string; profiles: PersistedProfile[] } {
+    const legacy = { ...defaultProfile(), ...this.sanitizeProfileUpdate(input), id: "default", name: "Default" };
+    const profiles = Array.isArray(input.profiles) && input.profiles.length
+      ? input.profiles.map((profile, index) => {
+        const base = index === 0 ? legacy : defaultProfile();
+        return {
+          ...base,
+          ...this.sanitizeProfileUpdate(profile),
+          id: sanitizeString(profile.id) || nanoid(),
+          name: sanitizeString(profile.name) || base.name || `Remote ${index + 1}`,
+          lastTestedAt: sanitizeString(profile.lastTestedAt),
+          lastStatus: profile.lastStatus === "ok" || profile.lastStatus === "error" ? profile.lastStatus : undefined
+        };
+      })
+      : [legacy];
+    const activeProfileId = sanitizeString(input.activeProfileId);
+    return {
+      activeProfileId: activeProfileId && profiles.some((profile) => profile.id === activeProfileId) ? activeProfileId : profiles[0].id,
+      profiles
+    };
+  }
+
+  private sanitizeProfileUpdate(input: Record<string, unknown>): Partial<PersistedProfile> {
+    const output: Partial<PersistedProfile> = {};
+    const name = sanitizeString(input.name);
+    if (name !== undefined) output.name = name || "Remote";
     const remoteHost = sanitizeString(input.remoteHost);
     if (remoteHost !== undefined) output.remoteHost = remoteHost;
     const remoteUser = sanitizeString(input.remoteUser);
     if (remoteUser !== undefined) output.remoteUser = remoteUser;
     const remoteIdentityPath = sanitizeString(input.remoteIdentityPath);
     if (remoteIdentityPath !== undefined) output.remoteIdentityPath = remoteIdentityPath;
+    const reverseBridgeRemoteHost = sanitizeString(input.reverseBridgeRemoteHost);
+    if (reverseBridgeRemoteHost !== undefined) output.reverseBridgeRemoteHost = reverseBridgeRemoteHost || "127.0.0.1";
     const gatewayDirectHost = sanitizeString(input.gatewayDirectHost);
     if (gatewayDirectHost !== undefined) output.gatewayDirectHost = gatewayDirectHost;
     const remoteWorkspaceRoot = sanitizeString(input.remoteWorkspaceRoot);
@@ -133,6 +246,8 @@ export class SettingsStore {
     if (input.clearAuthPassword === true) output.authPassword = "";
     const remoteSshPort = sanitizePort(input.remoteSshPort);
     if (remoteSshPort !== undefined) output.remoteSshPort = remoteSshPort;
+    const reverseBridgeRemotePort = sanitizePort(input.reverseBridgeRemotePort);
+    if (reverseBridgeRemotePort !== undefined) output.reverseBridgeRemotePort = reverseBridgeRemotePort;
     const gatewayRemotePort = sanitizePort(input.gatewayRemotePort);
     if (gatewayRemotePort !== undefined) output.gatewayRemotePort = gatewayRemotePort;
     const gatewayLocalPort = sanitizePort(input.gatewayLocalPort);
@@ -142,6 +257,16 @@ export class SettingsStore {
     const gatewayTransport = sanitizeGatewayTransport(input.gatewayTransport);
     if (gatewayTransport !== undefined) output.gatewayTransport = gatewayTransport;
     return output;
+  }
+
+  private async save(): Promise<void> {
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+    await fs.writeFile(settingsPath, `${JSON.stringify(this.persisted, null, 2)}\n`, { mode: 0o600 });
+    try {
+      await fs.chmod(settingsPath, 0o600);
+    } catch {
+      // best effort
+    }
   }
 }
 

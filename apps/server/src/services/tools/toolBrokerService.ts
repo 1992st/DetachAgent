@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { EventEmitter } from "node:events";
+import { spawn } from "node:child_process";
 import { nanoid } from "nanoid";
 import type {
   ToolGatewayEventInput,
@@ -48,6 +49,10 @@ interface ToolExecutionRecord {
   command: string;
   wrappedCommand: string;
   createdAt: string;
+  mode?: "terminal" | "direct";
+  completedAt?: string;
+  exitCode?: number;
+  output?: string;
   forwardStatus: ToolResultForwardStatus;
   forwardError?: string;
   forwardedAt?: string;
@@ -221,11 +226,24 @@ class ToolBrokerService {
           agentId: request.agentId,
           sessionKey: request.sessionKey
         });
-        const execution = await this.runInTerminal(request, prepared.command);
-        const updated = this.update(request, "approved", undefined, decision("approved", input));
+        const timeoutMs = prepared.timeoutMs ?? 30000;
+        const execution = await this.runDirectCommand(request, prepared.command, timeoutMs);
+        let updated = this.update(request, "running", undefined, decision("approved", input));
         await this.save();
         await this.audit({ type: "tool.approve", requestId, status: updated.status, command: prepared.command, terminalId: execution.terminalId, executionId: execution.executionId, actor: input.actor, riskAccepted: input.riskAccepted });
-        const result = await this.waitForExecutionResult(updated.id, { timeoutMs: 30000 });
+        const result = await this.waitForExecutionResult(updated.id, { timeoutMs: timeoutMs + 1000 });
+        if (result.completed) {
+          if (result.exitCode === 0) {
+            await fileTransferService.markTransferred(fileId);
+            updated = this.update(updated, "succeeded");
+          } else {
+            updated = this.update(updated, "failed", result.output.trim().slice(-4000) || `File transfer exited with code ${result.exitCode}.`);
+          }
+          await this.save();
+        } else {
+          updated = this.update(updated, "failed", "File transfer did not report completion within 30 seconds. Check the session terminal output and retry.");
+          await this.save();
+        }
         void this.forwardResultToAgent(updated.id, { delayMs: 0 });
         return {
           request: updated,
@@ -235,14 +253,16 @@ class ToolBrokerService {
             target: request.target,
             terminalId: execution.terminalId,
             sessionKey: execution.sessionKey,
-            wroteToTerminal: true,
+            wroteToTerminal: execution.mode !== "direct",
             completed: result.completed,
             exitCode: result.exitCode,
             forwardStatus: result.forwardStatus
           },
           message: result.completed && result.exitCode === 0
             ? "File transfer completed and the result is being forwarded to the agent."
-            : "File transfer command was written to the session terminal; completion is still pending."
+            : result.completed
+              ? "File transfer failed and the result is being forwarded to the agent."
+              : "File transfer command was written to the session terminal; completion is still pending."
         };
       } catch (error) {
         return this.fail(request, error instanceof Error ? error.message : String(error));
@@ -298,8 +318,20 @@ class ToolBrokerService {
         }
       };
     }
+    if (execution.mode === "direct") {
+      const parsed = {
+        output: execution.output ?? "",
+        completed: typeof execution.exitCode === "number",
+        exitCode: execution.exitCode
+      };
+      const result = this.buildExecutionResult(request, execution, parsed);
+      return {
+        request,
+        result
+      };
+    }
     const snapshot = await terminalService.snapshot(execution.sessionKey);
-    const parsed = parseExecutionOutput(snapshot.replay.slice(execution.startOffset), execution.executionId);
+    const parsed = parseExecutionOutput(snapshot.replay, execution);
     const result = this.buildExecutionResult(request, execution, parsed);
     return {
       request,
@@ -398,11 +430,42 @@ class ToolBrokerService {
       command,
       wrappedCommand,
       createdAt: new Date().toISOString(),
+      mode: "terminal",
       forwardStatus: "not-started"
     };
     this.executions.set(execution.executionId, execution);
     await this.save();
     return execution;
+  }
+
+  private async runDirectCommand(request: ToolRequestRecord, command: string, timeoutMs: number): Promise<ToolExecutionRecord> {
+    const executionId = nanoid();
+    const terminal = await terminalService.ensure(request.sessionKey);
+    const execution: ToolExecutionRecord = {
+      executionId,
+      requestId: request.id,
+      sessionKey: request.sessionKey,
+      terminalId: terminal.id,
+      startOffset: 0,
+      command,
+      wrappedCommand: command,
+      createdAt: new Date().toISOString(),
+      mode: "direct",
+      forwardStatus: "not-started",
+      output: ""
+    };
+    this.executions.set(execution.executionId, execution);
+    await this.save();
+    const result = await runShellCommand(command, timeoutMs);
+    const updated: ToolExecutionRecord = {
+      ...execution,
+      completedAt: new Date().toISOString(),
+      exitCode: result.exitCode,
+      output: result.output
+    };
+    this.executions.set(execution.executionId, updated);
+    await this.save();
+    return updated;
   }
 
   private async waitForExecutionResult(requestId: string, options: { timeoutMs: number }): Promise<ToolExecutionResultSnapshot> {
@@ -421,10 +484,11 @@ class ToolBrokerService {
     parsed: { output: string; completed: boolean; exitCode?: number }
   ): ToolExecutionResultSnapshot {
     const output = parsed.output.slice(-20_000);
+    const latestRequest = this.requests.get(request.id) ?? request;
     return {
       executionId: execution.executionId,
       requestId: request.id,
-      status: request.status,
+      status: latestRequest.status,
       terminalId: execution.terminalId,
       sessionKey: execution.sessionKey,
       completed: parsed.completed,
@@ -774,6 +838,48 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function runShellCommand(command: string, timeoutMs: number): Promise<{ exitCode: number; output: string }> {
+  return new Promise((resolve) => {
+    const child = spawn("/bin/sh", ["-lc", command], {
+      cwd: appConfig.storageDir,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let output = "";
+    let settled = false;
+    let timer: NodeJS.Timeout;
+    const finish = (exitCode: number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ exitCode, output: output.slice(-20_000) });
+    };
+    const append = (chunk: Buffer) => {
+      output = `${output}${chunk.toString("utf8")}`.slice(-40_000);
+    };
+    child.stdout.on("data", append);
+    child.stderr.on("data", append);
+    child.on("error", (error) => {
+      output = `${output}\n${error.message}`.slice(-40_000);
+      finish(127);
+    });
+    child.on("exit", (code, signal) => {
+      if (signal) {
+        output = `${output}\n[process terminated by signal ${signal}]`.slice(-40_000);
+      }
+      finish(typeof code === "number" ? code : 1);
+    });
+    timer = setTimeout(() => {
+      output = `${output}\n[process timed out after ${timeoutMs}ms]`.slice(-40_000);
+      child.kill("SIGTERM");
+      setTimeout(() => {
+        if (!settled) child.kill("SIGKILL");
+      }, 1000).unref();
+      finish(124);
+    }, timeoutMs);
+  });
+}
+
 function wrapCommandForCompletion(command: string, executionId: string): string {
   return [
     `printf '%s\\n' ${shellQuote(`__DETACHES_TOOL_START__:${executionId}`)}`,
@@ -785,10 +891,17 @@ function wrapCommandForCompletion(command: string, executionId: string): string 
   ].join("\n");
 }
 
-function parseExecutionOutput(raw: string, executionId: string): { output: string; completed: boolean; exitCode?: number } {
-  const startMarker = `__DETACHES_TOOL_START__:${executionId}`;
+function parseExecutionOutput(replay: string, execution: ToolExecutionRecord): { output: string; completed: boolean; exitCode?: number } {
+  const sliced = parseExecutionReplay(replay.slice(execution.startOffset), execution.executionId);
+  if (sliced.completed) return sliced;
+  return parseExecutionReplay(replay, execution.executionId);
+}
+
+function parseExecutionReplay(raw: string, executionId: string): { output: string; completed: boolean; exitCode?: number } {
+  const startPattern = new RegExp(`__DETACHES_TOOL_START__:${escapeRegExp(executionId)}`);
   const endPattern = new RegExp(`__DETACHES_TOOL_END__:${escapeRegExp(executionId)}:(\\d+)`);
-  const afterStart = raw.includes(startMarker) ? raw.slice(raw.indexOf(startMarker) + startMarker.length) : raw;
+  const startMatch = startPattern.exec(raw);
+  const afterStart = startMatch ? raw.slice(startMatch.index + startMatch[0].length) : raw;
   const endMatch = endPattern.exec(afterStart);
   const beforeEnd = endMatch ? afterStart.slice(0, endMatch.index) : afterStart;
   return {

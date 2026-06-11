@@ -11,10 +11,14 @@ export interface TunnelStatus {
   ok: boolean;
   message: string;
   localPort: number;
+  reverseHost?: string;
+  reversePort?: number;
+  reverseBrokerUrl?: string;
   pid?: number;
   stderr?: string;
   owner?: PortOwner | null;
   ownedByManagedProcess?: boolean;
+  localForwardManaged?: boolean;
 }
 
 interface PortOwner {
@@ -44,7 +48,10 @@ class SshTunnelService {
       return {
         ok: false,
         message: "OPENCLAW_REMOTE_USER is not configured; SSH tunnel disabled.",
-        localPort: config.gatewayLocalPort
+        localPort: config.gatewayLocalPort,
+        reverseHost: config.reverseBridgeRemoteHost,
+        reversePort: config.reverseBridgeRemotePort,
+        reverseBrokerUrl: `http://${config.reverseBridgeRemoteHost}:${config.reverseBridgeRemotePort}`
       };
     }
 
@@ -52,26 +59,48 @@ class SshTunnelService {
       return {
         ok: false,
         message: `Remote SSH ${config.remoteHost}:${config.remoteSshPort} is not reachable.`,
-        localPort: config.gatewayLocalPort
+        localPort: config.gatewayLocalPort,
+        reverseHost: config.reverseBridgeRemoteHost,
+        reversePort: config.reverseBridgeRemotePort,
+        reverseBrokerUrl: `http://${config.reverseBridgeRemoteHost}:${config.reverseBridgeRemotePort}`
       };
     }
 
+    let includeLocalForward = true;
     if (await this.isPortListening(config.gatewayLocalPort)) {
       const ownedByThisProcess = Boolean(this.process?.pid && !this.process.killed);
       const owner = await this.portOwner(config.gatewayLocalPort);
       const ownedBySsh = owner?.command.toLowerCase().includes("ssh") ?? false;
-      return {
-        ok: ownedByThisProcess || ownedBySsh,
-        message: ownedByThisProcess
-          ? "SSH tunnel is already listening."
-          : ownedBySsh
-            ? "Configured local gateway port is owned by an external ssh process."
-            : `Configured local gateway port is already owned by ${owner?.command ?? "another process"}; refusing to treat it as an SSH tunnel.`,
-        localPort: config.gatewayLocalPort,
-        pid: this.process?.pid ?? owner?.pid,
-        owner,
-        ownedByManagedProcess: ownedByThisProcess
-      };
+      if (ownedByThisProcess) {
+        return {
+          ok: true,
+          message: "SSH tunnel is already listening.",
+          localPort: config.gatewayLocalPort,
+          reverseHost: config.reverseBridgeRemoteHost,
+          reversePort: config.reverseBridgeRemotePort,
+          reverseBrokerUrl: `http://${config.reverseBridgeRemoteHost}:${config.reverseBridgeRemotePort}`,
+          pid: this.process?.pid,
+          owner,
+          ownedByManagedProcess: true,
+          localForwardManaged: true
+        };
+      }
+      if (ownedBySsh) {
+        includeLocalForward = false;
+      } else {
+        return {
+          ok: false,
+          message: `Configured local gateway port is already owned by ${owner?.command ?? "another process"}; refusing to treat it as an SSH tunnel.`,
+          localPort: config.gatewayLocalPort,
+          reverseHost: config.reverseBridgeRemoteHost,
+          reversePort: config.reverseBridgeRemotePort,
+          reverseBrokerUrl: `http://${config.reverseBridgeRemoteHost}:${config.reverseBridgeRemotePort}`,
+          pid: owner?.pid,
+          owner,
+          ownedByManagedProcess: false,
+          localForwardManaged: false
+        };
+      }
     }
 
     if (this.process && !this.process.killed) {
@@ -81,8 +110,11 @@ class SshTunnelService {
     this.stderr = "";
     const args = [
       "-N",
-      "-L",
-      `${config.gatewayLocalPort}:${config.gatewayRemoteHost}:${config.gatewayRemotePort}`,
+      ...(includeLocalForward
+        ? ["-L", `${config.gatewayLocalPort}:${config.gatewayRemoteHost}:${config.gatewayRemotePort}`]
+        : []),
+      "-R",
+      `${config.reverseBridgeRemoteHost}:${config.reverseBridgeRemotePort}:127.0.0.1:${config.serverPort}`,
       "-p",
       String(config.remoteSshPort),
       "-o",
@@ -109,13 +141,23 @@ class SshTunnelService {
       this.process = null;
     });
 
-    const listening = await this.waitForListeningOrExit(child, config.gatewayLocalPort, 3500);
+    const listening = includeLocalForward
+      ? await this.waitForListeningOrExit(child, config.gatewayLocalPort, 3500)
+      : await this.waitForProcessReadyOrExit(child, 1500);
     return {
       ok: listening,
-      message: listening ? "SSH tunnel is ready." : this.stderr || "SSH tunnel did not become ready.",
+      message: listening
+        ? includeLocalForward
+          ? "SSH tunnel is ready with local Gateway forward and remote reverse broker bridge."
+          : "SSH reverse broker bridge is ready; local Gateway forward is owned by an external ssh process."
+        : this.stderr || "SSH tunnel did not become ready.",
       localPort: config.gatewayLocalPort,
+      reverseHost: config.reverseBridgeRemoteHost,
+      reversePort: config.reverseBridgeRemotePort,
+      reverseBrokerUrl: `http://${config.reverseBridgeRemoteHost}:${config.reverseBridgeRemotePort}`,
       pid: this.process?.pid,
-      stderr: this.stderr || undefined
+      stderr: this.stderr || undefined,
+      localForwardManaged: includeLocalForward
     };
   }
 
@@ -202,6 +244,23 @@ class SshTunnelService {
       child.once("exit", onExit);
       timer = setTimeout(() => finish(false), timeoutMs);
       void poll();
+    });
+  }
+
+  private waitForProcessReadyOrExit(child: ChildProcessByStdio<null, Readable, Readable>, timeoutMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer: NodeJS.Timeout;
+      const finish = (value: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        child.off("exit", onExit);
+        resolve(value);
+      };
+      const onExit = () => finish(false);
+      child.once("exit", onExit);
+      timer = setTimeout(() => finish(!child.killed), timeoutMs);
     });
   }
 }

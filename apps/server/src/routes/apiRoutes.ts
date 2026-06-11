@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import express from "express";
 import multer from "multer";
 import type { AppHealth, DetachesContextExportResponse, DiagnosticItem, DiagnosticsResponse, NetworkTestResponse, NetworkTestStep, ToolDecisionActor, ToolTarget, UploadedFileRef } from "@detaches/shared";
-import { appConfig, publicServerBaseUrl } from "../config/appConfig.js";
+import { appConfig, reverseBridgeBaseUrl } from "../config/appConfig.js";
 import { settingsStore, runtimeConfig } from "../config/settingsStore.js";
 import { sshTunnelService } from "../services/tunnel/sshTunnelService.js";
 import { gatewayClient } from "../services/gateway/gatewayClient.js";
@@ -18,6 +18,7 @@ import { toolBrokerService } from "../services/tools/toolBrokerService.js";
 import { brokerTokenService } from "../services/tools/brokerTokenService.js";
 import { openclawDetachesAdapterService } from "../services/adapters/openclawDetachesAdapterService.js";
 import { contextExportService } from "../services/context/contextExportService.js";
+import { bootstrapSshIdentity } from "../services/ssh/sshBootstrapService.js";
 
 const upload = multer({
   dest: path.join(appConfig.storageDir, "cache"),
@@ -99,6 +100,40 @@ async function tailscalePingProbe(host: string): Promise<{ ok: boolean; message:
   }
 }
 
+async function reverseBridgeProbe(): Promise<{ ok: boolean; message: string; details?: unknown }> {
+  const config = await runtimeConfig();
+  if (!config.remoteUser) {
+    return { ok: false, message: "Remote SSH user is not configured; cannot probe reverse bridge." };
+  }
+  const probeUrl = `${reverseBridgeBaseUrl(config)}/api/ping`;
+  const args = [
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=5",
+    "-p",
+    String(config.remoteSshPort),
+    ...(config.remoteIdentityPath ? ["-i", config.remoteIdentityPath] : []),
+    `${config.remoteUser}@${config.remoteHost}`,
+    `curl -fsS --max-time 8 ${probeUrl} >/dev/null`
+  ];
+  try {
+    await execFileAsync("ssh", args, { timeout: 15000 });
+    return {
+      ok: true,
+      message: `Remote agent host can reach detaches_agent through ${reverseBridgeBaseUrl(config)}.`
+    };
+  } catch (error) {
+    const anyError = error as any;
+    const output = `${anyError.stdout ?? ""}${anyError.stderr ?? ""}`.trim();
+    return {
+      ok: false,
+      message: output || anyError.message || "Remote reverse bridge probe failed.",
+      details: { code: anyError.code, signal: anyError.signal }
+    };
+  }
+}
+
 async function runNetworkTest(): Promise<NetworkTestResponse> {
   const config = await runtimeConfig();
   const steps: NetworkTestStep[] = [];
@@ -113,7 +148,9 @@ async function runNetworkTest(): Promise<NetworkTestResponse> {
       gatewayTransport: config.gatewayTransport,
       gatewayDirectHost: config.gatewayDirectHost,
       gatewayLocalPort: config.gatewayLocalPort,
-      gatewayRemotePort: config.gatewayRemotePort
+      gatewayRemotePort: config.gatewayRemotePort,
+      reverseBridgeRemoteHost: config.reverseBridgeRemoteHost,
+      reverseBridgeRemotePort: config.reverseBridgeRemotePort
     }
   });
 
@@ -142,10 +179,20 @@ async function runNetworkTest(): Promise<NetworkTestResponse> {
       label: "SSH 隧道",
       state: tunnel.ok ? "ok" : "error",
       message: tunnel.ok && tunnel.pid
-        ? `SSH tunnel is listening on 127.0.0.1:${tunnel.localPort}.`
+        ? `SSH tunnel is listening on 127.0.0.1:${tunnel.localPort}; remote bridge is ${tunnel.reverseBrokerUrl}.`
         : tunnel.message,
       details: tunnel
     });
+    if (tunnel.ok) {
+      const reverseBridge = await reverseBridgeProbe();
+      steps.push({
+        id: "reverse-bridge",
+        label: "远端反向控制入口",
+        state: reverseBridge.ok ? "ok" : "error",
+        message: reverseBridge.message,
+        details: reverseBridge
+      });
+    }
     const owner = await sshTunnelService.localPortOwner(config.gatewayLocalPort);
     const localGateway = owner
       ? { ok: true, message: `127.0.0.1:${config.gatewayLocalPort} is listening (${owner.command} ${owner.pid}).`, owner }
@@ -226,6 +273,8 @@ async function checkHealth(): Promise<AppHealth> {
       gatewayDirectHost: config.gatewayDirectHost,
       gatewayLocalPort: config.gatewayLocalPort,
       gatewayRemotePort: config.gatewayRemotePort,
+      reverseBridgeRemoteHost: config.reverseBridgeRemoteHost,
+      reverseBridgeRemotePort: config.reverseBridgeRemotePort,
       authMode: config.authMode
     },
     checkedAt: new Date().toISOString()
@@ -342,6 +391,10 @@ function diagnosticsFromHealth(health: AppHealth): DiagnosticItem[] {
   return items;
 }
 
+apiRoutes.get("/ping", (_req, res) => {
+  res.json({ ok: true, app: "detaches_agent server", checkedAt: new Date().toISOString() });
+});
+
 apiRoutes.get("/health", async (_req, res) => {
   const body = await checkHealth();
   res.json(body);
@@ -402,11 +455,12 @@ apiRoutes.post("/context/exports", async (req, res) => {
   }
   try {
     const record = contextExportService.create({ sessionKey, sessionMode });
+    const config = await runtimeConfig();
     res.json({
       sessionKey: record.sessionKey,
       sessionMode: record.sessionMode,
       expiresAt: new Date(record.expiresAtMs).toISOString(),
-      consumeUrl: `${publicServerBaseUrl(await runtimeConfig())}/api/context/exports/${encodeURIComponent(record.token)}`
+      consumeUrl: `${reverseBridgeBaseUrl(config)}/api/context/exports/${encodeURIComponent(record.token)}`
     });
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
@@ -431,6 +485,76 @@ apiRoutes.put("/settings", async (req, res) => {
   gatewayClient.disconnect();
   sshTunnelService.stop();
   res.json(await settingsStore.publicSettings());
+});
+
+apiRoutes.post("/settings/profiles", async (req, res) => {
+  await settingsStore.createProfile(req.body ?? {});
+  gatewayClient.disconnect();
+  sshTunnelService.stop();
+  res.json(await settingsStore.publicSettings());
+});
+
+apiRoutes.put("/settings/profiles/:id", async (req, res) => {
+  try {
+    await settingsStore.updateProfile(String(req.params.id), req.body ?? {});
+    if ((await settingsStore.publicSettings()).activeProfileId === req.params.id) {
+      gatewayClient.disconnect();
+      sshTunnelService.stop();
+    }
+    res.json(await settingsStore.publicSettings());
+  } catch (error) {
+    res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/settings/profiles/:id/activate", async (req, res) => {
+  try {
+    await settingsStore.activateProfile(String(req.params.id));
+    gatewayClient.disconnect();
+    sshTunnelService.stop();
+    res.json(await settingsStore.publicSettings());
+  } catch (error) {
+    res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.delete("/settings/profiles/:id", async (req, res) => {
+  try {
+    await settingsStore.deleteProfile(String(req.params.id));
+    gatewayClient.disconnect();
+    sshTunnelService.stop();
+    res.json(await settingsStore.publicSettings());
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/settings/profiles/:id/bootstrap-ssh", async (req, res) => {
+  try {
+    const settings = await settingsStore.publicSettings();
+    const profile = settings.profiles.find((item) => item.id === req.params.id);
+    if (!profile) {
+      res.status(404).json({ error: `Remote profile not found: ${req.params.id}` });
+      return;
+    }
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    const identityPath = typeof req.body?.identityPath === "string" ? req.body.identityPath : profile.remoteIdentityPath;
+    const result = await bootstrapSshIdentity({
+      host: profile.remoteHost,
+      port: profile.remoteSshPort,
+      user: profile.remoteUser,
+      password,
+      identityPath
+    });
+    await settingsStore.updateProfile(profile.id, { remoteIdentityPath: result.identityPath });
+    if (settings.activeProfileId === profile.id) {
+      gatewayClient.disconnect();
+      sshTunnelService.stop();
+    }
+    res.json({ ...result, settings: await settingsStore.publicSettings() });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 apiRoutes.get("/gateway/status", async (_req, res) => {
@@ -538,8 +662,10 @@ function parseToolTarget(value: unknown): ToolTarget {
   return "local-user-machine";
 }
 
-function isToolRequestStatus(value: string): value is "pending" | "approved" | "rejected" | "blocked" | "started" | "failed" {
+function isToolRequestStatus(value: string): value is "pending" | "running" | "succeeded" | "approved" | "rejected" | "blocked" | "started" | "failed" {
   return value === "pending"
+    || value === "running"
+    || value === "succeeded"
     || value === "approved"
     || value === "rejected"
     || value === "blocked"
@@ -642,11 +768,12 @@ apiRoutes.post("/tools/events/gateway", async (req, res) => {
 
 apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
   const config = await runtimeConfig();
+  const bridgeBaseUrl = reverseBridgeBaseUrl(config);
   res.json({
     ok: true,
     app: "detaches_agent",
     protocolVersion: 1,
-    gatewayEventEndpoint: `${publicServerBaseUrl(config)}/api/tools/events/gateway`,
+    gatewayEventEndpoint: `${bridgeBaseUrl}/api/tools/events/gateway`,
     eventSource: "gateway-event",
     idempotencyField: "sourceEventId",
     submitTokenRequired: true,
@@ -654,9 +781,9 @@ apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
     requestFormats: ["broker-event", "fence"],
     requestKinds: ["terminal", "file-transfer", "adapter-install"],
     contextExport: {
-      createEndpoint: `${publicServerBaseUrl(config)}/api/context/exports`,
-      consumeEndpointPattern: `${publicServerBaseUrl(config)}/api/context/exports/{token}`,
-      createdBy: "detaches-ui-loopback",
+      createEndpoint: `${bridgeBaseUrl}/api/context/exports`,
+      consumeEndpointPattern: `${bridgeBaseUrl}/api/context/exports/{token}`,
+      createdBy: "detaches-ui-reverse-bridge",
       consumedBy: "remote-agent-host",
       oneTime: true,
       ttlSeconds: 300,

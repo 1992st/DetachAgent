@@ -5,6 +5,12 @@ dist/
 .env
 .env.local
 .DS_Store
+*.pem
+*.key
+**/id_*
+**/detaches_agent_ed25519*
+apps/server/*_ed25519*
+apps/server/jianlinpan*
 storage/uploads/*
 storage/downloads/*
 storage/cache/*

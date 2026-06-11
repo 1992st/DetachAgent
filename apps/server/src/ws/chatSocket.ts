@@ -9,6 +9,7 @@ import {
   renderDetachesClientContextFallback,
   renderDetachesSessionContext
 } from "../services/clientContextService.js";
+import { runtimeConfig } from "../config/settingsStore.js";
 
 function send(socket: WebSocket, event: ChatSocketServerEvent): void {
   if (socket.readyState === socket.OPEN) {
@@ -84,7 +85,7 @@ export function attachChatSocket(server: HttpServer): void {
           const clientContext = await buildChatClientContext(sessionMode, sessionKey, event.attachments, { detachesContext });
           const response = await gatewayClient.sendChat({
             sessionKey,
-            message: buildOutboundMessage(event.message, detachesContext, event.attachments, event.attachmentContextOverride),
+            message: await buildOutboundMessage(event.message, detachesContext, event.attachments, event.attachmentContextOverride),
             thinking: event.thinking,
             attachments: event.attachments,
             idempotencyKey: event.idempotencyKey,
@@ -111,23 +112,30 @@ export function attachChatSocket(server: HttpServer): void {
   });
 }
 
-function buildOutboundMessage(
+async function buildOutboundMessage(
   message: string,
   detachesContext: DetachesSessionContext,
   attachments?: UploadedFileRef[],
   attachmentContextOverride?: string
-): string {
+): Promise<string> {
   const blocks = [message];
-  const attachmentContext = buildAttachmentContext(attachments, attachmentContextOverride);
+  const attachmentContext = await buildAttachmentContext(attachments, attachmentContextOverride);
   if (attachmentContext) blocks.push("", attachmentContext);
   blocks.push("", renderDetachesSessionContext(detachesContext));
   return blocks.join("\n");
 }
 
-function buildAttachmentContext(attachments?: UploadedFileRef[], override?: string): string | null {
+async function buildAttachmentContext(attachments?: UploadedFileRef[], override?: string): Promise<string | null> {
   const cleanedOverride = override?.trim();
   if (cleanedOverride) return cleanedOverride;
   if (!attachments?.length) return null;
+  const config = await runtimeConfig();
+  const remoteUser = config.remoteUser || "remote-user";
+  const remoteHome = remoteUser === "root" ? "/root" : `/home/${remoteUser}`;
+  const remoteWorkspace = config.remoteWorkspaceRoot.startsWith("/")
+    ? config.remoteWorkspaceRoot
+    : `${remoteHome}/${config.remoteWorkspaceRoot.replace(/^~\/?/, "").replace(/^\/+/, "")}`;
+  const suggestedPath = `${remoteWorkspace.replace(/\/+$/, "")}/attachments/<file>`;
   return [
     "[detaches_agent 文件上下文]",
     `本次消息附带 ${attachments.length} 个文件。`,
@@ -144,15 +152,17 @@ function buildAttachmentContext(attachments?: UploadedFileRef[], override?: stri
       ""
     ]),
     "这些文件目前只在用户本机，尚未自动上传到远端。",
-    "重要：local-user-machine 只代表用户当前运行 detaches_agent 的本机 MacBook，不代表 OpenClaw Gateway 主机，也不代表远端 Mac mini。",
-    "如果你的目标是让远端 Agent/Gateway 主机读取文件，请使用 target=remote-agent-host，并把 remotePath 写成远端 agent workspace 内的相对路径或 workspace 内绝对路径；不要让用户手动 scp。",
+    `重要：local-user-machine 只代表用户当前运行 detaches_agent 的本机，不代表 OpenClaw Gateway 主机，也不代表远端 Agent 主机 ${config.remoteHost}。`,
+    `如果你的目标是让远端 Agent/Gateway 主机读取文件，请使用 target=remote-agent-host，并且 remotePath 必须是 ${remoteUser}@${config.remoteHost} 上的绝对路径。`,
+    `允许写入范围：远端用户 home (${remoteHome}) 或远端 workspace (${remoteWorkspace})。`,
+    `优先选择远端 workspace 下的可写路径，例如 ${suggestedPath}；不要使用相对路径，不要使用其他用户目录，不要默认写入 /Volumes 外部卷。`,
     "如果你只是要把文件保存到用户本机，才使用 target=local-user-machine。",
     "请求必须声明 target。当前可执行 target: local-user-machine、remote-agent-host；gateway-managed 仍需要服务端适配器，不能退化到本机执行。",
     "请求格式必须是唯一一个 fenced code block：",
     "```detaches-file-transfer",
-    "{\"fileId\":\"上面的文件 id\",\"target\":\"remote-agent-host\",\"remotePath\":\"references/target-file\",\"reason\":\"说明为什么远端 agent 需要读取这个文件\"}",
+    `{"fileId":"上面的文件 id","target":"remote-agent-host","remotePath":"${suggestedPath}","reason":"说明为什么远端 agent 需要读取这个文件"}`,
     "```",
-    "用户批准后，detaches_agent 会生成一次性下载链接；target=remote-agent-host 时会通过 SSH 让远端主机自己 curl 下载到 workspace，target=local-user-machine 时会保存到用户本机。",
+    "用户批准后，detaches_agent 会生成一次性下载链接；target=remote-agent-host 时远端主机会通过 reverse bridge curl 下载到 workspace，target=local-user-machine 时会保存到用户本机。",
     "用户批准前不要假装已经读取文件；如果传输失败，请根据 terminal 输出继续处理。"
   ].join("\n").trimEnd();
 }

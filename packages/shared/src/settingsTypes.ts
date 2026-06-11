@@ -1,8 +1,12 @@
-export interface PublicSettings {
+export interface RemoteProfile {
+  id: string;
+  name: string;
   remoteHost: string;
   remoteSshPort: number;
   remoteUser: string;
   remoteIdentityPath: string;
+  reverseBridgeRemoteHost: string;
+  reverseBridgeRemotePort: number;
   gatewayTransport: "ssh" | "direct";
   gatewayDirectHost: string;
   gatewayRemotePort: number;
@@ -12,13 +16,23 @@ export interface PublicSettings {
   publicBaseUrl: string;
   hasAuthToken: boolean;
   hasAuthPassword: boolean;
+  lastTestedAt?: string;
+  lastStatus?: "ok" | "error";
 }
 
-export interface SettingsUpdate {
+export interface PublicSettings extends RemoteProfile {
+  activeProfileId: string;
+  profiles: RemoteProfile[];
+}
+
+export interface RemoteProfileUpdate {
+  name?: string;
   remoteHost?: string;
   remoteSshPort?: number;
   remoteUser?: string;
   remoteIdentityPath?: string;
+  reverseBridgeRemoteHost?: string;
+  reverseBridgeRemotePort?: number;
   gatewayTransport?: "ssh" | "direct";
   gatewayDirectHost?: string;
   gatewayRemotePort?: number;
@@ -30,4 +44,8 @@ export interface SettingsUpdate {
   clearAuthPassword?: boolean;
   remoteWorkspaceRoot?: string;
   publicBaseUrl?: string;
+}
+
+export interface SettingsUpdate extends RemoteProfileUpdate {
+  activeProfileId?: string;
 }
