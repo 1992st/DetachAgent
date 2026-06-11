@@ -301,9 +301,7 @@ function ToolRequests({
       .then((response) => {
         const extractedIds = new Set(response.requests.map((request) => request.id));
         return fetchToolRequests({ sessionKey, agentId, limit: 100 })
-          .then((listed) => response.requests.length
-            ? mergeToolRequests(response.requests, listed.requests.filter((request) => extractedIds.has(request.id)))
-            : listed.requests.slice(0, 10))
+          .then((listed) => mergeToolRequests(response.requests, listed.requests.filter((request) => extractedIds.has(request.id))))
           .catch(() => response.requests);
       })
       .then((mergedRequests) => {
