@@ -653,7 +653,19 @@ function parseFileTransferRequests(text: string): ParsedToolRequest[] {
       // Ignore malformed requests; the agent can resend a valid JSON block.
     }
   }
-  return requests;
+  return keepLastFileTransferPerFile(requests);
+}
+
+function keepLastFileTransferPerFile(requests: ParsedToolRequest[]): ParsedToolRequest[] {
+  const lastIndexByFileId = new Map<string, number>();
+  requests.forEach((request, index) => {
+    const fileId = typeof request.payload.fileId === "string" ? request.payload.fileId : "";
+    if (fileId) lastIndexByFileId.set(fileId, index);
+  });
+  return requests.filter((request, index) => {
+    const fileId = typeof request.payload.fileId === "string" ? request.payload.fileId : "";
+    return !fileId || lastIndexByFileId.get(fileId) === index;
+  });
 }
 
 function parseTerminalCommandBody(body: string): ParsedToolRequest | null {

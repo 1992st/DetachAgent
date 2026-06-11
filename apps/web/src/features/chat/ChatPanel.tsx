@@ -299,10 +299,11 @@ function ToolRequests({
     setRequests([]);
     const loadRequests = () => extractToolRequests({ text, sessionKey, agentId, sourceMessageId, sourceRunId })
       .then((response) => {
-        const extractedIds = new Set(response.requests.map((request) => request.id));
+        const visibleRequests = keepLastFileTransferPerFile(response.requests);
+        const extractedIds = new Set(visibleRequests.map((request) => request.id));
         return fetchToolRequests({ sessionKey, agentId, limit: 100 })
-          .then((listed) => mergeToolRequests(response.requests, listed.requests.filter((request) => extractedIds.has(request.id))))
-          .catch(() => response.requests);
+          .then((listed) => mergeToolRequests(visibleRequests, listed.requests.filter((request) => extractedIds.has(request.id))))
+          .catch(() => visibleRequests);
       })
       .then((mergedRequests) => {
         setRequests(mergedRequests);
@@ -425,6 +426,20 @@ function mergeToolRequests(primary: ToolRequestRecord[], updates: ToolRequestRec
   return primary.map((request) => byId.get(request.id) ?? request);
 }
 
+function keepLastFileTransferPerFile(requests: ToolRequestRecord[]): ToolRequestRecord[] {
+  const lastIndexByFileId = new Map<string, number>();
+  requests.forEach((request, index) => {
+    if (request.kind !== "file-transfer") return;
+    const fileId = typeof request.payload.fileId === "string" ? request.payload.fileId : "";
+    if (fileId) lastIndexByFileId.set(fileId, index);
+  });
+  return requests.filter((request, index) => {
+    if (request.kind !== "file-transfer") return true;
+    const fileId = typeof request.payload.fileId === "string" ? request.payload.fileId : "";
+    return !fileId || lastIndexByFileId.get(fileId) === index;
+  });
+}
+
 function toolResultSummary(response: ToolExecutionResultResponse): string {
   const result = response.result;
   const status = result.completed
@@ -480,12 +495,14 @@ function buildDefaultAttachmentContext(attachments: UploadedFileRef[]): string {
       ""
     ]),
     "这些文件目前只在用户本机，尚未自动上传到远端。",
-    "如果你需要读取或处理文件，请先决定远端目标文件路径，然后向 UI 发起 detaches-file-transfer 待审批请求。",
+    "重要：local-user-machine 只代表用户当前运行 detaches_agent 的本机 MacBook，不代表 OpenClaw Gateway 主机，也不代表远端 Mac mini。",
+    "如果你的目标是让远端 Agent/Gateway 主机读取文件，不要请求 target=local-user-machine，也不要把 remotePath 写成远端用户目录；当前 remote-agent-host/gateway-managed 文件传输尚未启用，需要先请求用户启用远端传输适配器或改用本机处理。",
+    "只有当你明确要把文件保存到用户本机时，才向 UI 发起 detaches-file-transfer 待审批请求。",
     "请求格式必须是唯一一个 fenced code block：",
     "```detaches-file-transfer",
     "{\"fileId\":\"上面的文件 id\",\"remotePath\":\"/absolute/or/relative/target-file\",\"reason\":\"说明为什么需要传输\"}",
     "```",
-    "用户批准后，detaches_agent 会生成一次性下载链接并在本会话 terminal 中执行 curl，把文件传到你指定的 remotePath。",
+    "用户批准后，detaches_agent 会生成一次性下载链接并在用户本机会话 terminal 中执行 curl，把文件保存到用户本机的 remotePath。",
     "用户批准前不要假装已经读取文件；如果传输失败，请根据 terminal 输出继续处理。"
   ].join("\n").trimEnd();
 }

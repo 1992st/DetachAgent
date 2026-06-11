@@ -144,13 +144,15 @@ function buildAttachmentContext(attachments?: UploadedFileRef[], override?: stri
       ""
     ]),
     "这些文件目前只在用户本机，尚未自动上传到远端。",
-    "如果你需要读取或处理文件，请先决定目标文件路径，然后向 UI 发起 detaches-file-transfer 待审批请求。",
+    "重要：local-user-machine 只代表用户当前运行 detaches_agent 的本机 MacBook，不代表 OpenClaw Gateway 主机，也不代表远端 Mac mini。",
+    "如果你的目标是让远端 Agent/Gateway 主机读取文件，不要请求 target=local-user-machine，也不要把 remotePath 写成远端用户目录；当前 remote-agent-host/gateway-managed 文件传输尚未启用，需要先请求用户启用远端传输适配器或改用本机处理。",
+    "只有当你明确要把文件保存到用户本机时，才向 UI 发起 detaches-file-transfer 待审批请求。",
     "请求必须声明 target。当前可执行 target: local-user-machine；remote-agent-host 和 gateway-managed 仍需要服务端适配器，不能退化到本机执行。",
     "请求格式必须是唯一一个 fenced code block：",
     "```detaches-file-transfer",
     "{\"fileId\":\"上面的文件 id\",\"target\":\"local-user-machine\",\"remotePath\":\"/absolute/or/relative/target-file\",\"reason\":\"说明为什么需要传输\"}",
     "```",
-    "用户批准后，detaches_agent 会生成一次性下载链接并在本会话 terminal 中执行 curl，把文件传到你指定的 remotePath。",
+    "用户批准后，detaches_agent 会生成一次性下载链接并在用户本机会话 terminal 中执行 curl，把文件保存到用户本机的 remotePath。",
     "用户批准前不要假装已经读取文件；如果传输失败，请根据 terminal 输出继续处理。"
   ].join("\n").trimEnd();
 }
