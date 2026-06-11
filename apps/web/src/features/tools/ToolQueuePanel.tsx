@@ -62,7 +62,7 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
     try {
       const response = await approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated", actor: decisionActor(clientIdentity) });
       if (!response.execution?.wroteToTerminal) throw new Error(response.message || "Broker did not execute the request.");
-      onRevealTerminal();
+      if (request.kind !== "file-transfer") onRevealTerminal();
       const result = await fetchToolRequestResult(request.id);
       setSummaries((current) => ({ ...current, [request.id]: toolResultSummary(result) }));
       await refresh();

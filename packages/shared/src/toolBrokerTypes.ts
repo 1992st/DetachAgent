@@ -98,6 +98,9 @@ export interface ToolRequestDecisionResponse {
     terminalId?: string;
     sessionKey?: string;
     wroteToTerminal?: boolean;
+    completed?: boolean;
+    exitCode?: number;
+    forwardStatus?: ToolResultForwardStatus;
   };
   message?: string;
 }

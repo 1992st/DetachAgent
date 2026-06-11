@@ -355,7 +355,7 @@ function ToolRequests({
                   approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated", actor: decisionActor(clientIdentity) })
                     .then((response) => {
                       if (!response.execution?.wroteToTerminal) throw new Error(response.message || "Broker did not execute the request.");
-                      onReveal();
+                      if (request.kind !== "file-transfer") onReveal();
                       setHandled((current) => ({ ...current, [index]: "approved" }));
                       return fetchToolRequestResult(request.id);
                     })
@@ -370,7 +370,11 @@ function ToolRequests({
                 }}
               >
                 <Check size={15} />
-                {state === "approved" ? "Approved" : state === "running" ? "Approving" : request.risk?.level === "elevated" ? `Confirm ${actionLabel}` : actionLabel}
+                {state === "approved"
+                  ? request.kind === "file-transfer" ? "Transferred" : "Approved"
+                  : state === "running"
+                    ? request.kind === "file-transfer" ? "Transferring" : "Approving"
+                    : request.risk?.level === "elevated" ? `Confirm ${actionLabel}` : actionLabel}
               </button>
               <button
                 type="button"
@@ -547,6 +551,8 @@ function mergeStreamText(previous: string, incoming: string, payload: Record<str
   if (!previous) return incoming;
   if (incoming === previous) return previous;
   if (incoming.startsWith(previous)) return incoming;
+  if (previous.includes(incoming)) return previous;
+  if (incoming.includes(previous)) return incoming;
   const eventType = String(payload.type ?? payload.event ?? payload.kind ?? "");
   if (eventType.includes("delta") || typeof payload.delta === "string") return `${previous}${incoming}`;
   return incoming.length >= previous.length ? incoming : `${previous}${incoming}`;

@@ -53,6 +53,23 @@ interface ToolExecutionRecord {
   forwardedAt?: string;
 }
 
+interface ToolExecutionResultSnapshot {
+  executionId: string;
+  requestId: string;
+  status: ToolRequestStatus;
+  terminalId?: string;
+  sessionKey: string;
+  completed: boolean;
+  exitCode?: number;
+  forwardStatus: ToolResultForwardStatus;
+  forwardError?: string;
+  forwardedAt?: string;
+  output: string;
+  outputBytes: number;
+  capturedAt: string;
+  message?: string;
+}
+
 interface ToolBrokerState {
   version: 1;
   requests: ToolRequestRecord[];
@@ -71,6 +88,19 @@ class ToolBrokerService {
     const parsed = parseToolRequests(input.text);
     const requests = [];
     for (const item of parsed) {
+      const existing = this.findDuplicateExtractedRequest({
+        kind: item.kind,
+        target: item.target,
+        sessionKey: input.sessionKey,
+        agentId: input.agentId,
+        sourceMessageId: input.sourceMessageId,
+        sourceRunId: input.sourceRunId,
+        payload: item.payload
+      });
+      if (existing) {
+        requests.push(existing);
+        continue;
+      }
       requests.push(await this.create({
         kind: item.kind,
         target: item.target,
@@ -195,7 +225,8 @@ class ToolBrokerService {
         const updated = this.update(request, "approved", undefined, decision("approved", input));
         await this.save();
         await this.audit({ type: "tool.approve", requestId, status: updated.status, command: prepared.command, terminalId: execution.terminalId, executionId: execution.executionId, actor: input.actor, riskAccepted: input.riskAccepted });
-        void this.forwardResultToAgent(updated.id);
+        const result = await this.waitForExecutionResult(updated.id, { timeoutMs: 30000 });
+        void this.forwardResultToAgent(updated.id, { delayMs: 0 });
         return {
           request: updated,
           command: prepared.command,
@@ -204,9 +235,14 @@ class ToolBrokerService {
             target: request.target,
             terminalId: execution.terminalId,
             sessionKey: execution.sessionKey,
-            wroteToTerminal: true
+            wroteToTerminal: true,
+            completed: result.completed,
+            exitCode: result.exitCode,
+            forwardStatus: result.forwardStatus
           },
-          message: "File transfer command was written to the session terminal by the server broker."
+          message: result.completed && result.exitCode === 0
+            ? "File transfer completed and the result is being forwarded to the agent."
+            : "File transfer command was written to the session terminal; completion is still pending."
         };
       } catch (error) {
         return this.fail(request, error instanceof Error ? error.message : String(error));
@@ -264,27 +300,10 @@ class ToolBrokerService {
     }
     const snapshot = await terminalService.snapshot(execution.sessionKey);
     const parsed = parseExecutionOutput(snapshot.replay.slice(execution.startOffset), execution.executionId);
-    const output = parsed.output.slice(-20_000);
+    const result = this.buildExecutionResult(request, execution, parsed);
     return {
       request,
-      result: {
-        executionId: execution.executionId,
-        requestId,
-        status: request.status,
-        terminalId: execution.terminalId,
-        sessionKey: execution.sessionKey,
-        completed: parsed.completed,
-        exitCode: parsed.exitCode,
-        forwardStatus: execution.forwardStatus,
-        forwardError: execution.forwardError,
-        forwardedAt: execution.forwardedAt,
-        output,
-        outputBytes: Buffer.byteLength(output, "utf8"),
-        capturedAt: new Date().toISOString(),
-        message: parsed.completed
-          ? "Output is a terminal replay snapshot captured after the broker completion marker."
-          : "Output is a terminal replay snapshot; completion marker has not appeared yet."
-      }
+      result
     };
   }
 
@@ -318,6 +337,25 @@ class ToolBrokerService {
     const normalized = sourceEventId.trim();
     if (!normalized) return null;
     return [...this.requests.values()].find((request) => request.sourceEventId === normalized) ?? null;
+  }
+
+  private findDuplicateExtractedRequest(input: {
+    kind: ToolRequestKind;
+    target: ToolTarget;
+    sessionKey: string;
+    agentId?: string;
+    sourceMessageId?: string;
+    sourceRunId?: string;
+    payload: Record<string, unknown>;
+  }): ToolRequestRecord | null {
+    return [...this.requests.values()].find((request) => {
+      if (request.source !== "text-extract") return false;
+      if (request.kind !== input.kind || request.target !== input.target || request.sessionKey !== input.sessionKey) return false;
+      if ((request.agentId || "") !== (input.agentId || "")) return false;
+      if (input.sourceMessageId && request.sourceMessageId !== input.sourceMessageId) return false;
+      if (!input.sourceMessageId && input.sourceRunId && request.sourceRunId !== input.sourceRunId) return false;
+      return toolPayloadFingerprint(request) === toolPayloadFingerprint(input);
+    }) ?? null;
   }
 
   private update(request: ToolRequestRecord, status: ToolRequestStatus, error?: string, lastDecision?: ToolRequestRecord["lastDecision"]): ToolRequestRecord {
@@ -364,6 +402,42 @@ class ToolBrokerService {
     this.executions.set(execution.executionId, execution);
     await this.save();
     return execution;
+  }
+
+  private async waitForExecutionResult(requestId: string, options: { timeoutMs: number }): Promise<ToolExecutionResultSnapshot> {
+    const started = Date.now();
+    let latest = await this.result(requestId);
+    while (!latest.result.completed && Date.now() - started < options.timeoutMs) {
+      await delay(250);
+      latest = await this.result(requestId);
+    }
+    return latest.result;
+  }
+
+  private buildExecutionResult(
+    request: ToolRequestRecord,
+    execution: ToolExecutionRecord,
+    parsed: { output: string; completed: boolean; exitCode?: number }
+  ): ToolExecutionResultSnapshot {
+    const output = parsed.output.slice(-20_000);
+    return {
+      executionId: execution.executionId,
+      requestId: request.id,
+      status: request.status,
+      terminalId: execution.terminalId,
+      sessionKey: execution.sessionKey,
+      completed: parsed.completed,
+      exitCode: parsed.exitCode,
+      forwardStatus: execution.forwardStatus,
+      forwardError: execution.forwardError,
+      forwardedAt: execution.forwardedAt,
+      output,
+      outputBytes: Buffer.byteLength(output, "utf8"),
+      capturedAt: new Date().toISOString(),
+      message: parsed.completed
+        ? "Output is a terminal replay snapshot captured after the broker completion marker."
+        : "Output is a terminal replay snapshot; completion marker has not appeared yet."
+    };
   }
 
   private async forwardResultToAgent(requestId: string, options?: { delayMs?: number; force?: boolean }): Promise<void> {
@@ -500,10 +574,10 @@ interface ParsedToolRequest {
 }
 
 function parseToolRequests(text: string): ParsedToolRequest[] {
-  return [
+  return dedupeParsedToolRequests([
     ...parseTerminalCommandRequests(text),
     ...parseFileTransferRequests(text)
-  ];
+  ]);
 }
 
 function parseTerminalCommandRequests(text: string): ParsedToolRequest[] {
@@ -515,6 +589,36 @@ function parseTerminalCommandRequests(text: string): ParsedToolRequest[] {
     if (parsed) requests.push(parsed);
   }
   return requests;
+}
+
+function dedupeParsedToolRequests(requests: ParsedToolRequest[]): ParsedToolRequest[] {
+  const seen = new Set<string>();
+  return requests.filter((request) => {
+    const fingerprint = parsedToolFingerprint(request);
+    if (seen.has(fingerprint)) return false;
+    seen.add(fingerprint);
+    return true;
+  });
+}
+
+function parsedToolFingerprint(request: ParsedToolRequest): string {
+  return [
+    request.kind,
+    request.target,
+    String(request.payload.command ?? ""),
+    String(request.payload.fileId ?? ""),
+    String(request.payload.remotePath ?? "")
+  ].join("\0");
+}
+
+function toolPayloadFingerprint(input: Pick<ToolRequestCreateInput, "kind" | "target" | "payload">): string {
+  return [
+    input.kind,
+    input.target,
+    String(input.payload.command ?? ""),
+    String(input.payload.fileId ?? ""),
+    String(input.payload.remotePath ?? "")
+  ].join("\0");
 }
 
 function parseFileTransferRequests(text: string): ParsedToolRequest[] {

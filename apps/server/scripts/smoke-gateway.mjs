@@ -205,7 +205,7 @@ function createMockGateway() {
         socket.send(JSON.stringify({
           type: "event",
           event: "chat",
-          payload: { role: "assistant", text: `echo: ${frame.params.message}`, runId: "run-smoke-1" }
+          payload: { sessionKey: frame.params.sessionKey, role: "assistant", text: `echo: ${frame.params.message}`, runId: "run-smoke-1" }
         }));
         return;
       }
@@ -804,6 +804,8 @@ async function main() {
     assert.match(approvedBrokerTransfer.command, /curl -fL/);
     assert.match(approvedBrokerTransfer.command, /detaches-note-via-broker\.txt/);
     assert.equal(approvedBrokerTransfer.execution.wroteToTerminal, true);
+    assert.equal(approvedBrokerTransfer.execution.completed, true);
+    assert.equal(approvedBrokerTransfer.execution.exitCode, 0);
     assert.equal(approvedBrokerTransfer.execution.sessionKey, chatSessionKey);
     let brokerTransferResult = await requestJson(`/api/tools/requests/${brokerTransfer.request.id}/result`);
     while (!brokerTransferResult.result.completed) {
@@ -814,6 +816,10 @@ async function main() {
     assert.equal(brokerTransferResult.result.executionId, approvedBrokerTransfer.execution.executionId);
     assert.equal(brokerTransferResult.result.terminalId, approvedBrokerTransfer.execution.terminalId);
     assert.equal(brokerTransferResult.result.exitCode, 0);
+    while (!observed.chatSends.some((item) => item.idempotencyKey === `detaches-tool-result:${approvedBrokerTransfer.execution.executionId}`)) {
+      if (Date.now() - started > 12000) throw new Error("Timed out waiting for broker transfer result forward.");
+      await wait(50);
+    }
 
     const extractedTools = await requestJson("/api/tools/requests/extract", {
       method: "POST",
