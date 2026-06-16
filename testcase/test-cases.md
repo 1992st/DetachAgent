@@ -37,6 +37,62 @@
 - `doctor --url` 输出 session、agentId、broker 可用状态、staged files 和 broker-event 命令模板。
 - abort 请求被转发。
 
+## TC-002B 多 Agent 目录完整显示
+
+目标：验证 Gateway snapshot 只返回 4 个 agent 时，后端优先使用 Gateway `agents.list` RPC 的权威列表；只有 RPC/snapshot 都没有 agent 时，才使用 SSH/CLI 发现作为兜底。
+
+步骤：
+
+1. 执行 `pnpm --filter @detaches/shared build && pnpm --filter @detaches/server build`。
+2. 执行 `node testcase/agent-directory-full-list-test.mjs`。
+3. 执行 `node testcase/agent-directory-gateway-rpc-authority-test.mjs`。
+
+期望：
+
+- Gateway `agents.list` RPC 有返回时，SSH/CLI 磁盘发现不会混入可聊天 agent 列表。
+- Gateway RPC agent 与 session-only agent 可合并展示。
+- RPC/snapshot 都没有 agent 时，SSH/CLI 发现可以作为 fallback。
+- `global` session 不显示为聊天目标。
+- RPC 主来源返回 source 为 `gateway-agents-rpc+sessions`。
+
+## TC-002C Tool Queue pending 请求弹窗
+
+目标：验证 Skill 请求进入 Tool Queue 后，UI 会主动弹出审批入口，而不是只静默更新右侧列表。
+
+步骤：
+
+1. 执行 `pnpm --filter @detaches/shared build && pnpm --filter @detaches/web typecheck`。
+2. 执行 `node testcase/tool-queue-popup-test.mjs`。
+3. 构造 `kind: skill-verify`、`target: local-user-machine`、`status: pending`、`source: api` 的最近请求。
+4. 通过 `/api/tools/stream` 或刷新 Tool Queue 让前端收到该请求。
+
+期望：
+
+- 最近的 pending `skill-verify` 请求会触发 Tool Queue approval dialog。
+- 旧 pending 请求保留在队列中，但不会反复弹窗。
+- unsupported target 和非 pending 请求不会弹出审批框。
+- 弹窗中的 Approve / Reject 复用 broker 原有审批接口和审计链路。
+
+## TC-002D 普通用户直连 Main Agent Gateway
+
+目标：验证网络与连接页面默认走 OpenClaw Gateway 直连方案，不要求 detaches_agent 所在 PC SSH 登录 Main Agent 电脑。
+
+步骤：
+
+1. 打开“网络与连接”页面。
+2. 输入 Main Agent host、Gateway port、Gateway token/password 和 Public base URL。
+3. 点击“保存并测试直连”。
+4. 请求 `/api/settings`、`/api/network/test` 和 `/api/agents`。
+
+期望：
+
+- 新安装默认 `gatewayTransport` 为 `direct`。
+- 页面主流程不要求 SSH user、SSH password 或 SSH identity。
+- 保存后 detaches_agent 连接 `gatewayDirectHost:gatewayRemotePort`。
+- `/api/agents` 通过 Gateway `agents.list` / `sessions.list` 获取 agent 列表。
+- Main Agent 通过 `publicBaseUrl` 回连 detaches_agent 的 context export/tool broker 能力。
+- SSH tunnel 仅保留为高级兼容选项，不作为普通用户推荐路径。
+
 ## TC-002A OpenClaw detaches adapter
 
 目标：验证远端 agent-side adapter 资产可读取、可校验、可通过 `doctor` 诊断会话上下文、可消费一次性 context export URL、可探测 Tool Broker、可生成标准请求块、结构化 Tool Broker event，并可直接提交 event。

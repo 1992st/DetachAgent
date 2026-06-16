@@ -172,7 +172,7 @@ function sourceEventIdHint(context, suffix) {
 }
 
 function adapterCliPathHint() {
-  return "~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs";
+  return "~/.detach_agent/bin/detaches-agent-adapter.mjs";
 }
 
 function doctorContext(context) {

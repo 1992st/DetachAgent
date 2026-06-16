@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
 import { spawn } from "node:child_process";
 import { nanoid } from "nanoid";
@@ -27,6 +28,14 @@ import { fileTransferService } from "../files/fileTransferService.js";
 import { gatewayClient } from "../gateway/gatewayClient.js";
 import { terminalService } from "../terminal/terminalService.js";
 import { openclawDetachesAdapterService } from "../adapters/openclawDetachesAdapterService.js";
+
+const DETACH_AGENT_SKILL_NAME = "detach-agent-relationship";
+const DETACH_AGENT_SKILL_VERSION = "1.0.0";
+const DETACH_AGENT_SKILL_ZIP_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../web/public/skills/detach-agent-relationship.skill.zip"
+);
+const OPENCLAW_GLOBAL_SKILLS_DIR = "~/.openclaw/skills";
 
 type AuditEvent =
   | { type: "tool.create"; request: ToolRequestRecord }
@@ -269,7 +278,7 @@ class ToolBrokerService {
       }
     }
     if (request.kind === "adapter-install") {
-      const installDir = stringPayload(request, "installDir") || "~/.openclaw/detaches_agent";
+      const installDir = stringPayload(request, "installDir") || "~/.detach_agent";
       const workspaceDir = stringPayload(request, "workspaceDir") || "~/.openclaw/workspace";
       try {
         const prepared = await openclawDetachesAdapterService.prepareRemoteInstallCommand({ installDir, workspaceDir });
@@ -289,6 +298,34 @@ class ToolBrokerService {
             wroteToTerminal: true
           },
           message: "Remote adapter installation command was written to the session terminal by the server broker."
+        };
+      } catch (error) {
+        return this.fail(request, error instanceof Error ? error.message : String(error));
+      }
+    }
+    if (request.kind === "skill-install" || request.kind === "skill-verify") {
+      try {
+        const command = request.kind === "skill-install"
+          ? buildOpenClawSkillInstallCommand(request)
+          : buildOpenClawSkillVerifyCommand(request);
+        const execution = await this.runInTerminal(request, command);
+        const updated = this.update(request, "approved", undefined, decision("approved", input));
+        await this.save();
+        await this.audit({ type: "tool.approve", requestId, status: updated.status, command, terminalId: execution.terminalId, executionId: execution.executionId, actor: input.actor, riskAccepted: input.riskAccepted });
+        void this.forwardResultToAgent(updated.id);
+        return {
+          request: updated,
+          command,
+          execution: {
+            executionId: execution.executionId,
+            target: request.target,
+            terminalId: execution.terminalId,
+            sessionKey: execution.sessionKey,
+            wroteToTerminal: true
+          },
+          message: request.kind === "skill-install"
+            ? "Skill installation command was written to the session terminal by the server broker."
+            : "Skill verification command was written to the session terminal by the server broker."
         };
       } catch (error) {
         return this.fail(request, error instanceof Error ? error.message : String(error));
@@ -356,6 +393,7 @@ class ToolBrokerService {
 
   private targetSupported(kind: ToolRequestKind, target: ToolTarget): boolean {
     if (kind === "adapter-install") return target === "remote-agent-host";
+    if (kind === "skill-install" || kind === "skill-verify") return target === "local-user-machine";
     if (kind === "file-transfer") return target === "local-user-machine" || target === "remote-agent-host";
     return kind === "terminal" && target === "local-user-machine";
   }
@@ -766,12 +804,82 @@ function stringPayload(request: ToolRequestRecord, key: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function buildOpenClawSkillInstallCommand(request: ToolRequestRecord): string {
+  const skillName = stringPayload(request, "skillName") || DETACH_AGENT_SKILL_NAME;
+  const targetAgent = stringPayload(request, "targetAgent") || "openclaw";
+  if (skillName !== DETACH_AGENT_SKILL_NAME) throw new Error(`Unsupported skillName: ${skillName}`);
+  if (targetAgent !== "openclaw") throw new Error(`Unsupported targetAgent: ${targetAgent}`);
+  const targetDir = shellPath(stringPayload(request, "targetDir") || OPENCLAW_GLOBAL_SKILLS_DIR);
+  const zipPath = shellQuote(DETACH_AGENT_SKILL_ZIP_PATH);
+  const quotedSkill = shellQuote(DETACH_AGENT_SKILL_NAME);
+  const quotedVersion = shellQuote(DETACH_AGENT_SKILL_VERSION);
+  return [
+    "set -e",
+    `ZIP=${zipPath}`,
+    `TARGET_DIR=${targetDir}`,
+    `SKILL_NAME=${quotedSkill}`,
+    `TARGET_VERSION=${quotedVersion}`,
+    "TMP_DIR=$(mktemp -d)",
+    "cleanup() { rm -rf \"$TMP_DIR\"; }",
+    "trap cleanup EXIT",
+    "test -f \"$ZIP\" || { echo \"Skill zip not found: $ZIP\" >&2; exit 2; }",
+    "mkdir -p \"$TARGET_DIR\"",
+    "unzip -q -o \"$ZIP\" -d \"$TMP_DIR\"",
+    "test -f \"$TMP_DIR/$SKILL_NAME/SKILL.md\" || { echo \"Missing SKILL.md in skill package\" >&2; exit 3; }",
+    "test -f \"$TMP_DIR/$SKILL_NAME/VERSION\" || { echo \"Missing VERSION in skill package\" >&2; exit 4; }",
+    "test -f \"$TMP_DIR/$SKILL_NAME/README.md\" || { echo \"Missing README.md in skill package\" >&2; exit 5; }",
+    "OLD_VERSION=\"not-installed\"",
+    "if [ -f \"$TARGET_DIR/$SKILL_NAME/VERSION\" ]; then OLD_VERSION=$(cat \"$TARGET_DIR/$SKILL_NAME/VERSION\"); fi",
+    "rm -rf \"$TARGET_DIR/$SKILL_NAME\"",
+    "cp -R \"$TMP_DIR/$SKILL_NAME\" \"$TARGET_DIR/$SKILL_NAME\"",
+    "NEW_VERSION=$(cat \"$TARGET_DIR/$SKILL_NAME/VERSION\")",
+    "test \"$NEW_VERSION\" = \"$TARGET_VERSION\" || { echo \"Installed version mismatch: $NEW_VERSION expected $TARGET_VERSION\" >&2; exit 6; }",
+    "echo \"detach-agent-relationship skill installed\"",
+    "echo \"oldSkillVersion=$OLD_VERSION\"",
+    "echo \"newSkillVersion=$NEW_VERSION\"",
+    "echo \"installedPath=$TARGET_DIR/$SKILL_NAME\"",
+    "echo \"installScope=openclaw_global_shared\"",
+    "echo \"packageStructureStatus=ok\"",
+    "echo \"reloadOrReindexStatus=start a new Main Agent session or refresh/reindex skills if needed\""
+  ].join("\n");
+}
+
+function buildOpenClawSkillVerifyCommand(request: ToolRequestRecord): string {
+  const skillName = stringPayload(request, "skillName") || DETACH_AGENT_SKILL_NAME;
+  const targetAgent = stringPayload(request, "targetAgent") || "openclaw";
+  if (skillName !== DETACH_AGENT_SKILL_NAME) throw new Error(`Unsupported skillName: ${skillName}`);
+  if (targetAgent !== "openclaw") throw new Error(`Unsupported targetAgent: ${targetAgent}`);
+  const targetDir = shellPath(stringPayload(request, "targetDir") || OPENCLAW_GLOBAL_SKILLS_DIR);
+  const quotedSkill = shellQuote(DETACH_AGENT_SKILL_NAME);
+  const quotedVersion = shellQuote(DETACH_AGENT_SKILL_VERSION);
+  return [
+    "set -e",
+    `TARGET_DIR=${targetDir}`,
+    `SKILL_NAME=${quotedSkill}`,
+    `TARGET_VERSION=${quotedVersion}`,
+    "SKILL_DIR=\"$TARGET_DIR/$SKILL_NAME\"",
+    "test -d \"$SKILL_DIR\" || { echo \"Skill directory missing: $SKILL_DIR\" >&2; exit 2; }",
+    "test -f \"$SKILL_DIR/SKILL.md\" || { echo \"Missing SKILL.md\" >&2; exit 3; }",
+    "test -f \"$SKILL_DIR/VERSION\" || { echo \"Missing VERSION\" >&2; exit 4; }",
+    "test -f \"$SKILL_DIR/README.md\" || { echo \"Missing README.md\" >&2; exit 5; }",
+    "VERSION=$(cat \"$SKILL_DIR/VERSION\")",
+    "test \"$VERSION\" = \"$TARGET_VERSION\" || { echo \"Version mismatch: $VERSION expected $TARGET_VERSION\" >&2; exit 6; }",
+    "echo \"detach-agent-relationship skill ready\"",
+    "echo \"skillVersion=$VERSION\"",
+    "echo \"installedPath=$SKILL_DIR\"",
+    "echo \"installScope=openclaw_global_shared\"",
+    "echo \"packageStructureStatus=ok\""
+  ].join("\n");
+}
+
 function unsupportedTargetMessage(kind: ToolRequestKind, target: ToolTarget): string {
   return `${kind} target ${target} is not available. The request cannot fallback to local-user-machine.`;
 }
 
 function assessRisk(input: Pick<ToolRequestRecord, "kind" | "payload">): ToolRiskAssessment {
   if (input.kind === "adapter-install") return { level: "elevated", reasons: ["将在远端 agent host 安装 detaches adapter"] };
+  if (input.kind === "skill-install") return { level: "elevated", reasons: ["将在 Host/Main Agent 的 OpenClaw 全局 skills 路径安装或覆盖 skill"] };
+  if (input.kind === "skill-verify") return { level: "safe", reasons: [] };
   if (input.kind !== "terminal") return { level: "safe", reasons: [] };
   const command = typeof input.payload.command === "string" ? input.payload.command : "";
   const normalized = command.toLowerCase();
@@ -809,10 +917,17 @@ function targetObject(value: unknown): value is { [key: string]: unknown } {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function shellPath(value: string): string {
+  const normalized = value.replace(/\/+$/, "");
+  if (normalized === "~") return "$HOME";
+  if (normalized.startsWith("~/")) return `$HOME/${normalized.slice(2).replace(/'/g, "'\\''")}`;
+  return shellQuote(normalized);
+}
+
 function isToolRequestRecord(value: unknown): value is ToolRequestRecord {
   if (!targetObject(value)) return false;
   return typeof value.id === "string"
-    && (value.kind === "terminal" || value.kind === "file-transfer" || value.kind === "adapter-install")
+    && (value.kind === "terminal" || value.kind === "file-transfer" || value.kind === "adapter-install" || value.kind === "skill-install" || value.kind === "skill-verify")
     && typeof value.sessionKey === "string"
     && typeof value.createdAt === "string"
     && typeof value.updatedAt === "string"

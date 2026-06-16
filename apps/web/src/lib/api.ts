@@ -6,6 +6,8 @@ import type {
   DiagnosticsResponse,
   FileTransferPrepareResponse,
   FileUploadResponse,
+  LocalTerminalAppsResponse,
+  LocalTerminalOpenResponse,
   NetworkTestResponse,
   OpenClawAdapterInstallPlan,
   OpenClawAdapterReadiness,
@@ -227,6 +229,18 @@ export async function bootstrapRemoteProfileSsh(id: string, input: { password: s
 
 export async function testNetwork(): Promise<NetworkTestResponse> {
   const res = await fetch("/api/network/test", { method: "POST" });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function fetchLocalTerminalApps(): Promise<LocalTerminalAppsResponse> {
+  const res = await fetch("/api/terminal/apps");
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function openLocalTerminalApp(appId: string): Promise<LocalTerminalOpenResponse> {
+  const res = await fetch(`/api/terminal/apps/${encodeURIComponent(appId)}/open`, { method: "POST" });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }

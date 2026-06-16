@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { DetachesContextExportCreateResponse, OpenClawAdapterInstallPlan, OpenClawAdapterReadiness, ToolBrokerSocketEvent, ToolRequestRecord } from "@detaches/shared";
 import { createDetachesContextExport, createToolRequest, fetchOpenClawAdapterInstallPlan, fetchOpenClawAdapterReadiness, fetchToolRequests } from "../../lib/api.js";
 
-const defaultInstallDir = "~/.openclaw/detaches_agent";
+const defaultInstallDir = "~/.detach_agent";
 const defaultWorkspaceDir = "~/.openclaw/workspace";
 
 export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string | null; agentId: string | null }) {
@@ -167,7 +167,7 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
         </button>
       </div>
       <label className="adapter-field">
-        <span>远端安装目录（用于安装计划）</span>
+        <span>Detach Agent 机器安装目录（用于安装计划）</span>
         <input value={installDir} onChange={(event) => setInstallDir(event.target.value)} onBlur={() => void refresh()} />
       </label>
       <label className="adapter-field">

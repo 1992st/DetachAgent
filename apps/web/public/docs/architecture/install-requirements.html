@@ -1,0 +1,1136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Detach Agent Skill 安装需求</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #16202a;
+      --muted: #657386;
+      --line: #d7dee8;
+      --paper: #f6f8fb;
+      --panel: #ffffff;
+      --host: #0f6b63;
+      --detach: #8a4b14;
+      --bridge: #6b4fb5;
+      --warn: #b45309;
+      --bad: #b91c1c;
+      --good: #15803d;
+      --code: #111827;
+      --soft-host: #e7f6f3;
+      --soft-detach: #fff1df;
+      --soft-bridge: #f1edff;
+      --soft-warn: #fff7ed;
+      --shadow: 0 16px 34px rgba(20, 32, 46, 0.1);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.62;
+    }
+
+    header {
+      background: #101928;
+      color: #f8fafc;
+      padding: 36px 24px 30px;
+      border-bottom: 6px solid var(--host);
+    }
+
+    .wrap {
+      width: min(1220px, calc(100vw - 40px));
+      margin: 0 auto;
+    }
+
+    .eyebrow {
+      color: #a7f3d0;
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 8px 0 12px;
+      font-size: clamp(30px, 5vw, 52px);
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: clamp(22px, 3vw, 32px);
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    main {
+      padding: 28px 0 64px;
+    }
+
+    section {
+      margin-top: 24px;
+    }
+
+    code {
+      color: var(--code);
+      background: #eef2f7;
+      border-radius: 5px;
+      padding: 1px 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow: auto;
+      margin: 0;
+      border-radius: 8px;
+      background: var(--code);
+      color: #f8fafc;
+      padding: 16px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .lead {
+      max-width: 960px;
+      color: #d7dee8;
+      font-size: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px;
+      box-shadow: var(--shadow);
+    }
+
+    .caption {
+      color: var(--muted);
+      margin-bottom: 18px;
+      max-width: 960px;
+    }
+
+    .decision-grid,
+    .state-grid,
+    .review-grid,
+    .acceptance-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 14px;
+      min-height: 128px;
+    }
+
+    .card.host {
+      border-left: 6px solid var(--host);
+      background: var(--soft-host);
+    }
+
+    .card.detach {
+      border-left: 6px solid var(--detach);
+      background: var(--soft-detach);
+    }
+
+    .card.bridge {
+      border-left: 6px solid var(--bridge);
+      background: var(--soft-bridge);
+    }
+
+    .card.warn {
+      border-left: 6px solid var(--warn);
+      background: var(--soft-warn);
+    }
+
+    .card strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .card p,
+    .card li {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .card ul {
+      margin: 8px 0 0;
+      padding-left: 18px;
+    }
+
+    .matrix,
+    .two-column {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 12px;
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      color: #f8fafc;
+      background: #243244;
+      font-weight: 800;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: var(--host);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .tag.warn {
+      background: var(--warn);
+    }
+
+    .tag.bad {
+      background: var(--bad);
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+
+    .flow-step {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 14px;
+      min-height: 132px;
+    }
+
+    .flow-step::after {
+      content: "→";
+      position: absolute;
+      top: 45%;
+      right: -14px;
+      color: var(--bridge);
+      font-size: 24px;
+      font-weight: 900;
+    }
+
+    .flow-step:last-child::after {
+      content: "";
+    }
+
+    .flow-step strong {
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    .flow-step p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .button-spec {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .button-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 14px;
+    }
+
+    .button-label {
+      display: inline-block;
+      border-radius: 6px;
+      background: var(--host);
+      color: #fff;
+      padding: 6px 10px;
+      font-size: 13px;
+      font-weight: 800;
+      margin-bottom: 10px;
+    }
+
+    .button-label.warn {
+      background: var(--warn);
+    }
+
+    .button-label.bridge {
+      background: var(--bridge);
+    }
+
+    .install-console {
+      display: grid;
+      grid-template-columns: minmax(260px, 0.72fr) minmax(320px, 1fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .console-controls {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .console-controls label {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .console-controls select {
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0 12px;
+      background: #fff;
+      font: inherit;
+    }
+
+    .action-button {
+      min-height: 44px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--host);
+      color: #fff;
+      font: inherit;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    .action-button.secondary {
+      border: 1px solid var(--host);
+      background: #fff;
+      color: var(--host);
+    }
+
+    .action-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.62;
+    }
+
+    .console-status {
+      min-height: 22px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .console-output {
+      min-height: 320px;
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .payload-panels {
+      display: grid;
+      gap: 12px;
+    }
+
+    .payload-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px;
+    }
+
+    .payload-panel strong {
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .source-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .source {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px;
+    }
+
+    .source a {
+      color: var(--host);
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .source p {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 4px;
+    }
+
+    .footer {
+      color: var(--muted);
+      font-size: 13px;
+      padding: 8px 0 0;
+    }
+
+    @media (max-width: 920px) {
+      .decision-grid,
+      .state-grid,
+      .review-grid,
+      .acceptance-grid,
+      .flow,
+      .button-spec,
+      .install-console,
+      .matrix,
+      .two-column {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-step::after {
+        content: "";
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="eyebrow">Install Requirements</div>
+      <h1>Detach Agent Skill 安装需求</h1>
+      <p class="lead">安装是一个受控产品能力：识别 Agent 类型，选择正确 skill scope，发送带 zip 附件的安装请求，并用回执证明 Host/Main Agent 已能加载完整 skill。</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="panel">
+      <h2>安装结论</h2>
+      <p class="caption">主流程只服务一件事：让 Host/Main Agent 可安装、索引、启用 <code>detach-agent-relationship</code>。安装流程必须能拿到 zip、知道安装 scope、判断版本，并返回可验证回执。</p>
+      <div class="decision-grid">
+        <div class="card host">
+          <span class="tag">Target</span>
+          <strong>安装到 Host 侧 skill scope</strong>
+          <p>具体位置由 Agent 类型决定。OpenClaw 使用 shared managed/global scope；Codex 使用 <code>$CODEX_HOME/skills</code>。</p>
+        </div>
+        <div class="card detach">
+          <span class="tag bad">Not Target</span>
+          <strong>不安装到 Detach 机器</strong>
+          <p>Detach Agent 是消息来源和执行环境，不是 relationship skill 的安装主体。</p>
+        </div>
+        <div class="card bridge">
+          <span class="tag">Package</span>
+          <strong>安装完整 skill 包</strong>
+          <p>zip 解压后必须是完整 <code>detach-agent-relationship/</code> 目录，不是裸 <code>SKILL.md</code>。</p>
+        </div>
+        <div class="card warn">
+          <span class="tag warn">Trigger</span>
+          <strong>只在触发点出现</strong>
+          <p>创建 Detach 窗口前、设置/诊断页、更新/修复时触发；普通 Main Agent 对话不触发。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>安装与验证触发</h2>
+      <p class="caption">创建 Detach Agent 窗口前先点“验证 Skill 安装”。返回 <code>missing</code>、<code>outdated</code> 或 <code>broken</code> 时，再点安装/更新按钮。这里生成的是发给 Host/Main Agent 的 payload。</p>
+      <div class="install-console">
+        <div class="console-controls">
+          <label for="install-provider">Agent 类型</label>
+          <select id="install-provider">
+            <option value="openclaw">OpenClaw</option>
+          </select>
+          <a class="action-button" href="#install-payload-panel">安装 Skill 到 OpenClaw 全局路径</a>
+          <a class="action-button secondary" href="#verify-payload-panel">验证 Skill 安装</a>
+          <p class="console-status">按钮跳转到对应 payload。接入真实 Agent API 后，由产品层把 payload 和 zip 附件发给 Host/Main Agent。</p>
+        </div>
+        <div class="payload-panels">
+          <div class="payload-panel" id="install-payload-panel">
+            <strong>安装 / 更新 Payload</strong>
+            <pre>{
+  "provider": "openclaw",
+  "targetAgent": "openclaw",
+  "targetRole": "host_main_agent",
+  "installScope": "shared_managed",
+  "action": "install_or_update_skill",
+  "skillName": "detach-agent-relationship",
+  "skillVersion": "1.0.0",
+  "protocolVersion": "1.0.0",
+  "packageVersion": "1.0.0",
+  "targetPathPolicy": "openclaw_global_shared_skills",
+  "attachment": {
+    "type": "application/zip",
+    "name": "detach-agent-relationship.skill.zip",
+    "path": "detach-agent-relationship.skill.zip"
+  }
+}</pre>
+          </div>
+          <div class="payload-panel" id="verify-payload-panel">
+            <strong>验证 Payload</strong>
+            <pre>{
+  "provider": "openclaw",
+  "targetAgent": "openclaw",
+  "targetRole": "host_main_agent",
+  "installScope": "shared_managed",
+  "action": "verify_skill_install",
+  "skillName": "detach-agent-relationship",
+  "skillVersion": "1.0.0",
+  "protocolVersion": "1.0.0",
+  "targetPathPolicy": "openclaw_global_shared_skills",
+  "checks": [
+    "skill_visible",
+    "version_matches",
+    "package_structure_complete",
+    "scope_is_shared_managed",
+    "reload_or_reindex_complete"
+  ],
+  "expectedPackage": {
+    "folder": "detach-agent-relationship",
+    "files": ["SKILL.md", "VERSION", "README.md"]
+  }
+}</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>实现审查防线</h2>
+      <p class="caption">这些是安装实现必须持续验证的点。任何一项回退，都会让 Main Agent 拿不到包、装错位置，或无法判断升级。</p>
+      <div class="review-grid">
+        <div class="card warn">
+          <strong>zip 结构必须完整</strong>
+          <p><code>detach-agent-relationship.skill.zip</code> 必须包含 <code>SKILL.md</code>、<code>VERSION</code> 和 <code>README.md</code>。缺任意文件按 broken 处理。</p>
+        </div>
+        <div class="card warn">
+          <strong>打包脚本不能复制旧包</strong>
+          <p>skill 包升级后必须先重建根目录 zip，再同步辅助包。Windows 包内 zip hash 必须等于根目录 zip。</p>
+        </div>
+        <div class="card warn">
+          <strong>安装 prompt 不能空泛</strong>
+          <p>Prompt 必须告诉 Main Agent 从 attachment 读取 zip、按 Agent scope 安装、检查完整结构并返回回执。</p>
+        </div>
+        <div class="card warn">
+          <strong>manifest 不能保留旧 scope</strong>
+          <p>Manifest 必须携带版本和 Agent-specific install policy。OpenClaw 默认 shared managed/global，不是 workspace。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>搜索依据</h2>
+      <p class="caption">安装路径规则必须来自 Agent 文档或本机可验证事实。未知路径不能被产品猜测。</p>
+      <div class="source-list">
+        <div class="source">
+          <a href="https://docs.openclaw.ai/tools/skills">OpenClaw Skills docs</a>
+          <p>确认 OpenClaw 有 workspace、project agent、personal agent、shared managed skills。全局安装使用 shared managed scope，典型路径是 <code>~/.openclaw/skills</code>。</p>
+        </div>
+        <div class="source">
+          <a href="/Users/zhangshutong/.codex/skills/.system/skill-installer/SKILL.md">Codex skill-installer</a>
+          <p>确认 Codex skills 安装到 <code>$CODEX_HOME/skills/&lt;skill-name&gt;</code>，默认 <code>~/.codex/skills</code>。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Agent 安装位置矩阵</h2>
+      <p class="caption">同一个 skill，对不同 Agent 的安装 scope 不同。按钮、payload 和回执都必须携带 Agent 类型和 scope。</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Agent 类型</th>
+            <th>安装 scope</th>
+            <th>安装位置</th>
+            <th>规则</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>OpenClaw</strong></td>
+            <td>shared managed / global</td>
+            <td><code>~/.openclaw/skills</code> 或 OpenClaw 返回的 shared managed path</td>
+            <td>使用 global install，安装一次供本机 OpenClaw local agents 共享；除非用户明确选择 workspace-only，不装到 <code>&lt;workspace&gt;/skills</code>。</td>
+          </tr>
+          <tr>
+            <td><strong>Codex</strong></td>
+            <td>Codex skills root</td>
+            <td><code>$CODEX_HOME/skills</code>，默认 <code>~/.codex/skills</code></td>
+            <td>按 Codex skill-installer 规则安装；安装后提示重启或刷新以加载新 skill。</td>
+          </tr>
+          <tr>
+            <td><strong>Unknown</strong></td>
+            <td>unknown</td>
+            <td>不猜路径</td>
+            <td>先要求 Agent 返回 skill root，或询问用户确认路径；确认前不自动安装。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>触发与状态机</h2>
+      <p class="caption">安装检查发生在 Detach 窗口创建前，不进入普通 Main Agent 对话，也不被每条 marker 消息重复触发。</p>
+      <div class="flow">
+        <div class="flow-step">
+          <strong>1. Create Window</strong>
+          <p>用户创建 Detach Agent 窗口。系统先检查 Host 侧 skill 状态。</p>
+        </div>
+        <div class="flow-step">
+          <strong>2. Resolve Agent</strong>
+          <p>识别 Agent 类型、安装 scope、当前版本和生效路径。</p>
+        </div>
+        <div class="flow-step">
+          <strong>3. Install / Update</strong>
+          <p><code>missing</code>、<code>outdated</code>、<code>broken</code> 时展示对应按钮。</p>
+        </div>
+        <div class="flow-step">
+          <strong>4. Ready</strong>
+          <p>状态为 <code>ready</code> 后发送 window bootstrap，后续消息只带 <code>[[DETACH_AGENT]]</code>。</p>
+        </div>
+      </div>
+
+      <div class="state-grid" style="margin-top: 12px;">
+        <div class="card">
+          <strong>missing</strong>
+          <p>未安装，显示安装按钮。</p>
+        </div>
+        <div class="card">
+          <strong>outdated</strong>
+          <p>版本低于目标版本，显示更新按钮。</p>
+        </div>
+        <div class="card">
+          <strong>broken</strong>
+          <p>结构不完整或无法索引，显示修复按钮。</p>
+        </div>
+        <div class="card">
+          <strong>ready</strong>
+          <p>已安装且可用，不展示安装流程。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>安装/更新按钮</h2>
+      <p class="caption">按钮不是固定文案，而是由 Agent 类型和状态共同决定。按钮旁必须显示 scope、版本和路径，避免用户误装。</p>
+      <div class="button-spec">
+        <div class="button-card">
+          <span class="button-label">安装到 OpenClaw 全局 Skills</span>
+          <p>OpenClaw + <code>missing</code>。目标是 shared managed/global scope。</p>
+        </div>
+        <div class="button-card">
+          <span class="button-label warn">更新 OpenClaw 全局 Skill</span>
+          <p>OpenClaw + <code>outdated</code>。覆盖同名 global skill 并刷新索引。</p>
+        </div>
+        <div class="button-card">
+          <span class="button-label bridge">确认 Skill 安装位置</span>
+          <p>Unknown Agent。路径未确认前不执行安装。</p>
+        </div>
+      </div>
+      <div class="button-spec" style="margin-top: 12px;">
+        <div class="button-card">
+          <span class="button-label bridge">验证 Skill 安装</span>
+          <p>安装后或诊断页触发。检查 skill 可见性、版本、完整结构、生效路径和刷新状态。</p>
+        </div>
+        <div class="button-card">
+          <span class="button-label warn">修复 Skill</span>
+          <p><code>broken</code> 状态触发。重新发送完整 zip 并覆盖同名 skill。</p>
+        </div>
+        <div class="button-card">
+          <span class="button-label">重新检查</span>
+          <p><code>failed</code> 或用户刷新状态时触发。不安装，只重新拉取 Host 侧状态。</p>
+        </div>
+      </div>
+      <table style="margin-top: 14px;">
+        <thead>
+          <tr>
+            <th>状态</th>
+            <th>按钮行为</th>
+            <th>展示要求</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>checking</code></td>
+            <td>禁用按钮，显示检查中。</td>
+            <td>展示 Agent 类型和正在检查的 scope。</td>
+          </tr>
+          <tr>
+            <td><code>missing</code></td>
+            <td>启用安装。</td>
+            <td>展示目标版本、目标 scope、zip 名称。</td>
+          </tr>
+          <tr>
+            <td><code>outdated</code></td>
+            <td>启用更新。</td>
+            <td>展示当前版本和目标版本。</td>
+          </tr>
+          <tr>
+            <td><code>installing/updating</code></td>
+            <td>禁用按钮，显示进度。</td>
+            <td>展示 payload 已发送、等待回执。</td>
+          </tr>
+          <tr>
+            <td><code>failed</code></td>
+            <td>启用重试。</td>
+            <td>展示失败原因和下一步。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>安装请求 Payload</h2>
+      <p class="caption">Main Agent 不能靠 prompt 猜 zip。zip 必须作为同一安装请求的 attachment 传入；缺失或不可读时安装失败。</p>
+      <pre>{
+  "targetAgent": "openclaw",
+  "targetRole": "host_main_agent",
+  "installScope": "shared_managed",
+  "action": "install_or_update_skill",
+  "skillName": "detach-agent-relationship",
+  "targetPathPolicy": "openclaw_global_shared_skills",
+  "prompt": "Install or update the attached complete skill package into the correct shared skill location for this agent. For OpenClaw, use the shared managed/global skills path, not a single workspace unless the user explicitly chooses workspace-only. If the target path cannot be determined, ask the user. After installation, refresh or reindex skills and confirm name, version, path, package structure, and status.",
+  "attachment": {
+    "name": "detach-agent-relationship.skill.zip",
+    "type": "application/zip",
+    "path": "detach-agent-relationship.skill.zip"
+  }
+}</pre>
+      <div class="decision-grid" style="margin-top: 12px;">
+        <div class="card">
+          <strong>Attachment required</strong>
+          <p>缺少 zip 附件，安装失败。</p>
+        </div>
+        <div class="card">
+          <strong>Path not guessed</strong>
+          <p>Agent 无法确认安装路径时必须询问用户。</p>
+        </div>
+        <div class="card">
+          <strong>Overwrite allowed</strong>
+          <p>更新时允许覆盖同名 skill。</p>
+        </div>
+        <div class="card">
+          <strong>Receipt required</strong>
+          <p>安装后必须返回版本、路径、结构和刷新状态。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>验证请求 Payload</h2>
+      <p class="caption">验证按钮不需要 zip。它要求 Main Agent 返回当前生效 skill 状态，用于判断下一步是发送 bootstrap、更新、修复还是要求用户确认路径。</p>
+      <pre>{
+  "targetAgent": "openclaw",
+  "targetRole": "host_main_agent",
+  "installScope": "shared_managed",
+  "action": "verify_skill_install",
+  "skillName": "detach-agent-relationship",
+  "skillVersion": "1.0.0",
+  "protocolVersion": "1.0.0",
+  "targetPathPolicy": "openclaw_global_shared_skills",
+  "checks": [
+    "skill_visible",
+    "version_matches",
+    "package_structure_complete",
+    "scope_is_shared_managed",
+    "reload_or_reindex_complete"
+  ],
+  "expectedPackage": {
+    "folder": "detach-agent-relationship",
+    "files": ["SKILL.md", "VERSION", "README.md"]
+  }
+}</pre>
+      <div class="decision-grid" style="margin-top: 12px;">
+        <div class="card">
+          <strong>ready</strong>
+          <p>skill 可见、版本匹配、结构完整、scope 正确。下一步发送 window bootstrap。</p>
+        </div>
+        <div class="card">
+          <strong>missing / outdated</strong>
+          <p>显示安装或更新按钮。</p>
+        </div>
+        <div class="card">
+          <strong>broken</strong>
+          <p>显示修复按钮，并要求重新发送完整 zip。</p>
+        </div>
+        <div class="card">
+          <strong>conflict</strong>
+          <p>返回 <code>effectiveSkillPath</code> 和 <code>conflictPath</code>，提示 workspace 覆盖 global。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Main Agent Prompt 设计</h2>
+      <p class="caption">Prompt 的视角必须站在 Main Agent：它要知道自己是谁、从哪里拿包、按什么 Agent scope 安装、怎么判断成功。不要让它猜路径或猜包。</p>
+      <div class="two-column">
+        <div>
+          <h3>OpenClaw Prompt</h3>
+          <pre>You are the Host/Main Agent receiving a Detach Agent skill install request.
+
+Install or update the attached complete skill package:
+`detach-agent-relationship.skill.zip`
+
+Rules:
+1. Read the zip from this request's attachment. Do not guess or search for another zip.
+2. For OpenClaw, install into the shared managed/global skills scope, normally `~/.openclaw/skills`, not a single workspace unless the user explicitly chooses workspace-only.
+3. Do not install into the Detach Agent machine.
+4. The extracted folder must be `detach-agent-relationship/` and include `SKILL.md`, `VERSION`, and `README.md`.
+5. After install/update, refresh or reindex skills as required by OpenClaw.
+
+If the target path is unclear, ask the user.
+
+Return: skillName, oldSkillVersion, newSkillVersion, installedPath, installScope, packageStructureStatus, reloadOrReindexStatus.</pre>
+        </div>
+        <div>
+          <h3>Codex Prompt</h3>
+          <pre>You are the Host/Main Agent receiving a Detach Agent skill install request.
+
+Install or update the attached complete skill package:
+`detach-agent-relationship.skill.zip`
+
+Rules:
+1. Read the zip from this request's attachment. Do not guess or search for another zip.
+2. For Codex, install into `$CODEX_HOME/skills`; if `CODEX_HOME` is unset, use `~/.codex/skills`.
+3. Do not install into the Detach Agent machine.
+4. The extracted folder must be `detach-agent-relationship/` and include `SKILL.md`, `VERSION`, and `README.md`.
+5. Restart, refresh, or reindex Codex skills as required.
+
+If the target path is unclear, ask the user.
+
+Return: skillName, oldSkillVersion, newSkillVersion, installedPath, installScope, packageStructureStatus, reloadOrReindexStatus.</pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>完整 Skill 包</h2>
+      <p class="caption">安装对象是完整 skill，不是单独的 <code>SKILL.md</code>。运行时 prompt、bootstrap、marker 和安装器不进入 skill 包。</p>
+      <div class="two-column">
+        <pre>detach-agent-relationship/
+  SKILL.md
+  VERSION
+  README.md</pre>
+        <table>
+          <thead>
+            <tr>
+              <th>文件</th>
+              <th>职责</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>SKILL.md</code></td>
+              <td>Main Agent 运行时规则。</td>
+            </tr>
+            <tr>
+              <td><code>VERSION</code></td>
+              <td>skill 版本，用于安装和更新判断。</td>
+            </tr>
+            <tr>
+              <td><code>README.md</code></td>
+              <td>维护说明和变更边界。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="decision-grid" style="margin-top: 12px;">
+        <div class="card warn">
+          <strong>不放 bootstrap</strong>
+          <p>window bootstrap 是运行时启动消息，不属于 skill 包。</p>
+        </div>
+        <div class="card warn">
+          <strong>不放 marker</strong>
+          <p><code>[[DETACH_AGENT]]</code> marker 是消息协议资产，不属于 skill 包。</p>
+        </div>
+        <div class="card warn">
+          <strong>不放 installer</strong>
+          <p>Windows installer、provider registry、安装 prompt 不属于 skill 包。</p>
+        </div>
+        <div class="card warn">
+          <strong>不放路线图</strong>
+          <p>产品规划留在架构文档，不污染 Main Agent 运行时 skill。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>打包与获取链路</h2>
+      <p class="caption">Main Agent 获取 skill 包的路径必须由产品链路保证，不由模型猜测。HTML、manifest、根目录 zip、Windows 辅助包必须指向同一个版本。</p>
+      <div class="flow">
+        <div class="flow-step">
+          <strong>1. Source Skill</strong>
+          <p><code>skills/detach-agent-relationship/</code> 是唯一源目录，包含 <code>SKILL.md</code>、<code>VERSION</code>、<code>README.md</code>。</p>
+        </div>
+        <div class="flow-step">
+          <strong>2. Build Zip</strong>
+          <p>重建 <code>detach-agent-relationship.skill.zip</code>，zip 顶层必须是 <code>detach-agent-relationship/</code>。</p>
+        </div>
+        <div class="flow-step">
+          <strong>3. Attach Payload</strong>
+          <p>安装按钮发送 payload，并把该 zip 作为 <code>attachment</code> 同时传给 Main Agent。</p>
+        </div>
+        <div class="flow-step">
+          <strong>4. Sync Aux Packages</strong>
+          <p>Windows 包只作为辅助，必须复制同一个根目录 zip，不能单独维护第二份 skill。</p>
+        </div>
+      </div>
+      <table style="margin-top: 14px;">
+        <thead>
+          <tr>
+            <th>Artifact</th>
+            <th>来源</th>
+            <th>验证</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>detach-agent-relationship.skill.zip</code></td>
+            <td><code>skills/detach-agent-relationship/</code></td>
+            <td>zip 内含完整目录和版本文件。</td>
+          </tr>
+          <tr>
+            <td><code>detach-agent-skill-manifest.json</code></td>
+            <td>安装元数据</td>
+            <td><code>archiveName</code>、<code>skillVersion</code>、<code>packageVersion</code> 与 zip 一致。</td>
+          </tr>
+          <tr>
+            <td><code>detach-agent-skill-installer.js</code></td>
+            <td>浏览器侧 payload 构造</td>
+            <td>payload attachment path 指向根目录 zip，并携带 Agent scope。</td>
+          </tr>
+          <tr>
+            <td><code>windows-installer/detach-agent-relationship.skill.zip</code></td>
+            <td>根目录 zip 复制</td>
+            <td>hash 必须与根目录 zip 一致。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>更新管理</h2>
+      <p class="caption">版本必须分层管理。只改文档不触发升级；protocol 要求更高 skillVersion 时才触发更新。</p>
+      <table>
+        <thead>
+          <tr>
+            <th>版本</th>
+            <th>来源</th>
+            <th>触发更新</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>skillVersion</code></td>
+            <td>skill 包 <code>VERSION</code></td>
+            <td>缺失、结构损坏、版本低于目标版本。</td>
+          </tr>
+          <tr>
+            <td><code>protocolVersion</code></td>
+            <td>bootstrap / marker 语义</td>
+            <td>协议要求更高 <code>skillVersion</code>。</td>
+          </tr>
+          <tr>
+            <td><code>packageVersion</code></td>
+            <td>zip 分发包</td>
+            <td>分发包内容升级且影响安装资产。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="decision-grid" style="margin-top: 12px;">
+        <div class="card">
+          <strong>触发更新</strong>
+          <p>缺失、旧版、结构不完整、protocol 需要更高版本、用户点击更新/修复。</p>
+        </div>
+        <div class="card">
+          <strong>不触发更新</strong>
+          <p>普通 Main Agent 对话、后续 marker 消息、只改产品说明文档。</p>
+        </div>
+        <div class="card">
+          <strong>更新后回执</strong>
+          <p><code>oldSkillVersion</code>、<code>newSkillVersion</code>、<code>installedPath</code>、<code>installScope</code>。</p>
+        </div>
+        <div class="card">
+          <strong>刷新要求</strong>
+          <p>安装后必须 refresh / reindex / 新 session，具体动作按 Agent 文档执行。</p>
+        </div>
+      </div>
+      <table style="margin-top: 14px;">
+        <thead>
+          <tr>
+            <th>升级判定</th>
+            <th>动作</th>
+            <th>Main Agent 回执</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>未安装</td>
+            <td>安装目标 zip。</td>
+            <td><code>oldSkillVersion=null</code>，返回新版本和路径。</td>
+          </tr>
+          <tr>
+            <td>已安装版本低于目标版本</td>
+            <td>覆盖同名 skill，保留目标 scope。</td>
+            <td>返回 old/new 版本、覆盖路径、刷新状态。</td>
+          </tr>
+          <tr>
+            <td>已安装版本相同但结构损坏</td>
+            <td>修复安装，重新解压完整包。</td>
+            <td>返回 <code>packageStructureStatus=repaired</code>。</td>
+          </tr>
+          <tr>
+            <td>workspace skill 覆盖 global skill</td>
+            <td>提示当前生效路径，由用户选择移除覆盖或 workspace-only。</td>
+            <td>返回 effectivePath 和 conflictPath。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>对抗性审查</h2>
+      <p class="caption">这些不是边缘情况，是安装设计必须主动防住的失败路径。</p>
+      <div class="review-grid">
+        <div class="card warn">
+          <strong>错装到 Detach Agent</strong>
+          <p>阻止。安装主体只能是 Host/Main Agent 所属 skill scope。</p>
+        </div>
+        <div class="card warn">
+          <strong>OpenClaw 错装 workspace</strong>
+          <p>除非用户明确选择 workspace-only，否则使用 shared managed/global scope。</p>
+        </div>
+        <div class="card warn">
+          <strong>未带 zip 附件</strong>
+          <p>失败，不让 Main Agent 猜路径或猜包来源。</p>
+        </div>
+        <div class="card warn">
+          <strong>Unknown Agent 路径未知</strong>
+          <p>不猜。要求 Agent 返回 skill root 或询问用户。</p>
+        </div>
+        <div class="card warn">
+          <strong>session 未刷新</strong>
+          <p>提示新 session、refresh 或 reindex。</p>
+        </div>
+        <div class="card warn">
+          <strong>allowlist 禁用</strong>
+          <p>提示检查 Agent allowlist 或 skill 可见性策略。</p>
+        </div>
+        <div class="card warn">
+          <strong>workspace 覆盖 global</strong>
+          <p>提示当前生效路径，因为 OpenClaw workspace skills 可能优先于 managed global。</p>
+        </div>
+        <div class="card warn">
+          <strong>长 prompt 污染普通对话</strong>
+          <p>安装流程只在触发点出现，不进入普通 Main Agent 对话。</p>
+        </div>
+        <div class="card warn">
+          <strong>设计文档与代码分叉</strong>
+          <p>验收必须检查 manifest、JS payload、prompt、zip 内容和 Windows 辅助包是否与本需求一致。</p>
+        </div>
+        <div class="card warn">
+          <strong>版本文件缺失</strong>
+          <p>没有 <code>VERSION</code> 时不能判断升级，必须按 broken 处理。</p>
+        </div>
+        <div class="card warn">
+          <strong>空泛 prompt 误导 Main Agent</strong>
+          <p>Prompt 必须包含 attachment、scope、结构、刷新和回执要求。</p>
+        </div>
+        <div class="card warn">
+          <strong>同名包多份分叉</strong>
+          <p>根目录 zip 是唯一分发源；辅助包只能复制，不能手工维护。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>验收标准</h2>
+      <p class="caption">验收看用户是否能做对，而不是看页面是否写了很多说明。</p>
+      <div class="acceptance-grid">
+        <div class="card">
+          <strong>路径正确</strong>
+          <p>OpenClaw 默认 shared managed/global；Codex 默认 <code>~/.codex/skills</code>；Unknown 不猜。</p>
+        </div>
+        <div class="card">
+          <strong>按钮正确</strong>
+          <p>按钮按状态和 Agent 类型变化，且显示 scope、版本、路径。</p>
+        </div>
+        <div class="card">
+          <strong>附件正确</strong>
+          <p>Main Agent 从同一 payload 的 attachment 获取 zip。</p>
+        </div>
+        <div class="card">
+          <strong>包正确</strong>
+          <p>安装完整 skill 包，包含 <code>SKILL.md</code>、<code>VERSION</code>、<code>README.md</code>。</p>
+        </div>
+        <div class="card">
+          <strong>触发正确</strong>
+          <p>创建 Detach 窗口前检查；普通对话和后续 marker 不触发。</p>
+        </div>
+        <div class="card">
+          <strong>回执正确</strong>
+          <p>回执包含版本、路径、scope、结构状态和刷新状态。</p>
+        </div>
+        <div class="card">
+          <strong>风险可见</strong>
+          <p>错装、路径未知、附件缺失、allowlist、覆盖优先级都有明确处理。</p>
+        </div>
+        <div class="card">
+          <strong>实现可推进</strong>
+          <p>后续安装实现按该文档做，不再把 Windows installer 或 provider registry 当主流程。</p>
+        </div>
+      </div>
+    </section>
+
+    <p class="footer">最后更新：2026-06-13。安装主线：Agent 类型识别 → scope 决策 → 按钮触发 → payload + zip attachment → 安装回执。</p>
+  </main>
+</body>
+</html>

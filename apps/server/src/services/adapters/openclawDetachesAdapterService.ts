@@ -162,7 +162,7 @@ function normalizeBaseUrl(value: string | undefined): string {
 
 function normalizeInstallDir(value: string | undefined): string {
   const trimmed = value?.trim();
-  return trimmed || "~/.openclaw/detaches_agent";
+  return trimmed || "~/.detach_agent";
 }
 
 function normalizeWorkspaceDir(value: string | undefined): string {
@@ -360,12 +360,12 @@ export const openclawDetachesAdapterService = {
       install: {
         shell: [
           "curl -fL http://127.0.0.1:38888/api/adapters/openclaw-detaches/bundle -o /tmp/openclaw-detaches-adapter.tar.gz",
-          "mkdir -p ~/.openclaw/detaches_agent",
-          "tar -xzf /tmp/openclaw-detaches-adapter.tar.gz -C ~/.openclaw/detaches_agent --strip-components=1",
-          "node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs manifest"
+          "mkdir -p ~/.detach_agent",
+          "tar -xzf /tmp/openclaw-detaches-adapter.tar.gz -C ~/.detach_agent --strip-components=1",
+          "node ~/.detach_agent/bin/detaches-agent-adapter.mjs manifest"
         ].join("\n"),
         notes: [
-        "Run this on the real OpenClaw agent host through the detaches_agent SSH reverse bridge.",
+          "Run this on the real Detach Agent runtime machine through the detaches_agent SSH reverse bridge.",
           "The adapter only emits/validates detaches_agent requests; it does not bypass UI approval."
         ]
       }
@@ -431,7 +431,7 @@ export const openclawDetachesAdapterService = {
         ...openClawRuntimeVerifyShellLines
       ],
       notes: [
-        "Run these commands on the real OpenClaw agent host, not inside the user's local detaches_agent terminal.",
+        "Run these commands on the real Detach Agent runtime machine, not inside the Host/Main Agent skill directory.",
         "The baseUrl should normally be the SSH reverse bridge URL on the remote host, for example http://127.0.0.1:38999.",
         "The adapter only validates/emits detaches_agent protocol requests; it does not bypass UI approval."
       ]

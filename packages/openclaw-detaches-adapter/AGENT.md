@@ -25,7 +25,7 @@ If the context is missing, ask the user to resend through detaches_agent or avoi
 If detaches_agent provides a one-time context export URL, consume it with `doctor` on the real agent host before requesting tools:
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor \
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor \
   --url "$DETACHES_CONTEXT_EXPORT_URL" \
   --output-context /tmp/detaches-client-context.json
 ```
@@ -33,7 +33,7 @@ node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor \
 If you only need to fetch the context without the runbook, use:
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs context-fetch \
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs context-fetch \
   "$DETACHES_CONTEXT_EXPORT_URL" \
   --output /tmp/detaches-client-context.json
 ```
@@ -45,13 +45,13 @@ The export URL should be consumed once. Treat the saved file as sensitive becaus
 When this adapter is installed on the real OpenClaw agent host, use the CLI as a local protocol inspector:
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --context /path/to/clientContext.detaches.json
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --context /path/to/clientContext.detaches.json
 ```
 
 `doctor` is the preferred first command. It prints the current session identity, requestable targets, blocked targets, staged files, hard rules, and exact broker-event command templates. It does not execute commands or transfer files.
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs inspect-context /path/to/clientContext.detaches.json
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs inspect-context /path/to/clientContext.detaches.json
 ```
 
 `inspect-context` prints session identity, adapter readiness, capability targets, routing warnings, and hard rules as JSON. It does not execute commands or transfer files.
@@ -59,7 +59,7 @@ node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs inspect-context /
 Before submitting structured requests, verify the broker endpoint:
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs broker-probe "$DETACHES_AGENT_BASE_URL"
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs broker-probe "$DETACHES_AGENT_BASE_URL"
 ```
 
 ## Tool Request Rules
@@ -71,7 +71,7 @@ Use exactly one fenced block for a tool request.
 If the OpenClaw runtime can send structured gateway tool events, prefer broker-event JSON over fenced text:
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs terminal-request \
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-request \
   --context /path/to/clientContext-or-detaches.json \
   --target local-user-machine \
   --command pwd \
@@ -87,7 +87,7 @@ POST the JSON output to detaches_agent `/api/tools/events/gateway`. This keeps f
 If detaches_agent is reachable from the agent host, the CLI can submit the event itself:
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs terminal-request \
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-request \
   --context /path/to/clientContext-or-detaches.json \
   --target local-user-machine \
   --command pwd \

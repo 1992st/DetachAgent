@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
-import { Check, Eye, RefreshCw, Send, TerminalSquare, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, Eye, RefreshCw, Send, TerminalSquare, X, BellRing } from "lucide-react";
 import type { ClientIdentity, ToolBrokerSocketEvent, ToolDecisionActor, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget } from "@detaches/shared";
 import { approveToolRequest, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward } from "../../lib/api.js";
+import { isQueueToolRequestVisible, shouldSurfaceApproval, targetLabels, toolRequestSupported } from "./toolQueuePresentation.js";
 
 interface Props {
   sessionKey: string | null;
@@ -16,23 +17,36 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [summaries, setSummaries] = useState<Record<string, string>>({});
+  const [attentionRequest, setAttentionRequest] = useState<ToolRequestRecord | null>(null);
+  const surfacedRequestIds = useRef<Set<string>>(new Set());
+
+  const surfaceApproval = useCallback((request: ToolRequestRecord, options: { requireRecent?: boolean } = {}) => {
+    if (!shouldSurfaceApproval(request, options)) return;
+    if (surfacedRequestIds.current.has(request.id)) return;
+    surfacedRequestIds.current.add(request.id);
+    setAttentionRequest(request);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!sessionKey) {
       setRequests([]);
+      setAttentionRequest(null);
       return;
     }
     setLoading(true);
     setError(null);
     try {
       const response = await fetchToolRequests({ sessionKey, agentId, limit: 50 });
-      setRequests(response.requests.filter(isQueueToolRequestVisible));
+      const visibleRequests = response.requests.filter(isQueueToolRequestVisible);
+      setRequests(visibleRequests);
+      const latestPending = visibleRequests.find((request) => shouldSurfaceApproval(request, { requireRecent: true }));
+      if (latestPending) surfaceApproval(latestPending, { requireRecent: true });
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : String(refreshError));
     } finally {
       setLoading(false);
     }
-  }, [sessionKey, agentId]);
+  }, [sessionKey, agentId, surfaceApproval]);
 
   useEffect(() => {
     void refresh();
@@ -50,6 +64,9 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
         setRequests((current) => isQueueToolRequestVisible(data.request)
           ? upsertToolRequest(current, data.request)
           : current.filter((request) => request.id !== data.request.id));
+        if (data.action === "created" || data.action === "ingested") {
+          surfaceApproval(data.request);
+        }
         void refresh();
       }
     };
@@ -65,6 +82,7 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
       const response = await approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated", actor: decisionActor(clientIdentity) });
       if (!response.execution?.wroteToTerminal) throw new Error(response.message || "Broker did not execute the request.");
       if (request.kind !== "file-transfer") onRevealTerminal();
+      setAttentionRequest((current) => current?.id === request.id ? null : current);
       const result = await fetchToolRequestResult(request.id);
       setSummaries((current) => ({ ...current, [request.id]: toolResultSummary(result) }));
       await refresh();
@@ -80,6 +98,7 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
     setError(null);
     try {
       await rejectToolRequest(request.id, { actor: decisionActor(clientIdentity) });
+      setAttentionRequest((current) => current?.id === request.id ? null : current);
       await refresh();
     } catch (rejectError) {
       setError(rejectError instanceof Error ? rejectError.message : String(rejectError));
@@ -104,6 +123,39 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
 
   return (
     <section className="tool-queue">
+      {attentionRequest ? (
+        <div className="tool-approval-backdrop" role="presentation">
+          <div className="tool-approval-dialog" role="dialog" aria-modal="true" aria-label="Tool approval request">
+            <div className="tool-approval-header">
+              <BellRing size={18} />
+              <div>
+                <strong>{toolRequestTitle(attentionRequest)}</strong>
+                <small>{attentionRequest.source || "unknown"} · {attentionRequest.status}</small>
+              </div>
+              <button type="button" className="icon-button small" title="Dismiss" onClick={() => setAttentionRequest(null)}>
+                <X size={15} />
+              </button>
+            </div>
+            <div className="tool-approval-body">
+              <p className={`target-pill ${attentionRequest.target}`}>Target: {targetLabels[attentionRequest.target]}</p>
+              {attentionRequest.risk ? <p className={`risk-pill ${attentionRequest.risk.level}`}>Risk: {attentionRequest.risk.level}{attentionRequest.risk.reasons.length ? ` · ${attentionRequest.risk.reasons.join("; ")}` : ""}</p> : null}
+              {attentionRequest.reason ? <p>{attentionRequest.reason}</p> : null}
+              <code>{toolRequestCode(attentionRequest)}</code>
+            </div>
+            <div className="tool-approval-actions">
+              <button type="button" className="secondary-button" onClick={() => setAttentionRequest(null)}>
+                Later
+              </button>
+              <button type="button" className="secondary-button danger" disabled={busy[attentionRequest.id] || attentionRequest.status !== "pending"} onClick={() => void rejectRequest(attentionRequest)}>
+                Reject
+              </button>
+              <button type="button" className="primary-button" disabled={busy[attentionRequest.id] || attentionRequest.status !== "pending" || !toolRequestSupported(attentionRequest)} onClick={() => void runRequest(attentionRequest)}>
+                Approve
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="panel-heading compact">
         <div>
           <h2>Tool Queue</h2>
@@ -169,19 +221,6 @@ function decisionActor(identity: ClientIdentity | null): ToolDecisionActor {
   };
 }
 
-const targetLabels: Record<ToolTarget, string> = {
-  "local-user-machine": "用户本机",
-  "remote-agent-host": "远端 Agent 机器",
-  "gateway-managed": "Gateway 托管"
-};
-
-function toolRequestSupported(request: ToolRequestRecord): boolean {
-  if (request.kind === "adapter-install") return request.target === "remote-agent-host";
-  if (request.kind === "file-transfer") return request.target === "local-user-machine" || request.target === "remote-agent-host";
-  if (request.kind === "terminal") return request.target === "local-user-machine";
-  return false;
-}
-
 function unsupportedTargetMessage(request: ToolRequestRecord): string {
   if (request.target === "remote-agent-host") {
     return `${toolRequestTitle(request)} 当前不支持直接在远端执行，不能退化到用户本机执行。`;
@@ -192,6 +231,8 @@ function unsupportedTargetMessage(request: ToolRequestRecord): string {
 function toolRequestTitle(request: ToolRequestRecord): string {
   if (request.kind === "file-transfer") return "File transfer";
   if (request.kind === "adapter-install") return "Adapter install";
+  if (request.kind === "skill-install") return "Skill install";
+  if (request.kind === "skill-verify") return "Skill verify";
   return "Terminal command";
 }
 
@@ -207,8 +248,16 @@ function toolRequestCode(request: ToolRequestRecord): string {
   }
   if (request.kind === "adapter-install") {
     return [
-      `installDir: ${typeof request.payload.installDir === "string" ? request.payload.installDir : "~/.openclaw/detaches_agent"}`,
+      `installDir: ${typeof request.payload.installDir === "string" ? request.payload.installDir : "~/.detach_agent"}`,
       "action: install detaches adapter on remote-agent-host"
+    ].join("\n");
+  }
+  if (request.kind === "skill-install" || request.kind === "skill-verify") {
+    return [
+      `skillName: ${typeof request.payload.skillName === "string" ? request.payload.skillName : "detach-agent-relationship"}`,
+      `targetAgent: ${typeof request.payload.targetAgent === "string" ? request.payload.targetAgent : "openclaw"}`,
+      `targetDir: ${typeof request.payload.targetDir === "string" ? request.payload.targetDir : "~/.openclaw/skills"}`,
+      `action: ${request.kind === "skill-install" ? "install/update host skill" : "verify host skill"}`
     ].join("\n");
   }
   return [
@@ -221,18 +270,6 @@ function upsertToolRequest(current: ToolRequestRecord[], next: ToolRequestRecord
   const index = current.findIndex((request) => request.id === next.id);
   if (index === -1) return [next, ...current];
   return current.map((request, itemIndex) => itemIndex === index ? next : request);
-}
-
-function isQueueToolRequestVisible(request: ToolRequestRecord): boolean {
-  if (request.status === "pending" || request.status === "running" || request.status === "blocked") return true;
-  if (request.status !== "failed") return false;
-  if (
-    request.kind === "file-transfer"
-    && /staged file not found|already transferred/i.test(request.error || "")
-  ) {
-    return false;
-  }
-  return true;
 }
 
 function toolResultSummary(response: ToolExecutionResultResponse): string {

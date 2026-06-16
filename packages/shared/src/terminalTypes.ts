@@ -9,6 +9,24 @@ export interface TerminalInfo {
   command: string;
 }
 
+export interface LocalTerminalApp {
+  id: string;
+  name: string;
+  appPath: string;
+  available: boolean;
+}
+
+export interface LocalTerminalAppsResponse {
+  apps: LocalTerminalApp[];
+  platform: string;
+}
+
+export interface LocalTerminalOpenResponse {
+  ok: boolean;
+  app: LocalTerminalApp;
+  message: string;
+}
+
 export type TerminalSocketServerEvent =
   | { type: "ready"; terminal: TerminalInfo; replay: string }
   | { type: "data"; data: string }

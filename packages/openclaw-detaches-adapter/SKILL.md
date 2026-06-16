@@ -16,25 +16,25 @@ detaches_agent is a local UI and approval broker running on the user's computer.
 2. On the real OpenClaw agent host, run the agent-side doctor. Prefer the one-step URL flow when a fresh export URL is available:
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --url "$DETACHES_CONTEXT_EXPORT_URL" --output-context /tmp/detaches-client-context.json
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --url "$DETACHES_CONTEXT_EXPORT_URL" --output-context /tmp/detaches-client-context.json
 ```
 
 3. If you already saved the context, run doctor against the file:
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --context /tmp/detaches-client-context.json
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --context /tmp/detaches-client-context.json
 ```
 
 4. If you need raw diagnostics, inspect the context:
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs inspect-context /tmp/detaches-client-context.json
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs inspect-context /tmp/detaches-client-context.json
 ```
 
 5. Prefer structured broker events over fenced text:
 
 ```sh
-node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs terminal-request \
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-request \
   --context /tmp/detaches-client-context.json \
   --target local-user-machine \
   --command pwd \

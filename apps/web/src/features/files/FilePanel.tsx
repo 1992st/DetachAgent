@@ -3,6 +3,7 @@ import type { ClientIdentity, DiagnosticItem, UploadedFileRef } from "@detaches/
 import { downloadUrl } from "../../lib/api.js";
 import { AdapterStatusPanel } from "../adapters/AdapterStatusPanel.js";
 import { DiagnosticsPanel } from "../connection/DiagnosticsPanel.js";
+import { SkillInstallPanel } from "../skills/SkillInstallPanel.js";
 import { ToolQueuePanel } from "../tools/ToolQueuePanel.js";
 
 interface Props {
@@ -39,6 +40,7 @@ export function FilePanel({
   return (
     <aside className="file-panel">
       <DiagnosticsPanel items={diagnostics} loading={diagnosticsLoading} error={diagnosticsError} onRefresh={onDiagnosticsRefresh} />
+      <SkillInstallPanel sessionKey={sessionKey} agentId={agentId} />
       <AdapterStatusPanel sessionKey={sessionKey} agentId={agentId} />
       <ToolQueuePanel sessionKey={sessionKey} agentId={agentId} clientIdentity={clientIdentity} onRevealTerminal={onRevealTerminal} />
       <div className="panel-heading">

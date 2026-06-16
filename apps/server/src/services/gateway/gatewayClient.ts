@@ -55,6 +55,11 @@ export class GatewayClient extends EventEmitter {
     }
   }
 
+  async quickHealth(timeoutMs = 3000): Promise<unknown> {
+    await this.connectWithTimeout(timeoutMs);
+    return this.request("health", undefined, timeoutMs, false);
+  }
+
   async listSessions(limit = 50): Promise<unknown> {
     await this.connect();
     return this.request("sessions.list", { includeGlobal: true, includeUnknown: true, limit }, 15000);
@@ -165,6 +170,8 @@ export class GatewayClient extends EventEmitter {
     this.socket?.close();
     this.socket = null;
     this.connected = false;
+    this.hello = null;
+    this.chatSendClientContextSupported = null;
     this.rejectAll(new Error("Gateway disconnected."));
   }
 
@@ -173,9 +180,9 @@ export class GatewayClient extends EventEmitter {
     if (config.gatewayTransport === "ssh") {
       await sshTunnelService.ensure();
     }
-    const gatewayHost = config.gatewayTransport === "direct" ? config.gatewayDirectHost : "127.0.0.1";
-    const gatewayPort = config.gatewayTransport === "direct" ? config.gatewayRemotePort : config.gatewayLocalPort;
-    const url = `ws://${gatewayHost}:${gatewayPort}`;
+    const url = config.gatewayTransport === "direct"
+      ? resolveDirectGatewayUrl(config.gatewayDirectUrl, config.gatewayDirectHost, config.gatewayRemotePort)
+      : `ws://127.0.0.1:${config.gatewayLocalPort}`;
     await new Promise<void>((resolve, reject) => {
       const socket = new WebSocket(url, { maxPayload: 16 * 1024 * 1024 });
       let settled = false;
@@ -192,12 +199,12 @@ export class GatewayClient extends EventEmitter {
         cleanup();
         this.lastError = error.message;
         this.connected = false;
+        this.hello = null;
         if (this.socket === socket) this.socket = null;
-        try {
-          socket.close();
-        } catch {
-          // Ignore cleanup failures; the next connection attempt will create a fresh socket.
-        }
+        socket.once("error", () => {
+          // Swallow cleanup-time ws errors; the original connection error is already rejected.
+        });
+        socket.terminate();
         reject(error);
       };
       const onClose = () => {
@@ -221,6 +228,10 @@ export class GatewayClient extends EventEmitter {
       this.on("hello", onHello);
       connectTimer = setTimeout(() => fail(new Error("Gateway connect timed out.")), 12000);
     });
+  }
+
+  private async connectWithTimeout(timeoutMs: number): Promise<void> {
+    return withTimeout(this.connect(), timeoutMs, "Gateway quick health timed out.");
   }
 
   private installHandlers(socket: WebSocket): void {
@@ -393,7 +404,26 @@ function isClientContextUnsupportedError(error: unknown): boolean {
   return /invalid\s+chat\.send\s+params/i.test(message) && /unexpected\s+property\s+['"]?clientContext['"]?/i.test(message);
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 export const gatewayClient = new GatewayClient();
+
+export function resolveDirectGatewayUrl(gatewayDirectUrl: string, gatewayDirectHost: string, gatewayRemotePort: number): string {
+  const directUrl = gatewayDirectUrl.trim();
+  if (directUrl) {
+    if (/^https:\/\//i.test(directUrl)) return directUrl.replace(/^https:/i, "wss:");
+    if (/^http:\/\//i.test(directUrl)) return directUrl.replace(/^http:/i, "ws:");
+    if (/^wss?:\/\//i.test(directUrl)) return directUrl;
+    return `wss://${directUrl}`;
+  }
+  return `ws://${gatewayDirectHost}:${gatewayRemotePort}`;
+}
 
 function methodsFromHello(hello: GatewayHello | null): string[] {
   const rawMethods = (hello?.features as any)?.methods;

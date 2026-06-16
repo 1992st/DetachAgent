@@ -1,17 +1,30 @@
 import { FormEvent, forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { Copy, Eraser, TerminalSquare } from "lucide-react";
+import { Copy, Eraser, Minimize2, TerminalSquare, X } from "lucide-react";
 import type { TerminalInfo, TerminalSocketServerEvent } from "@detaches/shared";
 
 interface Props {
   sessionKey: string | null;
+  title?: string;
+  emptyText?: string;
+  className?: string;
+  autoOpenKey?: string | null;
+  onClose?: () => void;
 }
 
 export interface TerminalPanelHandle {
   reveal: () => void;
 }
 
-export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPanel({ sessionKey }, ref) {
+export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function TerminalPanel({
+  sessionKey,
+  title = "Agent Control Terminal",
+  emptyText = "Local control terminal is connected for this conversation. Commands approved from cloud agent messages will run here.",
+  className = "",
+  autoOpenKey = null,
+  onClose
+}, ref) {
   const [open, setOpen] = useState(false);
+  const [minimized, setMinimized] = useState(false);
   const [status, setStatus] = useState<TerminalInfo | null>(null);
   const [output, setOutput] = useState("");
   const [input, setInput] = useState("");
@@ -22,6 +35,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
   useImperativeHandle(ref, () => ({
     reveal() {
       setOpen(true);
+      setMinimized(false);
     }
   }), []);
 
@@ -64,6 +78,12 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
     outputRef.current.scrollTop = outputRef.current.scrollHeight;
   }, [output]);
 
+  useEffect(() => {
+    if (!autoOpenKey || !sessionKey) return;
+    setOpen(true);
+    setMinimized(false);
+  }, [autoOpenKey, sessionKey]);
+
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!input || socketRef.current?.readyState !== WebSocket.OPEN) return;
@@ -76,17 +96,25 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
   }
 
   return (
-    <section className={`terminal-panel ${open ? "open" : ""}`}>
+    <section className={`terminal-panel ${className} ${open ? "open" : ""} ${minimized ? "minimized" : ""}`}>
       <button type="button" className="terminal-toggle" onClick={() => setOpen((value) => !value)} disabled={!sessionKey}>
         <TerminalSquare size={16} />
-        <span>Agent Terminal</span>
+        <span>{title}</span>
         <small>{status?.status ?? socketState}</small>
       </button>
-      {open ? (
-        <div className="terminal-body">
+      {open && minimized ? (
+        <button type="button" className="terminal-mini" onClick={() => setMinimized(false)} disabled={!sessionKey}>
+          <TerminalSquare size={15} />
+          <span>{title}</span>
+          <small>{status?.status ?? socketState}</small>
+        </button>
+      ) : null}
+      {open && !minimized ? (
+        <div className="terminal-popover" role="dialog" aria-label="Local terminal">
+          <div className="terminal-body">
           <div className="terminal-toolbar">
             <div>
-              <strong>{status?.terminalId ?? "terminal"}</strong>
+              <strong>{title}</strong>
               <small>{sessionKey}</small>
             </div>
             <div className="terminal-actions">
@@ -96,9 +124,23 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
               <button type="button" className="icon-button" title="Clear view" onClick={() => setOutput("")}>
                 <Eraser size={15} />
               </button>
+              <button type="button" className="icon-button" title="缩小 terminal" onClick={() => setMinimized(true)}>
+                <Minimize2 size={15} />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                title="关闭 terminal"
+                onClick={() => {
+                  setOpen(false);
+                  onClose?.();
+                }}
+              >
+                <X size={15} />
+              </button>
             </div>
           </div>
-          <pre className="terminal-output" ref={outputRef}>{output || "Local terminal is connected for this conversation. Commands approved from agent messages will run here."}</pre>
+          <pre className="terminal-output" ref={outputRef}>{output || emptyText}</pre>
           <form className="terminal-input-row" onSubmit={submit}>
             <input
               value={input}
@@ -108,6 +150,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
             />
             <button className="secondary-button" disabled={!input || socketRef.current?.readyState !== WebSocket.OPEN}>Enter</button>
           </form>
+          </div>
         </div>
       ) : null}
     </section>

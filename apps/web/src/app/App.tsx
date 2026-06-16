@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentSummary, AppHealth, ChatSessionMode, ClientIdentity, DiagnosticItem, UploadedFileRef } from "@detaches/shared";
-import { fetchAgents, fetchClientIdentity, fetchDiagnostics, fetchHealth, uploadFile } from "../lib/api.js";
+import type { AgentSummary, AppHealth, ChatSessionMode, ClientIdentity, DiagnosticItem, LocalTerminalApp, UploadedFileRef } from "@detaches/shared";
+import { fetchAgents, fetchClientIdentity, fetchDiagnostics, fetchHealth, fetchLocalTerminalApps, openLocalTerminalApp, uploadFile } from "../lib/api.js";
 import { ConnectionBar } from "../features/connection/ConnectionBar.js";
 import { AgentList } from "../features/agents/AgentList.js";
 import { ChatPanel, type ChatPanelHandle } from "../features/chat/ChatPanel.js";
@@ -28,6 +28,9 @@ export function App() {
   const [uploading, setUploading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [remotePath, setRemotePath] = useState("");
+  const [terminalApps, setTerminalApps] = useState<LocalTerminalApp[]>([]);
+  const [terminalAppsLoading, setTerminalAppsLoading] = useState(false);
+  const [terminalAppsError, setTerminalAppsError] = useState<string | null>(null);
   const chatPanelRef = useRef<ChatPanelHandle | null>(null);
 
   const refreshHealth = useCallback(async () => {
@@ -90,6 +93,28 @@ export function App() {
   const selectedSession = selectedAgent ? sessionKeyForAgent(selectedAgent, sessionMode, clientIdentity) : null;
   const attachments = selectedSession ? attachmentsBySession[selectedSession] ?? [] : [];
 
+  const loadTerminalApps = useCallback(async () => {
+    setTerminalAppsLoading(true);
+    setTerminalAppsError(null);
+    try {
+      const response = await fetchLocalTerminalApps();
+      setTerminalApps(response.apps);
+    } catch (error) {
+      setTerminalAppsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTerminalAppsLoading(false);
+    }
+  }, []);
+
+  const openTerminalApp = useCallback(async (appId: string) => {
+    setTerminalAppsError(null);
+    try {
+      await openLocalTerminalApp(appId);
+    } catch (error) {
+      setTerminalAppsError(error instanceof Error ? error.message : String(error));
+    }
+  }, []);
+
   async function handleUpload(files: FileList) {
     if (!selectedSession) return;
     setUploading(true);
@@ -113,10 +138,23 @@ export function App() {
 
   return (
     <div className="shell">
-      <ConnectionBar health={health} loading={healthLoading} error={healthError} onRefresh={refreshHealth} />
+      <ConnectionBar
+        health={health}
+        loading={healthLoading}
+        error={healthError}
+        onRefresh={refreshHealth}
+        terminalApps={terminalApps}
+        terminalAppsLoading={terminalAppsLoading}
+        terminalAppsError={terminalAppsError}
+        onLoadTerminalApps={loadTerminalApps}
+        onOpenTerminalApp={(appId) => void openTerminalApp(appId)}
+      />
       <nav className="view-tabs" aria-label="Main views">
-        <button className={view === "chat" ? "active" : ""} onClick={() => setView("chat")}>聊天</button>
-        <button className={view === "network" ? "active" : ""} onClick={() => setView("network")}>网络与 SSH</button>
+        <div className="view-tab-buttons">
+          <button className={view === "chat" ? "active" : ""} onClick={() => setView("chat")}>聊天</button>
+          <button className={view === "network" ? "active" : ""} onClick={() => setView("network")}>网络与 SSH</button>
+        </div>
+        <div className="top-debug-terminal-slot" />
       </nav>
       {view === "chat" ? (
         <div className="workspace">

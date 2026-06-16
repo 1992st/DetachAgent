@@ -9,6 +9,7 @@ export interface RemoteProfile {
   reverseBridgeRemotePort: number;
   gatewayTransport: "ssh" | "direct";
   gatewayDirectHost: string;
+  gatewayDirectUrl: string;
   gatewayRemotePort: number;
   gatewayLocalPort: number;
   authMode: "token" | "password" | "none";
@@ -35,6 +36,7 @@ export interface RemoteProfileUpdate {
   reverseBridgeRemotePort?: number;
   gatewayTransport?: "ssh" | "direct";
   gatewayDirectHost?: string;
+  gatewayDirectUrl?: string;
   gatewayRemotePort?: number;
   gatewayLocalPort?: number;
   authMode?: "token" | "password" | "none";

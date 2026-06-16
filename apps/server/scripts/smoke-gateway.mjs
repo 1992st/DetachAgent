@@ -349,11 +349,12 @@ async function main() {
     assert.equal(JSON.parse(adapterProbe.stdout).ok, true);
 
     const agents = await requestJson("/api/agents");
-    assert.equal(agents.agents.length, 2);
-    assert.equal(agents.source, "gateway-agents+sessions");
-    assert.deepEqual(agents.agents.map((agent) => agent.sessionKey), [
-      "agent:agent-alpha:main",
-      "agent:agent-gamma:main"
+    assert.equal(agents.agents.length, 3);
+    assert.equal(agents.source, "gateway-agents-rpc+sessions");
+    assert.deepEqual(agents.agents.map((agent) => agent.id).sort(), [
+      "agent-alpha",
+      "agent-beta",
+      "agent-gamma"
     ]);
 
     const uploadForm = new FormData();
@@ -434,7 +435,7 @@ async function main() {
     assert.equal(adapterBundle.status, 200);
     assert.equal(adapterBundle.headers.get("content-type"), "application/gzip");
     assert.equal((await adapterBundle.arrayBuffer()).byteLength, adapterInfo.bundle.size);
-    const adapterInstallPlan = await requestJson(`/api/adapters/openclaw-detaches/install-plan?baseUrl=${encodeURIComponent(`http://${host}:${serverPort}`)}&installDir=${encodeURIComponent("~/.openclaw/detaches_agent_smoke")}`);
+    const adapterInstallPlan = await requestJson(`/api/adapters/openclaw-detaches/install-plan?baseUrl=${encodeURIComponent(`http://${host}:${serverPort}`)}&installDir=${encodeURIComponent("~/.detach_agent_smoke")}`);
     assert.equal(adapterInstallPlan.target, "remote-agent-host");
     assert.equal(adapterInstallPlan.adapterId, "detaches_agent.openclaw.adapter");
     assert.equal(adapterInstallPlan.workspaceDir, "~/.openclaw/workspace");
@@ -460,7 +461,7 @@ async function main() {
     assert.equal(missingAdapterReadiness.target, "remote-agent-host");
     assert.equal(missingAdapterReadiness.state, "missing");
     assert.equal(missingAdapterReadiness.checks.some((check) => check.id === "install-dir" && check.state === "missing"), true);
-    const remoteProbeWithoutUser = await requestJson(`/api/adapters/openclaw-detaches/readiness?probe=remote-ssh&installDir=${encodeURIComponent("~/.openclaw/detaches_agent")}`);
+    const remoteProbeWithoutUser = await requestJson(`/api/adapters/openclaw-detaches/readiness?probe=remote-ssh&installDir=${encodeURIComponent("~/.detach_agent")}`);
     assert.equal(remoteProbeWithoutUser.target, "remote-agent-host");
     assert.equal(remoteProbeWithoutUser.probe, "remote-ssh");
     assert.equal(remoteProbeWithoutUser.state, "error");
@@ -490,7 +491,6 @@ async function main() {
     assert.match(userChatSend.message, /detaches_agent 接入上下文/);
     assert.match(userChatSend.message, /agentId: agent-alpha/);
     assert.match(userChatSend.message, /remoteAdapter: state=error/);
-    assert.match(userChatSend.message, /clientContext\.detaches/);
     assert.match(userChatSend.message, /contextExport\.consumeUrl/);
     assert.match(userChatSend.message, /doctor --url/);
     assert.doesNotMatch(userChatSend.message, new RegExp(`toolBroker: gatewayEventEndpoint=${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
@@ -759,7 +759,7 @@ async function main() {
         sessionKey: chatSessionKey,
         agentId: "agent-alpha",
         reason: "smoke adapter install approval",
-        payload: { installDir: "~/.openclaw/detaches_agent_smoke" }
+        payload: { installDir: "~/.detach_agent_smoke" }
       })
     });
     assert.equal(adapterInstallTool.request.status, "pending");

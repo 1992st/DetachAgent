@@ -1,5 +1,5 @@
-import { FormEvent, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { Check, Copy, Eye, FileText, Paperclip, Send, Square, X } from "lucide-react";
+import { type CSSProperties, FormEvent, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { Check, Copy, Eye, FileText, List, Minus, Paperclip, Plus, Send, Square, X } from "lucide-react";
 import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
 import { approveToolRequest, extractToolRequests, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward } from "../../lib/api.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
@@ -13,6 +13,16 @@ interface Props {
   onSessionModeChange: (mode: ChatSessionMode) => void;
   onClearAttachments: () => void;
   onNeedUpload: (files: FileList) => void;
+}
+
+type LogLevel = "debug" | "info" | "warn" | "error";
+
+interface LogEntry {
+  id: string;
+  at: string;
+  level: LogLevel;
+  event: string;
+  detail?: unknown;
 }
 
 export interface ChatPanelHandle {
@@ -35,10 +45,17 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [attachmentContext, setAttachmentContext] = useState("");
   const [attachmentContextOpen, setAttachmentContextOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [chatFontSize, setChatFontSize] = useState(() => {
+    const saved = Number(window.localStorage.getItem("detaches.chatFontSize"));
+    return Number.isFinite(saved) && saved >= 12 && saved <= 20 ? saved : 14;
+  });
   const socketRef = useRef<WebSocket | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<TerminalPanelHandle | null>(null);
+  const logStreamRef = useRef<HTMLDivElement | null>(null);
 
   useImperativeHandle(ref, () => ({
     revealTerminal: () => terminalRef.current?.reveal()
@@ -50,6 +67,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     socketRef.current?.close();
     if (!sessionKey) {
       setSocketState("idle");
+      appendLog("info", "session-idle", { sessionKey });
       return;
     }
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -57,27 +75,45 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     const ws = new WebSocket(`${protocol}://${window.location.host}/api/chat/${encodeURIComponent(sessionKey)}?${params}`);
     socketRef.current = ws;
     setSocketState("connecting");
-    ws.onopen = () => setSocketState("connected");
-    ws.onclose = () => setSocketState("closed");
-    ws.onerror = () => setSocketState("error");
+    appendLog("info", "socket-connecting", { sessionKey, sessionMode });
+    ws.onopen = () => {
+      setSocketState("connected");
+      appendLog("info", "socket-connected", { sessionKey, sessionMode });
+    };
+    ws.onclose = (event) => {
+      setSocketState("closed");
+      appendLog("warn", "socket-closed", { code: event.code, reason: event.reason, wasClean: event.wasClean });
+    };
+    ws.onerror = () => {
+      setSocketState("error");
+      appendLog("error", "socket-error", { sessionKey, sessionMode });
+    };
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data) as ChatSocketServerEvent;
+      appendLog("debug", "socket-message", { type: data.type });
       if (data.type === "history") {
         setMessages(data.payload.messages);
+        appendLog("info", "history-loaded", { count: data.payload.messages.length });
       } else if (data.type === "chat") {
         if (isPayloadForSession(data.payload, sessionKey)) {
           setMessages((current) => upsertGatewayChat(current, data.payload));
+          appendLog("debug", "chat-upserted", { sessionKey });
         }
       } else if (data.type === "sent") {
         setLastRunId(data.payload.runId ?? null);
+        appendLog("info", "message-sent-ack", data.payload);
       } else if (data.type === "error") {
         setMessages((current) => [
           ...current,
           { id: crypto.randomUUID(), role: "system", text: data.message, timestamp: new Date().toISOString() }
         ]);
+        appendLog("error", "server-error", { message: data.message });
       }
     };
-    return () => ws.close();
+    return () => {
+      appendLog("debug", "socket-cleanup", { sessionKey, sessionMode });
+      ws.close();
+    };
   }, [sessionKey, sessionMode]);
 
   useEffect(() => {
@@ -90,20 +126,61 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     const nextContext = buildDefaultAttachmentContext(attachments);
     setAttachmentContext(nextContext);
     if (!nextContext) setAttachmentContextOpen(false);
+    if (attachments.length) appendLog("info", "attachments-ready", attachments.map((file) => ({ id: file.id, name: file.name, size: file.size })));
   }, [attachments]);
 
+  useEffect(() => {
+    const el = logStreamRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [logs, logOpen]);
+
   const canSend = useMemo(() => Boolean(sessionKey && draft.trim() && socketRef.current?.readyState === WebSocket.OPEN), [sessionKey, draft, socketState]);
+  const messagesStyle = useMemo(() => ({
+    "--chat-message-font-size": `${chatFontSize}px`
+  }) as CSSProperties, [chatFontSize]);
+
+  function updateChatFontSize(next: number) {
+    const clamped = Math.max(12, Math.min(20, next));
+    setChatFontSize(clamped);
+    window.localStorage.setItem("detaches.chatFontSize", String(clamped));
+    appendLog("debug", "chat-font-size", { size: clamped });
+  }
+
+  function appendLog(level: LogLevel, event: string, detail?: unknown) {
+    setLogs((current) => {
+      const next = [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          at: new Date().toISOString(),
+          level,
+          event,
+          detail
+        }
+      ];
+      return next.length > 500 ? next.slice(next.length - 500) : next;
+    });
+  }
 
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!canSend) return;
     const text = draft.trim();
+    const idempotencyKey = crypto.randomUUID();
+    appendLog("info", "chat-send", {
+      sessionKey,
+      sessionMode,
+      idempotencyKey,
+      messageLength: text.length,
+      attachmentCount: attachments.length
+    });
     socketRef.current?.send(JSON.stringify({
       type: "send",
       message: text,
       attachments,
       attachmentContextOverride: attachments.length ? attachmentContext : undefined,
-      idempotencyKey: crypto.randomUUID()
+      idempotencyKey
     }));
     setMessages((current) => [
       ...current,
@@ -121,11 +198,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
 
   function abort() {
     if (!lastRunId) return;
+    appendLog("warn", "abort-run", { runId: lastRunId });
     socketRef.current?.send(JSON.stringify({ type: "abort", runId: lastRunId }));
   }
 
   async function copyMessage(message: ChatMessage) {
     await navigator.clipboard.writeText(messageText(message));
+    appendLog("debug", "message-copied", { id: message.id, role: message.role });
   }
 
   return (
@@ -155,12 +234,49 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
               主会话
             </button>
           </div>
+          <div className="font-size-control" aria-label="Chat font size">
+            <button type="button" className="icon-button small" title="减小聊天字体" onClick={() => updateChatFontSize(chatFontSize - 1)} disabled={chatFontSize <= 12}>
+              <Minus size={14} />
+            </button>
+            <span>{chatFontSize}px</span>
+            <button type="button" className="icon-button small" title="放大聊天字体" onClick={() => updateChatFontSize(chatFontSize + 1)} disabled={chatFontSize >= 20}>
+              <Plus size={14} />
+            </button>
+          </div>
+          <button className="icon-button" onClick={() => setLogOpen(true)} title="查看实时 Log">
+            <List size={16} />
+          </button>
           <button className="icon-button" disabled={!lastRunId} onClick={abort} title="Stop generation">
             <Square size={16} />
           </button>
         </div>
       </div>
-      <div className="messages" ref={messagesRef}>
+      {logOpen ? (
+        <section className="log-console" aria-label="实时 Log 控制台">
+          <div className="log-console-header">
+            <div>
+              <strong>实时 Log</strong>
+              <small>{logs.length} 条记录</small>
+            </div>
+            <div className="log-console-actions">
+              <button type="button" className="secondary-button compact" onClick={() => setLogs([])}>清空</button>
+              <button type="button" className="icon-button small" title="关闭 Log" onClick={() => setLogOpen(false)}>
+                <X size={15} />
+              </button>
+            </div>
+          </div>
+          <div className="log-console-stream" ref={logStreamRef}>
+            {logs.length ? logs.map((entry) => (
+              <div className={`log-console-row ${entry.level}`} key={entry.id}>
+                <span>{new Date(entry.at).toLocaleTimeString("zh-CN", { hour12: false })}</span>
+                <strong>{entry.event}</strong>
+                {entry.detail === undefined ? null : <code>{formatLogDetail(entry.detail)}</code>}
+              </div>
+            )) : <p>暂无日志。发送消息、接收响应、上传附件或处理工具请求后会实时出现。</p>}
+          </div>
+        </section>
+      ) : null}
+      <div className="messages" ref={messagesRef} style={messagesStyle}>
         {messages.map((message) => (
           <article className={`message ${message.role}`} key={message.id}>
             <div className="message-meta">
@@ -178,6 +294,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
               sourceRunId={message.runId}
               clientIdentity={clientIdentity}
               onReveal={() => terminalRef.current?.reveal()}
+              onLog={appendLog}
             />
             {message.attachments?.map((attachment) => (
               <small className="attachment-chip" key={`${message.id}-${attachment.name}`}>{attachment.name}</small>
@@ -186,7 +303,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
         ))}
         {!sessionKey ? <div className="empty-state large">左侧选择一个远端 Agent 后开始聊天。</div> : null}
       </div>
-      <TerminalPanel ref={terminalRef} sessionKey={sessionKey} />
+      <TerminalPanel
+        ref={terminalRef}
+        sessionKey={sessionKey}
+        title="Agent Control Terminal"
+        emptyText="这个终端用于观察 Cloud Agent 在本机执行的审批后操作。"
+      />
       <form className="composer" onSubmit={submit}>
         {attachments.length ? (
           <div className="attachment-context-panel">
@@ -275,7 +397,8 @@ function ToolRequests({
   sourceMessageId,
   sourceRunId,
   clientIdentity,
-  onReveal
+  onReveal,
+  onLog
 }: {
   text: string;
   sessionKey: string | null;
@@ -284,6 +407,7 @@ function ToolRequests({
   sourceRunId?: string;
   clientIdentity: ClientIdentity | null;
   onReveal: () => void;
+  onLog: (level: LogLevel, event: string, detail?: unknown) => void;
 }) {
   const [requests, setRequests] = useState<ToolRequestRecord[]>([]);
   const [handled, setHandled] = useState<Record<number, "approved" | "rejected" | "running" | "error" | "blocked">>({});
@@ -308,6 +432,12 @@ function ToolRequests({
       })
       .then((mergedRequests) => {
         setRequests(mergedRequests);
+        if (mergedRequests.length) onLog("info", "tool-requests-detected", mergedRequests.map((request) => ({
+          id: request.id,
+          kind: request.kind,
+          target: request.target,
+          status: request.status
+        })));
         const nextHandled: Record<number, "blocked"> = {};
         const nextErrors: Record<number, string> = {};
         mergedRequests.forEach((request, index) => {
@@ -319,7 +449,10 @@ function ToolRequests({
         setHandled(nextHandled);
         setErrors(nextErrors);
       })
-      .catch((error) => setErrors({ 0: error instanceof Error ? error.message : String(error) }));
+      .catch((error) => {
+        onLog("error", "tool-requests-load-failed", error);
+        setErrors({ 0: error instanceof Error ? error.message : String(error) });
+      });
     void loadRequests();
   }, [text, sessionKey, agentId, sourceMessageId, sourceRunId]);
   if (!requests.length && !errors[0]) return null;
@@ -351,19 +484,23 @@ function ToolRequests({
                 disabled={unsupported || Boolean(state && state !== "error")}
                 onClick={() => {
                   if (!confirmElevatedRisk(request)) return;
+                  onLog("info", "tool-request-approve", { id: request.id, kind: request.kind, target: request.target });
                   setHandled((current) => ({ ...current, [index]: "running" }));
                   approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated", actor: decisionActor(clientIdentity) })
                     .then((response) => {
                       if (!response.execution?.wroteToTerminal) throw new Error(response.message || "Broker did not execute the request.");
                       if (request.kind !== "file-transfer") onReveal();
+                      onLog("info", "tool-request-approved", { id: request.id, execution: response.execution });
                       setHandled((current) => ({ ...current, [index]: "approved" }));
                       return fetchToolRequestResult(request.id);
                     })
                     .then((response) => {
                       if (!response) return;
+                      onLog("info", "tool-result-fetched", { id: request.id, result: response.result });
                       setResultSummaries((current) => ({ ...current, [index]: toolResultSummary(response) }));
                     })
                     .catch((error) => {
+                      onLog("error", "tool-request-approve-failed", { id: request.id, error });
                       setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
                       setHandled((current) => ({ ...current, [index]: "error" }));
                     });
@@ -381,6 +518,7 @@ function ToolRequests({
                 className="secondary-button"
                 disabled={Boolean(state && state !== "error")}
                 onClick={() => {
+                  onLog("warn", "tool-request-reject", { id: request.id, kind: request.kind, target: request.target });
                   void rejectToolRequest(request.id, { actor: decisionActor(clientIdentity) });
                   setHandled((current) => ({ ...current, [index]: "rejected" }));
                 }}
@@ -397,9 +535,16 @@ function ToolRequests({
                   className="icon-button"
                   title="Retry result forward"
                   onClick={() => {
+                    onLog("info", "tool-result-forward-retry", { id: request.id });
                     retryToolResultForward(request.id)
-                      .then((response) => setResultSummaries((current) => ({ ...current, [index]: toolResultSummary(response) })))
-                      .catch((error) => setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) })));
+                      .then((response) => {
+                        onLog("info", "tool-result-forward-retried", { id: request.id, result: response.result });
+                        setResultSummaries((current) => ({ ...current, [index]: toolResultSummary(response) }));
+                      })
+                      .catch((error) => {
+                        onLog("error", "tool-result-forward-retry-failed", { id: request.id, error });
+                        setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
+                      });
                   }}
                 >
                   <Send size={15} />
@@ -420,6 +565,16 @@ function decisionActor(identity: ClientIdentity | null) {
     displayName: identity?.displayName,
     source: "detaches-ui" as const
   };
+}
+
+function formatLogDetail(value: unknown): string {
+  if (value instanceof Error) return value.stack || value.message;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function mergeToolRequests(primary: ToolRequestRecord[], updates: ToolRequestRecord[]): ToolRequestRecord[] {

@@ -1,4 +1,5 @@
 import type { AgentSummary, AgentsListResponse } from "@detaches/shared";
+import { runtimeConfig } from "../../config/settingsStore.js";
 import { discoverAgentsViaCli } from "./agentCliDiscoveryService.js";
 import { gatewayClient } from "./gatewayClient.js";
 
@@ -20,7 +21,7 @@ function buildAgentMainSessionKey(agentId: string): string {
   return `agent:${normalized}:main`;
 }
 
-function extractSessions(raw: unknown): any[] {
+export function extractSessions(raw: unknown): any[] {
   return Array.isArray((raw as any)?.sessions) ? (raw as any).sessions :
     Array.isArray((raw as any)?.items) ? (raw as any).items :
     Array.isArray((raw as any)?.previews) ? (raw as any).previews :
@@ -28,19 +29,19 @@ function extractSessions(raw: unknown): any[] {
     [];
 }
 
-function extractConfiguredAgents(raw: unknown): any[] {
+export function extractConfiguredAgents(raw: unknown): any[] {
   return Array.isArray((raw as any)?.agents) ? (raw as any).agents :
     Array.isArray((raw as any)?.items) ? (raw as any).items :
     Array.isArray(raw) ? raw as any[] :
     [];
 }
 
-function extractSnapshotAgents(raw: unknown): any[] {
+export function extractSnapshotAgents(raw: unknown): any[] {
   const snapshotHealth = (raw as any)?.snapshot?.health;
   return extractConfiguredAgents(snapshotHealth);
 }
 
-function summaryFromSession(item: any, index: number): AgentSummary {
+export function summaryFromSession(item: any, index: number): AgentSummary {
   const sessionKey = String(item.key ?? item.sessionKey ?? item.id ?? `session-${index + 1}`);
   const previewItems = Array.isArray(item.items) ? item.items : [];
   const preview = previewItems.map(textFromPreview).filter(Boolean).slice(-2).join(" / ") ||
@@ -65,7 +66,7 @@ function summaryFromSession(item: any, index: number): AgentSummary {
   };
 }
 
-function summaryFromConfiguredAgent(item: any): AgentSummary | null {
+export function summaryFromConfiguredAgent(item: any): AgentSummary | null {
   const id = String(item.id ?? item.agentId ?? "").trim();
   if (!id) return null;
   const identityName = typeof item.identity?.name === "string" ? item.identity.name : "";
@@ -84,8 +85,11 @@ function summaryFromConfiguredAgent(item: any): AgentSummary | null {
 export async function listAgents(): Promise<AgentsListResponse> {
   let sessionsRaw: unknown = null;
   let sessionsError: string | null = null;
+  let helloRaw: unknown = null;
   let agentsRaw: unknown = null;
   let agentsError: string | null = null;
+  let snapshotAgentsRaw: any[] = [];
+  let cliDiscovery: Awaited<ReturnType<typeof discoverAgentsViaCli>> | null = null;
   if (!gatewayClient.getHello()) {
     try {
       await gatewayClient.connect();
@@ -93,13 +97,55 @@ export async function listAgents(): Promise<AgentsListResponse> {
       agentsError = error instanceof Error ? error.message : String(error);
     }
   }
-  agentsRaw = gatewayClient.getHello();
+  helloRaw = gatewayClient.getHello();
 
-  const configured = extractSnapshotAgents(agentsRaw)
+  try {
+    agentsRaw = await gatewayClient.listAgents();
+  } catch (error) {
+    agentsError = error instanceof Error ? error.message : String(error);
+  }
+
+  const gatewayAgents = extractConfiguredAgents(agentsRaw)
     .map(summaryFromConfiguredAgent)
     .filter(Boolean) as AgentSummary[];
+  snapshotAgentsRaw = extractSnapshotAgents(helloRaw);
+  const snapshotAgents = snapshotAgentsRaw
+    .map(summaryFromConfiguredAgent)
+    .filter(Boolean) as AgentSummary[];
+  try {
+    sessionsRaw = await gatewayClient.listSessions(200);
+  } catch (error) {
+    sessionsError = error instanceof Error ? error.message : String(error);
+  }
   const sessions = extractSessions(sessionsRaw).map(summaryFromSession);
-  const cliDiscovery = await discoverAgentsViaCli();
+  const config = await runtimeConfig();
+  if (!gatewayAgents.length && agentsError && config.gatewayTransport === "ssh") {
+    cliDiscovery = await discoverAgentsViaCli();
+  }
+  const { agents, source } = buildAgentDirectory({
+    configured: gatewayAgents.length ? gatewayAgents : snapshotAgents,
+    sessions,
+    cliAgents: cliDiscovery?.agents ?? [],
+    configuredSource: gatewayAgents.length ? "gateway-agents-rpc" : snapshotAgents.length ? "gateway-agents" : undefined
+  });
+
+  return {
+    agents,
+    source,
+    raw: { hello: helloRaw, agents: agentsRaw, agentsError, snapshotAgents: snapshotAgentsRaw, sessions: sessionsRaw, sessionsError, cli: cliDiscovery }
+  };
+}
+
+export function buildAgentDirectory(input: {
+  configured?: AgentSummary[];
+  sessions?: AgentSummary[];
+  cliAgents?: AgentSummary[];
+  configuredSource?: "gateway-agents" | "gateway-agents-rpc";
+}): Pick<AgentsListResponse, "agents" | "source"> {
+  const configured = input.configured ?? [];
+  const sessions = input.sessions ?? [];
+  const cliAgents = input.cliAgents ?? [];
+  const configuredSource = input.configuredSource ?? "gateway-agents";
   const byAgentId = new Map<string, AgentSummary>();
   const sessionsByAgentId = new Map<string, AgentSummary[]>();
 
@@ -108,8 +154,7 @@ export async function listAgents(): Promise<AgentsListResponse> {
     sessionsByAgentId.set(key, [...(sessionsByAgentId.get(key) ?? []), session]);
   }
 
-  const primaryAgents = configured.length ? configured : cliDiscovery.agents;
-  for (const agent of primaryAgents) {
+  for (const agent of [...configured, ...cliAgents]) {
     byAgentId.set(agent.id.toLowerCase(), agent);
   }
   for (const session of sessions) {
@@ -143,7 +188,8 @@ export async function listAgents(): Promise<AgentsListResponse> {
 
   return {
     agents,
-    source: configured.length ? "gateway-agents+sessions" : cliDiscovery.agents.length ? "gateway-agents+sessions+ssh-cli" : "gateway-sessions",
-    raw: { agents: agentsRaw, agentsError, sessions: sessionsRaw, sessionsError, cli: cliDiscovery }
+    source: configured.length
+      ? configuredSource === "gateway-agents-rpc" ? "gateway-agents-rpc+sessions" : cliAgents.length ? "gateway-agents+sessions+ssh-cli" : "gateway-agents+sessions"
+      : cliAgents.length ? "gateway-agents+sessions+ssh-cli" : "gateway-sessions"
   };
 }

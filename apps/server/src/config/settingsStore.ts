@@ -13,6 +13,7 @@ export interface RuntimeSettings {
   reverseBridgeRemotePort: number;
   gatewayTransport: "ssh" | "direct";
   gatewayDirectHost: string;
+  gatewayDirectUrl: string;
   gatewayRemotePort: number;
   gatewayLocalPort: number;
   authMode: "token" | "password" | "none";
@@ -67,6 +68,7 @@ function defaultProfile(): PersistedProfile {
     reverseBridgeRemotePort: appConfig.reverseBridgeRemotePort,
     gatewayTransport: appConfig.gatewayTransport,
     gatewayDirectHost: appConfig.gatewayDirectHost,
+    gatewayDirectUrl: appConfig.gatewayDirectUrl,
     gatewayRemotePort: appConfig.gatewayRemotePort,
     gatewayLocalPort: appConfig.gatewayLocalPort,
     authMode: appConfig.authMode,
@@ -234,6 +236,8 @@ export class SettingsStore {
     if (reverseBridgeRemoteHost !== undefined) output.reverseBridgeRemoteHost = reverseBridgeRemoteHost || "127.0.0.1";
     const gatewayDirectHost = sanitizeString(input.gatewayDirectHost);
     if (gatewayDirectHost !== undefined) output.gatewayDirectHost = gatewayDirectHost;
+    const gatewayDirectUrl = sanitizeString(input.gatewayDirectUrl);
+    if (gatewayDirectUrl !== undefined) output.gatewayDirectUrl = gatewayDirectUrl.replace(/\/+$/, "");
     const remoteWorkspaceRoot = sanitizeString(input.remoteWorkspaceRoot);
     if (remoteWorkspaceRoot !== undefined) output.remoteWorkspaceRoot = remoteWorkspaceRoot;
     const publicBaseUrl = sanitizeString(input.publicBaseUrl);

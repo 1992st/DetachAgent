@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import express from "express";
 import multer from "multer";
-import type { AppHealth, DetachesContextExportResponse, DiagnosticItem, DiagnosticsResponse, NetworkTestResponse, NetworkTestStep, ToolDecisionActor, ToolTarget, UploadedFileRef } from "@detaches/shared";
+import type { AppHealth, DetachesContextExportResponse, DiagnosticItem, DiagnosticsResponse, NetworkTestResponse, NetworkTestStep, ToolDecisionActor, ToolRequestKind, ToolTarget, UploadedFileRef } from "@detaches/shared";
 import { appConfig, reverseBridgeBaseUrl } from "../config/appConfig.js";
 import { settingsStore, runtimeConfig } from "../config/settingsStore.js";
 import { sshTunnelService } from "../services/tunnel/sshTunnelService.js";
@@ -19,6 +19,8 @@ import { brokerTokenService } from "../services/tools/brokerTokenService.js";
 import { openclawDetachesAdapterService } from "../services/adapters/openclawDetachesAdapterService.js";
 import { contextExportService } from "../services/context/contextExportService.js";
 import { bootstrapSshIdentity } from "../services/ssh/sshBootstrapService.js";
+import { localTerminalAppService } from "../services/terminal/localTerminalAppService.js";
+import { resolveDirectGatewayUrl } from "../services/gateway/gatewayClient.js";
 
 const upload = multer({
   dest: path.join(appConfig.storageDir, "cache"),
@@ -28,6 +30,26 @@ const upload = multer({
 export const apiRoutes = express.Router();
 
 const execFileAsync = promisify(execFile);
+
+apiRoutes.get("/terminal/apps", async (_req, res) => {
+  try {
+    res.json(await localTerminalAppService.list());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/terminal/apps/:appId/open", async (req, res) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Opening local terminal apps is only allowed from the local machine." });
+    return;
+  }
+  try {
+    res.json(await localTerminalAppService.open(req.params.appId));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
 
 function isLoopbackRequest(req: express.Request): boolean {
   const address = req.socket.remoteAddress || "";
@@ -137,16 +159,21 @@ async function reverseBridgeProbe(): Promise<{ ok: boolean; message: string; det
 async function runNetworkTest(): Promise<NetworkTestResponse> {
   const config = await runtimeConfig();
   const steps: NetworkTestStep[] = [];
+  const directGatewayUrl = resolveDirectGatewayUrl(config.gatewayDirectUrl, config.gatewayDirectHost, config.gatewayRemotePort);
   steps.push({
     id: "settings",
     label: "配置",
     state: "ok",
-    message: `${config.gatewayTransport === "ssh" ? "SSH tunnel" : "Direct"} -> ${config.remoteHost}:${config.gatewayRemotePort}`,
+    message: config.gatewayTransport === "ssh"
+      ? `SSH tunnel -> ${config.remoteHost}:${config.gatewayRemotePort}`
+      : `Direct -> ${directGatewayUrl}`,
     details: {
       remoteHost: config.remoteHost,
       remoteSshPort: config.remoteSshPort,
       gatewayTransport: config.gatewayTransport,
       gatewayDirectHost: config.gatewayDirectHost,
+      gatewayDirectUrl: config.gatewayDirectUrl,
+      resolvedGatewayUrl: directGatewayUrl,
       gatewayLocalPort: config.gatewayLocalPort,
       gatewayRemotePort: config.gatewayRemotePort,
       reverseBridgeRemoteHost: config.reverseBridgeRemoteHost,
@@ -205,18 +232,19 @@ async function runNetworkTest(): Promise<NetworkTestResponse> {
       details: localGateway
     });
   } else {
-    const direct = await tcpProbe(config.gatewayDirectHost, config.gatewayRemotePort);
+    const directUrlConfigured = Boolean(config.gatewayDirectUrl.trim());
+    const direct = directUrlConfigured ? null : await tcpProbe(config.gatewayDirectHost, config.gatewayRemotePort);
     steps.push({
       id: "direct-gateway-port",
-      label: "直连 Gateway 端口",
-      state: direct.ok ? "ok" : "error",
-      message: direct.message,
-      details: direct
+      label: directUrlConfigured ? "直连 Gateway URL" : "直连 Gateway 端口",
+      state: directUrlConfigured ? "ok" : direct?.ok ? "ok" : "error",
+      message: directUrlConfigured ? `Using ${directGatewayUrl}; Gateway health will verify the WebSocket endpoint.` : direct?.message ?? "Direct Gateway port was not checked.",
+      details: directUrlConfigured ? { url: directGatewayUrl } : direct
     });
   }
 
   try {
-    await gatewayClient.health();
+    await gatewayClient.quickHealth();
     steps.push({
       id: "gateway-health",
       label: "Gateway health",
@@ -248,7 +276,7 @@ async function checkHealth(): Promise<AppHealth> {
   let gatewayOk = false;
   let gatewayMessage = "Gateway not checked.";
   try {
-    await gatewayClient.health();
+    await gatewayClient.quickHealth();
     gatewayOk = true;
     gatewayMessage = "Gateway health check passed.";
   } catch (error) {
@@ -662,6 +690,19 @@ function parseToolTarget(value: unknown): ToolTarget {
   return "local-user-machine";
 }
 
+function parseToolRequestKind(value: unknown): ToolRequestKind | null {
+  if (
+    value === "file-transfer"
+    || value === "terminal"
+    || value === "adapter-install"
+    || value === "skill-install"
+    || value === "skill-verify"
+  ) {
+    return value;
+  }
+  return null;
+}
+
 function isToolRequestStatus(value: string): value is "pending" | "running" | "succeeded" | "approved" | "rejected" | "blocked" | "started" | "failed" {
   return value === "pending"
     || value === "running"
@@ -714,7 +755,7 @@ apiRoutes.post("/files/transfer/prepare", async (req, res) => {
 
 apiRoutes.post("/tools/requests", async (req, res) => {
   try {
-    const kind = req.body.kind === "file-transfer" ? "file-transfer" : req.body.kind === "terminal" ? "terminal" : req.body.kind === "adapter-install" ? "adapter-install" : null;
+    const kind = parseToolRequestKind(req.body.kind);
     const target = parseToolTarget(req.body.target);
     const sessionKey = typeof req.body.sessionKey === "string" ? req.body.sessionKey.trim() : "";
     const agentId = typeof req.body.agentId === "string" ? req.body.agentId.trim() : undefined;
@@ -734,7 +775,7 @@ apiRoutes.post("/tools/requests", async (req, res) => {
 
 apiRoutes.post("/tools/events/gateway", async (req, res) => {
   try {
-    const kind = req.body.kind === "file-transfer" ? "file-transfer" : req.body.kind === "terminal" ? "terminal" : req.body.kind === "adapter-install" ? "adapter-install" : null;
+    const kind = parseToolRequestKind(req.body.kind);
     const target = parseToolTarget(req.body.target);
     const sessionKey = typeof req.body.sessionKey === "string" ? req.body.sessionKey.trim() : "";
     const sourceEventId = typeof req.body.sourceEventId === "string" ? req.body.sourceEventId.trim() : "";
@@ -779,7 +820,7 @@ apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
     submitTokenRequired: true,
     submitTokenHeader: "Authorization",
     requestFormats: ["broker-event", "fence"],
-    requestKinds: ["terminal", "file-transfer", "adapter-install"],
+    requestKinds: ["terminal", "file-transfer", "adapter-install", "skill-install", "skill-verify"],
     contextExport: {
       createEndpoint: `${bridgeBaseUrl}/api/context/exports`,
       consumeEndpointPattern: `${bridgeBaseUrl}/api/context/exports/{token}`,

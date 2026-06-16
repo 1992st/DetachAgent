@@ -11,13 +11,13 @@
     "cli": "bin/detaches-agent-adapter.mjs"
   },
   "commands": {
-    "doctorUrl": "detaches-agent-adapter doctor --url <one-time-context-export-url> --output-context /tmp/detaches-client-context.json",
-    "doctorContext": "detaches-agent-adapter doctor --context /tmp/detaches-client-context.json",
-    "fetchContext": "detaches-agent-adapter context-fetch <one-time-context-export-url> --output /tmp/detaches-client-context.json",
-    "inspectContext": "detaches-agent-adapter inspect-context /tmp/detaches-client-context.json",
-    "probeBroker": "detaches-agent-adapter broker-probe <detaches-agent-base-url>",
-    "terminalRequest": "detaches-agent-adapter terminal-request --context /tmp/detaches-client-context.json --target local-user-machine --format broker-event --submit",
-    "fileTransferRequest": "detaches-agent-adapter file-transfer-request --context /tmp/detaches-client-context.json --target local-user-machine --format broker-event --submit"
+    "doctorUrl": "node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --url <one-time-context-export-url> --output-context /tmp/detaches-client-context.json",
+    "doctorContext": "node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --context /tmp/detaches-client-context.json",
+    "fetchContext": "node ~/.detach_agent/bin/detaches-agent-adapter.mjs context-fetch <one-time-context-export-url> --output /tmp/detaches-client-context.json",
+    "inspectContext": "node ~/.detach_agent/bin/detaches-agent-adapter.mjs inspect-context /tmp/detaches-client-context.json",
+    "probeBroker": "node ~/.detach_agent/bin/detaches-agent-adapter.mjs broker-probe <detaches-agent-base-url>",
+    "terminalRequest": "node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-request --context /tmp/detaches-client-context.json --target local-user-machine --format broker-event --submit",
+    "fileTransferRequest": "node ~/.detach_agent/bin/detaches-agent-adapter.mjs file-transfer-request --context /tmp/detaches-client-context.json --target local-user-machine --format broker-event --submit"
   },
   "context": {
     "accepts": [
