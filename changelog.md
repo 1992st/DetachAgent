@@ -7,6 +7,13 @@
 ### Main Agent Gateway 连接
 
 - 默认连接策略从 SSH tunnel 调整为 Direct Gateway，避免普通用户必须让 detaches_agent 所在 PC SSH 登录 Main Agent 电脑。
+- `网络与连接 / Main Agent Gateway` 新增 `导入 Agent 配置` 助手：
+  - 先选择 Agent 类型，v1 支持 OpenClaw，其他类型预留为 Coming soon。
+  - 可粘贴或上传 `~/.openclaw/openclaw.json`，并输入 Main Agent 地址或 Tailscale Serve URL。
+  - 基于纯规则解析 `gateway.bind`、`gateway.port`、`gateway.tailscale.mode` 和 `gateway.auth`。
+  - 明文 token/password 会自动写入当前 profile，但预览中只脱敏显示。
+  - secret/env/file/exec 引用不会被复制，提示用户手动填写 Gateway 凭据。
+  - 应用前显示 profile 字段 diff，用户确认后调用 `saveRemoteProfile()` 保存并自动触发网络测试。
 - `网络与连接` 页面新增 `Gateway URL / Tailscale Serve` 输入，用于支持 OpenClaw 的：
 
   ```json
@@ -24,6 +31,7 @@
   - Direct URL 模式显示 resolved Gateway URL。
   - Host/port 模式显示 `gatewayDirectHost:gatewayRemotePort`。
   - SSH tunnel 模式显示远端 SSH/Gateway 目标。
+- 网络测试遇到 Gateway `pairing required` 时，错误说明保持简短，并单独显示可复制的 Main Agent 主机批准命令；命令直接读取 `~/.openclaw/devices/pending.json` 与 `~/.openclaw/openclaw.json`，避免 `openclaw devices list --json` 输出非 JSON 时导致用户命令失败。
 - Gateway 连接失败时清理旧 hello snapshot，避免旧的本机 Gateway 缓存误导诊断结果。
 - Direct 模式下不再偷偷用 SSH/CLI 磁盘发现补齐 agent 列表，避免出现“列表很多但不能正常通行”的假阳性。
 - 新增 Main Agent 配置说明折叠区，基于当前 UI 输入生成 OpenClaw 配置示例：
@@ -94,6 +102,7 @@
   - `TC-002B 多 Agent 目录完整显示`
   - `TC-002C Tool Queue pending 请求弹窗`
   - `TC-002D 普通用户直连 Main Agent Gateway`
+  - `TC-002E Agent 配置导入助手`
 
 ### 验证命令
 
@@ -106,5 +115,6 @@ pnpm --filter @detaches/web typecheck
 node testcase/agent-directory-full-list-test.mjs
 node testcase/agent-directory-gateway-rpc-authority-test.mjs
 node testcase/tool-queue-popup-test.mjs
+node testcase/agent-config-assistant-rules-test.mjs
 pnpm --filter @detaches/server smoke
 ```

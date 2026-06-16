@@ -69,6 +69,8 @@ node ~/.openclaw/detaches_agent/bin/detaches-agent-adapter.mjs doctor --url "$CO
 - 支持直接 Gateway 或 SSH tunnel 连接模式。
 - SSH tunnel 同时建立本地 Gateway forward 和远端 reverse bridge，使远端 agent host 可以通过 `127.0.0.1:<reverseBridgeRemotePort>` 访问本机 detaches_agent。
 - 提供网络诊断视图，覆盖 SSH TCP、SSH tunnel、reverse bridge、本地 Gateway 端口和 Gateway health。
+- Gateway health 遇到 `pairing required` 时，网络诊断必须显示短错误说明，并单独提供可复制的 Main Agent 主机批准命令。
+- 该批准命令必须避免依赖 `openclaw devices list --json` 的可解析输出；应从 Main Agent 本机 `~/.openclaw/devices/pending.json` 找到当前 detaches_agent deviceId 对应 requestId，并使用 `~/.openclaw/openclaw.json` 中的明文 `gateway.auth.token` 显式调用 `openclaw devices approve`。
 
 ### 远端 Agent Host 适配
 

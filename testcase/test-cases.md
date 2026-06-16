@@ -92,6 +92,33 @@
 - `/api/agents` 通过 Gateway `agents.list` / `sessions.list` 获取 agent 列表。
 - Main Agent 通过 `publicBaseUrl` 回连 detaches_agent 的 context export/tool broker 能力。
 - SSH tunnel 仅保留为高级兼容选项，不作为普通用户推荐路径。
+- Gateway health 返回 `pairing required` 时，网络测试只显示短提示，并在独立代码块中提供 `复制命令`。
+- 复制命令在 Main Agent 主机上读取 `~/.openclaw/devices/pending.json` 和 `~/.openclaw/openclaw.json`，不依赖 `openclaw devices list --json` 的输出可被 JSON 解析。
+
+## TC-002E Agent 配置导入助手
+
+目标：验证“网络与连接 / SSH”页面的 `导入 Agent 配置` 助手可以基于规则解析 OpenClaw 配置，预览后保存当前 profile，并在应用后自动触发网络测试。
+
+步骤：
+
+1. 执行 `pnpm --filter @detaches/shared build && pnpm --filter @detaches/web typecheck`。
+2. 执行 `node testcase/agent-config-assistant-rules-test.mjs`。
+3. 打开“网络与连接”页面，点击 `导入 Agent 配置`。
+4. 在 Agent 类型选择页确认 OpenClaw 可继续，其他类型显示 Coming soon。
+5. 粘贴或上传 `~/.openclaw/openclaw.json`。
+6. 输入 Main Agent 地址或 Tailscale Serve URL，点击 `分析配置`。
+7. 检查预览中的 Gateway 模式、推荐连接方式、字段 diff、token/password 脱敏状态和风险提示。
+8. 点击 `应用到当前配置`。
+
+期望：
+
+- `loopback + tailscale.mode=serve/funnel` 只接受 Tailscale Serve HTTPS URL，不把裸 IP 当成直连 URL。
+- `tailnet`、`lan`、非 loopback `custom` 使用 `gatewayDirectHost + gatewayRemotePort`。
+- `lan` 显示网络边界 warning。
+- 明文 token/password 自动写入保存请求，但 UI 不展示完整明文。
+- secret/env/file/exec 引用不复制 secret，并提示用户手动填写 Gateway 凭据。
+- 非 loopback 且缺少 token/password/trusted-proxy 时不允许一键应用为完成。
+- 应用前不会静默保存；应用后调用 `saveRemoteProfile()` 并触发网络测试。
 
 ## TC-002A OpenClaw detaches adapter
 

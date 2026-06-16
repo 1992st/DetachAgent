@@ -253,11 +253,14 @@ async function runNetworkTest(): Promise<NetworkTestResponse> {
       details: { hello: gatewayClient.getHello() }
     });
   } catch (error) {
+    const message = gatewayClient.getLastError() ?? (error instanceof Error ? error.message : String(error));
+    const authItem = classifyGatewayAuth(message);
     steps.push({
       id: "gateway-health",
       label: "Gateway health",
       state: "error",
-      message: gatewayClient.getLastError() ?? (error instanceof Error ? error.message : String(error))
+      message: authItem ? `${authItem.message}. ${authItem.action}` : message,
+      details: authItem ?? { message }
     });
   }
 
@@ -341,16 +344,24 @@ function classifyGatewayAuth(message: string): DiagnosticItem | null {
   }
   if (normalized.includes("pairing required") || normalized.includes("device") && normalized.includes("required")) {
     const identity = loadOrCreateDeviceIdentity();
+    const approveCommand = buildDeviceApproveCommand(identity.deviceId);
     return {
       id: "gateway-pairing-required",
       severity: "warning",
       title: "Gateway pairing required",
       message,
-      action: `Approve this device from an already paired OpenClaw client, or approve the pending request on the gateway host. Device ID: ${identity.deviceId}`,
-      details: { deviceId: identity.deviceId }
+      action: "需要在 Main Agent 主机批准 detaches_agent 设备。请复制下方命令到 Main Agent 主机终端执行；命令会读取 Main Agent 的 gateway.auth.token 并显式传给 OpenClaw CLI。如果提示 No pending request，先回到这里重新点击“测试网络”，再执行该命令。",
+      details: { deviceId: identity.deviceId, approveCommand }
     };
   }
   return null;
+}
+
+function buildDeviceApproveCommand(deviceId: string): string {
+  const escapedDeviceId = JSON.stringify(deviceId);
+  const tokenReader = `const fs=require("fs");const p=require("os").homedir()+"/.openclaw/openclaw.json";const cfg=JSON.parse(fs.readFileSync(p,"utf8"));const token=cfg.gateway&&cfg.gateway.auth&&cfg.gateway.auth.token;if(typeof token!=="string"||!token){console.error("gateway.auth.token is not plaintext in "+p);process.exit(1)}process.stdout.write(token)`;
+  const requestReader = `const fs=require("fs");const p=require("os").homedir()+"/.openclaw/devices/pending.json";const pending=JSON.parse(fs.readFileSync(p,"utf8"));const id=${escapedDeviceId};const r=Object.values(pending).find(x=>x&&x.deviceId===id);if(!r){console.error("No pending request for "+id+" in "+p);process.exit(1)}process.stdout.write(r.requestId)`;
+  return `TOKEN=$(node -e '${tokenReader}') && REQ=$(node -e '${requestReader}') && openclaw devices approve "$REQ" --token "$TOKEN"`;
 }
 
 function diagnosticsFromHealth(health: AppHealth): DiagnosticItem[] {

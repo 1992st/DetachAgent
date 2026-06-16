@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Copy, Play, Plus, Save, ShieldCheck, Trash2, Wifi } from "lucide-react";
+import { Copy, FileInput, Play, Plus, Save, ShieldCheck, Trash2, Wifi } from "lucide-react";
 import type { NetworkTestResponse, PublicSettings, RemoteProfile, RemoteProfileUpdate } from "@detaches/shared";
 import { activateRemoteProfile, createRemoteProfile, deleteRemoteProfile, fetchSettings, saveRemoteProfile, testNetwork } from "../../lib/api.js";
+import { AgentConfigAssistantDialog } from "./agentConfigAssistant/AgentConfigAssistantDialog.js";
 
 interface Props {
   onSaved: () => void;
@@ -17,6 +18,8 @@ export function SettingsPanel({ onSaved }: Props) {
   const [status, setStatus] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<NetworkTestResponse | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantApplying, setAssistantApplying] = useState(false);
 
   useEffect(() => {
     fetchSettings()
@@ -213,6 +216,49 @@ export function SettingsPanel({ onSaved }: Props) {
     }
   }
 
+  async function applyAgentConfig(update: RemoteProfileUpdate) {
+    if (!selectedProfile) return;
+    setAssistantApplying(true);
+    setStatus("正在应用 Agent 配置...");
+    try {
+      const saved = await saveRemoteProfile(selectedProfile.id, {
+        name: selectedProfile.name,
+        remoteHost: selectedProfile.remoteHost,
+        remoteSshPort: Number(selectedProfile.remoteSshPort),
+        remoteUser: selectedProfile.remoteUser,
+        remoteIdentityPath: selectedProfile.remoteIdentityPath,
+        reverseBridgeRemoteHost: selectedProfile.reverseBridgeRemoteHost,
+        reverseBridgeRemotePort: Number(selectedProfile.reverseBridgeRemotePort),
+        gatewayTransport: selectedProfile.gatewayTransport,
+        gatewayDirectHost: selectedProfile.gatewayDirectHost,
+        gatewayDirectUrl: selectedProfile.gatewayDirectUrl,
+        gatewayRemotePort: Number(selectedProfile.gatewayRemotePort),
+        gatewayLocalPort: Number(selectedProfile.gatewayLocalPort),
+        authMode: selectedProfile.authMode,
+        remoteWorkspaceRoot: selectedProfile.remoteWorkspaceRoot,
+        publicBaseUrl: selectedProfile.publicBaseUrl,
+        ...update
+      });
+      setSettings(saved);
+      if (saved.activeProfileId !== selectedProfile.id) {
+        setSettings(await activateRemoteProfile(selectedProfile.id));
+      }
+      setSelectedProfileId(selectedProfile.id);
+      setToken("");
+      setPassword("");
+      setClearToken(false);
+      setClearPassword(false);
+      setStatus("Agent 配置已应用，正在测试网络。");
+      onSaved();
+      await runTest();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      throw error;
+    } finally {
+      setAssistantApplying(false);
+    }
+  }
+
   if (!settings || !selectedProfile) {
     return <div className="settings-page muted">{status ?? "Loading settings..."}</div>;
   }
@@ -270,7 +316,13 @@ export function SettingsPanel({ onSaved }: Props) {
         </div>
 
         <section className="settings-section">
-          <h3>Main Agent Gateway</h3>
+          <div className="settings-section-heading">
+            <h3>Main Agent Gateway</h3>
+            <button type="button" className="secondary-button compact" onClick={() => setAssistantOpen(true)}>
+              <FileInput size={16} />
+              导入 Agent 配置
+            </button>
+          </div>
           <label>
             Profile name
             <input value={selectedProfile.name} onChange={(e) => updateSelectedProfile({ name: e.target.value })} />
@@ -430,6 +482,16 @@ export function SettingsPanel({ onSaved }: Props) {
               <article className={`network-test-step ${step.state}`} key={step.id}>
                 <strong>{step.label}</strong>
                 <p>{step.message}</p>
+                {networkStepApproveCommand(step.details) ? (
+                  <div className="network-test-command">
+                    <span>在 Main Agent 主机执行</span>
+                    <code>{networkStepApproveCommand(step.details)}</code>
+                    <button type="button" className="secondary-button compact" onClick={() => copyText(networkStepApproveCommand(step.details) ?? "")}>
+                      <Copy size={14} />
+                      复制命令
+                    </button>
+                  </div>
+                ) : null}
               </article>
             ))}
           </div>
@@ -469,6 +531,25 @@ export function SettingsPanel({ onSaved }: Props) {
           <p>修改 Main Agent 的 OpenClaw 配置后，需要重启 Main Agent 上的 OpenClaw Gateway，再回到这里点击“测试网络”。</p>
         </details>
       </section>
+
+      <AgentConfigAssistantDialog
+        profile={selectedProfile}
+        open={assistantOpen}
+        applying={assistantApplying}
+        onClose={() => setAssistantOpen(false)}
+        onApply={applyAgentConfig}
+      />
     </div>
   );
+}
+
+function networkStepApproveCommand(details: unknown): string | null {
+  if (!details || typeof details !== "object") return null;
+  const command = (details as { details?: { approveCommand?: unknown } }).details?.approveCommand;
+  return typeof command === "string" && command.trim() ? command : null;
+}
+
+async function copyText(value: string) {
+  if (!value) return;
+  await navigator.clipboard.writeText(value);
 }
