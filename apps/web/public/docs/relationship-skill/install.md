@@ -24,7 +24,8 @@ Host/Main Agent environment.
 
 Use one of these sources from this repository:
 
-- Source directory: `skills/detach-agent-relationship/`
+- Source directory:
+  `packages/openclaw-detaches-adapter/skills/detach-agent-relationship/`
 - Packaged skill archive: `detach-agent-relationship.skill.zip`
 - Windows offline package: `dist/detach-agent-windows-installer.zip`
 
@@ -36,11 +37,17 @@ download the packaged `detach-agent-relationship.skill.zip` release artifact.
 Run these commands on the Host/Main Agent computer:
 
 ```bash
-git clone <repo-url>
-cd <repo-directory>
+git clone https://github.com/1992st/DetachAgent.git
+cd DetachAgent
 mkdir -p ~/.openclaw/skills
 rm -rf ~/.openclaw/skills/detach-agent-relationship
-cp -R skills/detach-agent-relationship ~/.openclaw/skills/detach-agent-relationship
+cp -R packages/openclaw-detaches-adapter/skills/detach-agent-relationship ~/.openclaw/skills/detach-agent-relationship
+```
+
+One-line install command:
+
+```bash
+tmp_dir=$(mktemp -d) && git clone --depth 1 https://github.com/1992st/DetachAgent.git "$tmp_dir/DetachAgent" && mkdir -p ~/.openclaw/skills && rm -rf ~/.openclaw/skills/detach-agent-relationship && cp -R "$tmp_dir/DetachAgent/packages/openclaw-detaches-adapter/skills/detach-agent-relationship" ~/.openclaw/skills/detach-agent-relationship && rm -rf "$tmp_dir"
 ```
 
 Then restart the Host/Main Agent session or refresh the OpenClaw skill index so

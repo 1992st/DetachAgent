@@ -102,7 +102,7 @@ function buildPayload(action: "install" | "verify"): Record<string, unknown> {
     localSkillCacheDir,
     targetPathPolicy: "openclaw_global_shared_skills",
     prompt: action === "install"
-      ? "Install or update the complete attached skill package. First cache it on this machine under ~/.detach_agent/skills, then copy it into the OpenClaw shared/global skills path for the Host/Main Agent. Do not install into a workspace or Detach Agent machine unless explicitly requested."
+      ? "Install or update the complete attached skill package. If the attachment is unavailable, download it from https://github.com/1992st/DetachAgent.git with: tmp_dir=$(mktemp -d) && git clone --depth 1 https://github.com/1992st/DetachAgent.git \"$tmp_dir/DetachAgent\" && mkdir -p ~/.openclaw/skills && rm -rf ~/.openclaw/skills/detach-agent-relationship && cp -R \"$tmp_dir/DetachAgent/packages/openclaw-detaches-adapter/skills/detach-agent-relationship\" ~/.openclaw/skills/detach-agent-relationship && rm -rf \"$tmp_dir\". First cache the skill on this machine under ~/.detach_agent/skills when using the attachment flow, then copy it into the OpenClaw shared/global skills path for the Host/Main Agent. Do not install into a workspace or Detach Agent machine unless explicitly requested."
       : "Verify the local ~/.detach_agent/skills cache and the OpenClaw shared/global skills installation for the Host/Main Agent.",
     attachment: {
       name: "detach-agent-relationship.skill.zip",
