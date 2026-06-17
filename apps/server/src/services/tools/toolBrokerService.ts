@@ -25,6 +25,7 @@ import type {
 } from "@detaches/shared";
 import { appConfig } from "../../config/appConfig.js";
 import { fileTransferService } from "../files/fileTransferService.js";
+import { mainAgentFileTransferService } from "../files/mainAgentFileTransferService.js";
 import { gatewayClient } from "../gateway/gatewayClient.js";
 import { terminalService } from "../terminal/terminalService.js";
 import { openclawDetachesAdapterService } from "../adapters/openclawDetachesAdapterService.js";
@@ -278,6 +279,28 @@ class ToolBrokerService {
         return this.fail(request, error instanceof Error ? error.message : String(error));
       }
     }
+    if (request.kind === "main-agent-save-file") {
+      try {
+        const transfer = await mainAgentFileTransferService.start(request);
+        const updated = this.update(request, "running", undefined, decision("approved", input));
+        await this.save();
+        await this.audit({ type: "tool.approve", requestId, status: updated.status, command: `main-agent-save-file:${transfer.transferId}`, actor: input.actor, riskAccepted: input.riskAccepted });
+        return {
+          request: updated,
+          execution: {
+            executionId: transfer.transferId,
+            target: request.target,
+            sessionKey: request.sessionKey,
+            wroteToTerminal: false,
+            completed: false,
+            forwardStatus: "not-started"
+          },
+          message: transfer.needsPassword ? "File transfer is waiting for SSH password." : "Main Agent file transfer started."
+        };
+      } catch (error) {
+        return this.fail(request, error instanceof Error ? error.message : String(error));
+      }
+    }
     if (request.kind === "adapter-install") {
       const installDir = stringPayload(request, "installDir") || "~/.detach_agent";
       const workspaceDir = stringPayload(request, "workspaceDir") || "~/.openclaw/workspace";
@@ -338,6 +361,32 @@ class ToolBrokerService {
   async result(requestId: string): Promise<ToolExecutionResultResponse> {
     await this.load();
     const request = this.requireRequest(requestId);
+    if (request.kind === "main-agent-save-file") {
+      const transfer = mainAgentFileTransferService.findByRequest(requestId);
+      if (transfer && (transfer.status === "succeeded" || transfer.status === "failed") && request.status === "running") {
+        const updated = this.update(request, transfer.status === "succeeded" ? "succeeded" : "failed", transfer.error);
+        await this.save();
+        void this.forwardResultToAgent(updated.id, { delayMs: 0 });
+        return this.result(requestId);
+      }
+      const output = transfer ? JSON.stringify(transfer, null, 2) : "";
+      return {
+        request: this.requests.get(requestId) ?? request,
+        result: {
+          executionId: transfer?.transferId ?? "",
+          requestId,
+          status: (this.requests.get(requestId) ?? request).status,
+          sessionKey: request.sessionKey,
+          completed: transfer?.status === "succeeded" || transfer?.status === "failed",
+          exitCode: transfer?.status === "succeeded" ? 0 : transfer?.status === "failed" ? 1 : undefined,
+          forwardStatus: "not-started",
+          output,
+          outputBytes: Buffer.byteLength(output, "utf8"),
+          capturedAt: new Date().toISOString(),
+          message: "Main Agent file transfer status snapshot."
+        }
+      };
+    }
     const execution = [...this.executions.values()].find((item) => item.requestId === requestId);
     if (!execution) {
       return {
@@ -395,6 +444,7 @@ class ToolBrokerService {
   private targetSupported(kind: ToolRequestKind, target: ToolTarget): boolean {
     if (kind === "adapter-install") return target === "remote-agent-host";
     if (kind === "skill-install" || kind === "skill-verify") return target === "local-user-machine";
+    if (kind === "main-agent-save-file") return target === "main-agent-machine";
     if (kind === "file-transfer") return target === "local-user-machine" || target === "remote-agent-host";
     return kind === "terminal" && target === "local-user-machine";
   }
@@ -547,6 +597,10 @@ class ToolBrokerService {
   private async forwardResultToAgent(requestId: string, options?: { delayMs?: number; force?: boolean }): Promise<void> {
     await this.load();
     const request = this.requireRequest(requestId);
+    if (request.kind === "main-agent-save-file") {
+      await this.forwardMainAgentFileTransferResult(request, options);
+      return;
+    }
     const execution = [...this.executions.values()].find((item) => item.requestId === requestId);
     if (!execution) return;
     if (!options?.force && execution.forwardStatus === "sent") return;
@@ -601,6 +655,56 @@ class ToolBrokerService {
         status: "failed",
         ok: false,
         error: message
+      });
+    }
+  }
+
+  private async forwardMainAgentFileTransferResult(request: ToolRequestRecord, options?: { delayMs?: number; force?: boolean }): Promise<void> {
+    const transfer = mainAgentFileTransferService.findByRequest(request.id);
+    if (!transfer) return;
+    await delay(options?.delayMs ?? 600);
+    try {
+      const message = [
+        "[detaches_agent 工具结果]",
+        "Main Agent file transfer snapshot from the user's local detaches_agent broker.",
+        "",
+        "```json",
+        JSON.stringify({
+          requestId: request.id,
+          executionId: transfer.transferId,
+          kind: request.kind,
+          target: request.target,
+          status: request.status,
+          completed: transfer.status === "succeeded" || transfer.status === "failed",
+          transferStatus: transfer.status,
+          sourceLocalPath: transfer.sourceLocalPath,
+          destination: transfer.destination,
+          method: transfer.method,
+          error: transfer.error
+        }, null, 2),
+        "```"
+      ].join("\n");
+      await gatewayClient.sendChat({
+        sessionKey: request.sessionKey,
+        message,
+        idempotencyKey: `detaches-tool-result:${transfer.transferId}`,
+        clientContext: {
+          app: "detaches_agent",
+          channel: "detaches_tool_result",
+          toolResult: true,
+          requestId: request.id,
+          executionId: transfer.transferId
+        }
+      });
+      await this.audit({ type: "tool.result.forward", requestId: request.id, executionId: transfer.transferId, status: "sent", ok: true });
+    } catch (error) {
+      await this.audit({
+        type: "tool.result.forward",
+        requestId: request.id,
+        executionId: transfer.transferId,
+        status: "failed",
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
       });
     }
   }
@@ -680,7 +784,8 @@ interface ParsedToolRequest {
 function parseToolRequests(text: string): ParsedToolRequest[] {
   return dedupeParsedToolRequests([
     ...parseTerminalCommandRequests(text),
-    ...parseFileTransferRequests(text)
+    ...parseFileTransferRequests(text),
+    ...parseMainAgentSaveFileRequests(text)
   ]);
 }
 
@@ -711,7 +816,9 @@ function parsedToolFingerprint(request: ParsedToolRequest): string {
     request.target,
     String(request.payload.command ?? ""),
     String(request.payload.fileId ?? ""),
-    String(request.payload.remotePath ?? "")
+    String(request.payload.remotePath ?? ""),
+    String(request.payload.sourceLocalPath ?? ""),
+    destinationFingerprint(request.payload.destination)
   ].join("\0");
 }
 
@@ -721,7 +828,9 @@ function toolPayloadFingerprint(input: Pick<ToolRequestCreateInput, "kind" | "ta
     input.target,
     String(input.payload.command ?? ""),
     String(input.payload.fileId ?? ""),
-    String(input.payload.remotePath ?? "")
+    String(input.payload.remotePath ?? ""),
+    String(input.payload.sourceLocalPath ?? ""),
+    destinationFingerprint(input.payload.destination)
   ].join("\0");
 }
 
@@ -758,6 +867,48 @@ function parseFileTransferRequests(text: string): ParsedToolRequest[] {
     }
   }
   return keepLastFileTransferPerFile(requests);
+}
+
+function parseMainAgentSaveFileRequests(text: string): ParsedToolRequest[] {
+  const requests: ParsedToolRequest[] = [];
+  const fencePattern = /```(?:main-agent-save-file|detaches-main-agent-save-file)\s*\n([\s\S]*?)```/gi;
+  let match: RegExpExecArray | null;
+  while ((match = fencePattern.exec(text))) {
+    const body = match[1].trim();
+    if (!body) continue;
+    try {
+      const parsed = JSON.parse(body) as {
+        fileId?: unknown;
+        sourceLocalPath?: unknown;
+        displayName?: unknown;
+        size?: unknown;
+        destination?: unknown;
+        methodPreference?: unknown;
+        reason?: unknown;
+      };
+      const fileId = typeof parsed.fileId === "string" ? parsed.fileId.trim() : "";
+      const sourceLocalPath = typeof parsed.sourceLocalPath === "string" ? parsed.sourceLocalPath.trim() : "";
+      const destination = mainAgentDestinationPayload(parsed.destination);
+      if (fileId && sourceLocalPath && destination) {
+        requests.push({
+          kind: "main-agent-save-file",
+          target: "main-agent-machine",
+          reason: typeof parsed.reason === "string" ? parsed.reason.trim() : undefined,
+          payload: {
+            fileId,
+            sourceLocalPath,
+            displayName: typeof parsed.displayName === "string" ? parsed.displayName.trim() : undefined,
+            size: typeof parsed.size === "number" ? parsed.size : undefined,
+            destination,
+            methodPreference: parsed.methodPreference === "scp" ? "scp" : "rsync"
+          }
+        });
+      }
+    } catch {
+      // Ignore malformed requests; the agent can resend a valid JSON block.
+    }
+  }
+  return requests;
 }
 
 function keepLastFileTransferPerFile(requests: ParsedToolRequest[]): ParsedToolRequest[] {
@@ -797,7 +948,25 @@ function parseToolTarget(value: unknown): ToolTarget {
   const raw = targetObject(value) ? value.environment ?? value.type ?? value.id : value;
   if (raw === "remote-agent-host" || raw === "remote" || raw === "agent-host") return "remote-agent-host";
   if (raw === "gateway-managed" || raw === "gateway") return "gateway-managed";
+  if (raw === "main-agent-machine" || raw === "main-agent" || raw === "host-main-agent") return "main-agent-machine";
   return "local-user-machine";
+}
+
+function destinationFingerprint(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const record = value as Record<string, unknown>;
+  return [record.host, record.port, record.user, record.path].map((item) => String(item ?? "")).join(":");
+}
+
+function mainAgentDestinationPayload(value: unknown): { host: string; port: number; user: string; path: string } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const host = typeof record.host === "string" ? record.host.trim() : "";
+  const user = typeof record.user === "string" ? record.user.trim() : "";
+  const remotePath = typeof record.path === "string" ? record.path.trim() : "";
+  const port = typeof record.port === "number" ? record.port : Number(record.port);
+  if (!host || !user || !remotePath.startsWith("/") || !Number.isFinite(port)) return null;
+  return { host, user, path: remotePath, port: Math.max(1, Math.min(65535, Math.floor(port))) };
 }
 
 function stringPayload(request: ToolRequestRecord, key: string): string {
@@ -893,6 +1062,7 @@ function unsupportedTargetMessage(kind: ToolRequestKind, target: ToolTarget): st
 }
 
 function assessRisk(input: Pick<ToolRequestRecord, "kind" | "payload">): ToolRiskAssessment {
+  if (input.kind === "main-agent-save-file") return { level: "elevated", reasons: ["将通过本机 SSH/SCP/Rsync 把 staged 文件保存到 Main Agent 机器"] };
   if (input.kind === "adapter-install") return { level: "elevated", reasons: ["将在远端 agent host 安装 detaches adapter"] };
   if (input.kind === "skill-install") return { level: "elevated", reasons: ["将在 Host/Main Agent 的 OpenClaw 全局 skills 路径安装或覆盖 skill"] };
   if (input.kind === "skill-verify") return { level: "safe", reasons: [] };

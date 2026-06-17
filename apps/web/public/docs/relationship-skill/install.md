@@ -44,6 +44,21 @@ rm -rf ~/.openclaw/skills/detach-agent-relationship
 cp -R packages/openclaw-detaches-adapter/skills/detach-agent-relationship ~/.openclaw/skills/detach-agent-relationship
 ```
 
+Repository details for this checkout:
+
+- Git remote: `https://github.com/1992st/DetachAgent.git`
+- Current local checkout path: `/Users/zhangshutong/code/detaches_agent`
+- Skill source path: `packages/openclaw-detaches-adapter/skills/detach-agent-relationship`
+
+If the Host/Main Agent computer can directly access this checkout path, install
+from the local path instead of cloning:
+
+```bash
+mkdir -p ~/.openclaw/skills
+rm -rf ~/.openclaw/skills/detach-agent-relationship
+cp -R /Users/zhangshutong/code/detaches_agent/packages/openclaw-detaches-adapter/skills/detach-agent-relationship ~/.openclaw/skills/detach-agent-relationship
+```
+
 One-line install command:
 
 ```bash

@@ -3,8 +3,8 @@ import type { ToolTarget } from "./fileTypes.js";
 import type { OpenClawAdapterReadinessState } from "./adapterTypes.js";
 
 export interface DetachesToolCapability {
-  name: "terminal" | "file-transfer";
-  requestFence: "detaches-terminal" | "detaches-file-transfer";
+  name: "terminal" | "file-transfer" | "main-agent-save-file";
+  requestFence: "detaches-terminal" | "detaches-file-transfer" | "main-agent-save-file";
   supportedTargets: ToolTarget[];
   unavailableTargets: ToolTarget[];
   approvalRequired: boolean;

@@ -17,6 +17,7 @@ export function isQueueToolRequestVisible(request: ToolRequestRecord): boolean {
 export function toolRequestSupported(request: Pick<ToolRequestRecord, "kind" | "target">): boolean {
   if (request.kind === "adapter-install") return request.target === "remote-agent-host";
   if (request.kind === "skill-install" || request.kind === "skill-verify") return request.target === "local-user-machine";
+  if (request.kind === "main-agent-save-file") return request.target === "main-agent-machine";
   if (request.kind === "file-transfer") return request.target === "local-user-machine" || request.target === "remote-agent-host";
   if (request.kind === "terminal") return request.target === "local-user-machine";
   return false;
@@ -38,5 +39,6 @@ export function shouldSurfaceApproval(
 export const targetLabels: Record<ToolTarget, string> = {
   "local-user-machine": "用户本机",
   "remote-agent-host": "远端 Agent 机器",
-  "gateway-managed": "Gateway 托管"
+  "gateway-managed": "Gateway 托管",
+  "main-agent-machine": "Main Agent 机器"
 };

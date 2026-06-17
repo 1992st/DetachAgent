@@ -1,7 +1,8 @@
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { ToolBrokerSocketEvent, ToolRequestRecord } from "@detaches/shared";
+import type { MainAgentFileTransferSnapshot, ToolBrokerSocketEvent, ToolRequestRecord } from "@detaches/shared";
 import { toolBrokerService, type ToolBrokerEvent } from "../services/tools/toolBrokerService.js";
+import { mainAgentFileTransferService } from "../services/files/mainAgentFileTransferService.js";
 
 function send(socket: WebSocket, event: ToolBrokerSocketEvent): void {
   if (socket.readyState === socket.OPEN) {
@@ -29,11 +30,18 @@ export function attachToolBrokerSocket(server: HttpServer): void {
         send(socket, { type: "request", action: event.action, request: event.request });
       }
     };
+    const onTransfer = (transfer: MainAgentFileTransferSnapshot) => {
+      if (sessionKey && transfer.sessionKey !== sessionKey) return;
+      if (agentId && transfer.agentId !== agentId) return;
+      send(socket, { type: "transfer", transfer });
+    };
     toolBrokerService.emitter.on("request", onRequest);
+    mainAgentFileTransferService.emitter.on("transfer", onTransfer);
     send(socket, { type: "ready", filters: { sessionKey, agentId } });
 
     socket.on("close", () => {
       toolBrokerService.emitter.off("request", onRequest);
+      mainAgentFileTransferService.emitter.off("transfer", onTransfer);
     });
   });
 }

@@ -8,6 +8,8 @@ import type {
   FileUploadResponse,
   LocalTerminalAppsResponse,
   LocalTerminalOpenResponse,
+  MainAgentFileTransferPasswordResponse,
+  MainAgentFileTransferSnapshot,
   NetworkTestResponse,
   OpenClawAdapterInstallPlan,
   OpenClawAdapterReadiness,
@@ -155,6 +157,22 @@ export async function fetchToolRequestResult(requestId: string): Promise<ToolExe
 
 export async function retryToolResultForward(requestId: string): Promise<ToolExecutionResultResponse> {
   const res = await fetch(`/api/tools/requests/${encodeURIComponent(requestId)}/forward`, { method: "POST" });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function submitMainAgentTransferPassword(transferId: string, password: string): Promise<MainAgentFileTransferPasswordResponse> {
+  const res = await fetch(`/api/file-transfers/${encodeURIComponent(transferId)}/password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password })
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function fetchMainAgentTransfer(transferId: string): Promise<{ transfer: MainAgentFileTransferSnapshot }> {
+  const res = await fetch(`/api/file-transfers/${encodeURIComponent(transferId)}`);
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }

@@ -46,7 +46,7 @@ export async function buildDetachesSessionContext(
   const contextExportRecord = options.createContextExport
     ? contextExportService.create({ sessionKey, sessionMode, attachments })
     : null;
-  const stagedFiles: DetachesStagedFileContext[] = attachments.map((file) => ({
+    const stagedFiles: DetachesStagedFileContext[] = attachments.map((file) => ({
     fileId: file.id,
     name: file.name,
     displayName: file.displayName || file.name,
@@ -57,10 +57,10 @@ export async function buildDetachesSessionContext(
     remotePath: file.remotePath,
     transfer: {
       requestFence: "detaches-file-transfer" as const,
-      supportedTargets: ["remote-agent-host", "local-user-machine"],
-      defaultTarget: "remote-agent-host" as const,
+      supportedTargets: ["remote-agent-host", "local-user-machine", "main-agent-machine"],
+      defaultTarget: "main-agent-machine" as const,
       requiresApproval: true,
-      remotePathRule: `For target=remote-agent-host, remotePath must be an absolute path on ${remoteUser}@${config.remoteHost} inside the remote agent workspace (${remoteWorkspace}) or remote user home (${remoteHome}). Prefer ${remoteWorkspace.replace(/\/+$/, "")}/attachments/<file>; do not use relative paths, other users' home directories, or /Volumes external drives.`
+      remotePathRule: `For target=main-agent-machine, use a main-agent-save-file request. sourceLocalPath must be this staged localPath, and destination.path must be an absolute path chosen by the Main Agent according to Host/Main Agent rules. detaches_agent will use local rsync/scp only after user approval and one-time password input when required.`
     }
   }));
   return {
@@ -126,6 +126,14 @@ export async function buildDetachesSessionContext(
         unavailableTargets: ["gateway-managed"],
         approvalRequired: true,
         executionHost: "remote-agent-host"
+      },
+      {
+        name: "main-agent-save-file",
+        requestFence: "main-agent-save-file",
+        supportedTargets: ["main-agent-machine"],
+        unavailableTargets: ["gateway-managed", "remote-agent-host", "local-user-machine"],
+        approvalRequired: true,
+        executionHost: "user-local-machine"
       }
     ],
     invariants: [

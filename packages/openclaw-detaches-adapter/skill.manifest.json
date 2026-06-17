@@ -17,7 +17,8 @@
     "inspectContext": "node ~/.detach_agent/bin/detaches-agent-adapter.mjs inspect-context /tmp/detaches-client-context.json",
     "probeBroker": "node ~/.detach_agent/bin/detaches-agent-adapter.mjs broker-probe <detaches-agent-base-url>",
     "terminalRequest": "node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-request --context /tmp/detaches-client-context.json --target local-user-machine --format broker-event --submit",
-    "fileTransferRequest": "node ~/.detach_agent/bin/detaches-agent-adapter.mjs file-transfer-request --context /tmp/detaches-client-context.json --target local-user-machine --format broker-event --submit"
+    "fileTransferRequest": "node ~/.detach_agent/bin/detaches-agent-adapter.mjs file-transfer-request --context /tmp/detaches-client-context.json --target local-user-machine --format broker-event --submit",
+    "mainAgentSaveFileRequest": "node ~/.detach_agent/bin/detaches-agent-adapter.mjs main-agent-save-file-request --context /tmp/detaches-client-context.json --format broker-event --submit"
   },
   "context": {
     "accepts": [
@@ -35,7 +36,8 @@
     "approvalBroker": "detaches_agent local UI",
     "forbiddenFallbacks": [
       "remote-agent-host -> local-user-machine",
-      "gateway-managed -> local-user-machine"
+      "gateway-managed -> local-user-machine",
+      "main-agent-machine -> local-user-machine"
     ]
   }
 }

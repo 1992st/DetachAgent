@@ -1,6 +1,6 @@
-import type { ToolTarget } from "./fileTypes.js";
+import type { MainAgentFileTransferSnapshot, ToolTarget } from "./fileTypes.js";
 
-export type ToolRequestKind = "terminal" | "file-transfer" | "adapter-install" | "skill-install" | "skill-verify";
+export type ToolRequestKind = "terminal" | "file-transfer" | "main-agent-save-file" | "adapter-install" | "skill-install" | "skill-verify";
 export type ToolRequestStatus = "pending" | "running" | "succeeded" | "approved" | "rejected" | "blocked" | "started" | "failed";
 export type ToolResultForwardStatus = "not-started" | "pending" | "sent" | "failed";
 export type ToolRequestSource = "text-extract" | "api" | "gateway-event";
@@ -87,6 +87,7 @@ export interface ToolRequestListResponse {
 export type ToolBrokerSocketEvent =
   | { type: "ready"; filters: { sessionKey?: string; agentId?: string } }
   | { type: "request"; action: "created" | "updated" | "ingested" | "duplicate"; request: ToolRequestRecord }
+  | { type: "transfer"; transfer: MainAgentFileTransferSnapshot }
   | { type: "error"; message: string };
 
 export interface ToolRequestDecisionResponse {

@@ -13,6 +13,7 @@ import { gatewayClient } from "../services/gateway/gatewayClient.js";
 import { loadOrCreateDeviceIdentity } from "../services/gateway/deviceIdentityService.js";
 import { listAgents } from "../services/gateway/agentDirectoryService.js";
 import { fileTransferService } from "../services/files/fileTransferService.js";
+import { mainAgentFileTransferService } from "../services/files/mainAgentFileTransferService.js";
 import { buildChatClientContext, publicClientIdentity } from "../services/clientContextService.js";
 import { toolBrokerService } from "../services/tools/toolBrokerService.js";
 import { brokerTokenService } from "../services/tools/brokerTokenService.js";
@@ -700,7 +701,7 @@ apiRoutes.post("/files/upload", upload.single("file"), async (req, res) => {
 });
 
 function parseToolTarget(value: unknown): ToolTarget {
-  if (value === "remote-agent-host" || value === "gateway-managed" || value === "local-user-machine") {
+  if (value === "remote-agent-host" || value === "gateway-managed" || value === "local-user-machine" || value === "main-agent-machine") {
     return value;
   }
   return "local-user-machine";
@@ -709,6 +710,7 @@ function parseToolTarget(value: unknown): ToolTarget {
 function parseToolRequestKind(value: unknown): ToolRequestKind | null {
   if (
     value === "file-transfer"
+    || value === "main-agent-save-file"
     || value === "terminal"
     || value === "adapter-install"
     || value === "skill-install"
@@ -836,7 +838,7 @@ apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
     submitTokenRequired: true,
     submitTokenHeader: "Authorization",
     requestFormats: ["broker-event", "fence"],
-    requestKinds: ["terminal", "file-transfer", "adapter-install", "skill-install", "skill-verify"],
+    requestKinds: ["terminal", "file-transfer", "main-agent-save-file", "adapter-install", "skill-install", "skill-verify"],
     contextExport: {
       createEndpoint: `${bridgeBaseUrl}/api/context/exports`,
       consumeEndpointPattern: `${bridgeBaseUrl}/api/context/exports/{token}`,
@@ -847,10 +849,32 @@ apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
       adapterCommand: "context-fetch",
       doctorCommand: "doctor"
     },
-    targets: ["local-user-machine", "remote-agent-host", "gateway-managed"],
+    targets: ["local-user-machine", "remote-agent-host", "gateway-managed", "main-agent-machine"],
     approvalRequired: true,
     adapterId: "detaches_agent.openclaw.adapter"
   });
+});
+
+apiRoutes.get("/file-transfers/:transferId", async (req, res) => {
+  const transfer = mainAgentFileTransferService.get(req.params.transferId);
+  if (!transfer) {
+    res.status(404).json({ error: "Transfer not found." });
+    return;
+  }
+  res.json({ transfer });
+});
+
+apiRoutes.post("/file-transfers/:transferId/password", async (req, res) => {
+  try {
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    if (!password) {
+      res.status(400).json({ error: "Password is required." });
+      return;
+    }
+    res.json({ transfer: mainAgentFileTransferService.providePassword(req.params.transferId, password) });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 apiRoutes.get("/tools/requests", async (req, res) => {

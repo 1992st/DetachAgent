@@ -20,6 +20,7 @@ function usage(exitCode = 0) {
     "  broker-probe <detaches-agent-base-url-or-capabilities-url>",
     "  terminal-request --target <target> --command <command> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
     "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
+    "  main-agent-save-file-request --file-id <id> --source-local-path <path> --display-name <name> --size <bytes> --host <host> --port <port> --user <user> --path <dest> --reason <reason> [--method rsync|scp --context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
     "",
     "This CLI does not execute tools. It only validates context and emits detaches_agent request blocks."
   ].join("\n");
@@ -179,6 +180,7 @@ function doctorContext(context) {
   const inspection = inspectContext(context);
   const terminalCapability = inspection.capabilities.find((capability) => capability.name === "terminal");
   const fileCapability = inspection.capabilities.find((capability) => capability.name === "file-transfer");
+  const mainAgentSaveCapability = inspection.capabilities.find((capability) => capability.name === "main-agent-save-file");
   const brokerEndpoint = inspection.broker?.gatewayEventEndpoint;
   const submitTokenAvailable = typeof inspection.broker?.submitToken === "string" && inspection.broker.submitToken.length > 0;
   const preferredFormat = inspection.broker?.requestFormats?.includes("broker-event") && brokerEndpoint && submitTokenAvailable
@@ -188,6 +190,8 @@ function doctorContext(context) {
     && !terminalCapability?.unavailableTargets?.includes("local-user-machine");
   const localFileRequestable = fileCapability?.supportedTargets?.includes("local-user-machine")
     && !fileCapability?.unavailableTargets?.includes("local-user-machine");
+  const mainAgentSaveRequestable = mainAgentSaveCapability?.supportedTargets?.includes("main-agent-machine")
+    && !mainAgentSaveCapability?.unavailableTargets?.includes("main-agent-machine");
   const cli = adapterCliPathHint();
   const nextActions = [
     "Treat this as a detaches_agent mediated session, not plain webchat.",
@@ -225,6 +229,24 @@ function doctorContext(context) {
           `  --reason ${commandQuote("copy the staged file before reading or archiving it")}`,
           "  --format broker-event",
           `  --source-event-id ${commandQuote(sourceEventIdHint(context, "file"))}`,
+          "  --submit"
+        ].join(" \\\n")
+      : null,
+    mainAgentSaveFileBrokerEvent: mainAgentSaveRequestable && inspection.files.staged.length > 0
+      ? [
+          `node ${cli} main-agent-save-file-request`,
+          `  --context ${commandQuote("<context-json-file>")}`,
+          `  --file-id ${commandQuote(inspection.files.staged[0].fileId || "file-id")}`,
+          `  --source-local-path ${commandQuote(inspection.files.staged[0].localPath || "<sourceLocalPath-from-prompt>")}`,
+          `  --display-name ${commandQuote(inspection.files.staged[0].displayName || inspection.files.staged[0].name || "file")}`,
+          `  --size ${commandQuote(String(inspection.files.staged[0].size || 0))}`,
+          `  --host ${commandQuote("<main-agent-ssh-host>")}`,
+          "  --port 22",
+          `  --user ${commandQuote("<main-agent-ssh-user>")}`,
+          `  --path ${commandQuote("<absolute-path-chosen-by-main-agent>")}`,
+          `  --reason ${commandQuote("save the staged file to the Host/Main Agent machine")}`,
+          "  --format broker-event",
+          `  --source-event-id ${commandQuote(sourceEventIdHint(context, "main-agent-save-file"))}`,
           "  --submit"
         ].join(" \\\n")
       : null
@@ -513,6 +535,23 @@ async function main() {
       fileId: requireOption(args, "file-id"),
       remotePath: requireOption(args, "remote-path")
     }, "detaches-file-transfer");
+    return;
+  }
+
+  if (command === "main-agent-save-file-request") {
+    await emitRequest(args, "main-agent-save-file", "main-agent-machine", requireOption(args, "reason"), {
+      fileId: requireOption(args, "file-id"),
+      sourceLocalPath: requireOption(args, "source-local-path"),
+      displayName: requireOption(args, "display-name"),
+      size: Number(requireOption(args, "size")),
+      destination: {
+        host: requireOption(args, "host"),
+        port: Number(requireOption(args, "port")),
+        user: requireOption(args, "user"),
+        path: requireOption(args, "path")
+      },
+      methodPreference: optionalString(args, "method") === "scp" ? "scp" : "rsync"
+    }, "main-agent-save-file");
     return;
   }
 

@@ -27,11 +27,16 @@
     "gateway-managed": {
       "status": "reserved",
       "execution": "requires Gateway files/artifacts/tools adapter"
+    },
+    "main-agent-machine": {
+      "status": "supported",
+      "execution": "detaches_agent runs approved local rsync/scp from staged file to Host/Main Agent SSH destination"
     }
   },
   "requestFences": {
     "terminal": "detaches-terminal",
-    "fileTransfer": "detaches-file-transfer"
+    "fileTransfer": "detaches-file-transfer",
+    "mainAgentSaveFile": "main-agent-save-file"
   },
   "cliCommands": {
     "manifest": "Print this adapter manifest.",
@@ -41,7 +46,8 @@
     "context-fetch": "Fetch a one-time detaches_agent context export URL, validate it, and write clientContext or detaches JSON for subsequent adapter commands.",
     "broker-probe": "Verify a detaches_agent Tool Broker capabilities endpoint before submitting requests.",
     "terminal-request": "Emit a detaches-terminal fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Supports --context to read session and broker fields; use --submit to post with the context endpoint.",
-    "file-transfer-request": "Emit a detaches-file-transfer fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Supports --context to read session and broker fields; use --submit to post with the context endpoint."
+    "file-transfer-request": "Emit a detaches-file-transfer fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Supports --context to read session and broker fields; use --submit to post with the context endpoint.",
+    "main-agent-save-file-request": "Emit a main-agent-save-file fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Host/Main Agent chooses destination path; detaches_agent runs rsync/scp after user approval."
   },
   "requestFormats": [
     "fence",
@@ -67,9 +73,9 @@
   ],
   "hardRules": [
     "Never claim a command, file read, file transfer, download, archive, or modification has happened until approved tool output proves it.",
-    "Never change a target from remote-agent-host or gateway-managed to local-user-machine as a fallback.",
+    "Never change a target from remote-agent-host, gateway-managed, or main-agent-machine to local-user-machine as a fallback.",
     "Every tool request must be a single fenced code block using the declared request fence.",
     "Every tool request must include target and reason.",
-    "Files attached by detaches_agent start in the user's local staging area and are not available on the remote agent host until an approved transfer succeeds."
+    "Files attached by detaches_agent start in the user's local staging area and are not available on the remote agent host or Host/Main Agent machine until an approved transfer succeeds."
   ]
 }

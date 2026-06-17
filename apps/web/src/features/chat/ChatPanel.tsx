@@ -42,6 +42,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [socketState, setSocketState] = useState("idle");
+  const [socketReconnectNonce, setSocketReconnectNonce] = useState(0);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [attachmentContext, setAttachmentContext] = useState("");
   const [attachmentContextOpen, setAttachmentContextOpen] = useState(false);
@@ -56,12 +57,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<TerminalPanelHandle | null>(null);
   const logStreamRef = useRef<HTMLDivElement | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
 
   useImperativeHandle(ref, () => ({
     revealTerminal: () => terminalRef.current?.reveal()
   }), []);
 
   useEffect(() => {
+    let disposed = false;
+    if (reconnectTimerRef.current) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     setMessages([]);
     setLastRunId(null);
     socketRef.current?.close();
@@ -83,10 +90,17 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     ws.onclose = (event) => {
       setSocketState("closed");
       appendLog("warn", "socket-closed", { code: event.code, reason: event.reason, wasClean: event.wasClean });
+      if (!disposed && sessionKey) {
+        reconnectTimerRef.current = window.setTimeout(() => {
+          reconnectTimerRef.current = null;
+          setSocketReconnectNonce((current) => current + 1);
+        }, 1500);
+      }
     };
     ws.onerror = () => {
       setSocketState("error");
       appendLog("error", "socket-error", { sessionKey, sessionMode });
+      ws.close();
     };
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data) as ChatSocketServerEvent;
@@ -111,10 +125,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
       }
     };
     return () => {
+      disposed = true;
+      if (reconnectTimerRef.current) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       appendLog("debug", "socket-cleanup", { sessionKey, sessionMode });
       ws.close();
     };
-  }, [sessionKey, sessionMode]);
+  }, [sessionKey, sessionMode, socketReconnectNonce]);
 
   useEffect(() => {
     const el = messagesRef.current;
@@ -373,11 +392,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
 const targetLabels: Record<ToolTarget, string> = {
   "local-user-machine": "用户本机",
   "remote-agent-host": "远端 Agent 机器",
-  "gateway-managed": "Gateway 托管"
+  "gateway-managed": "Gateway 托管",
+  "main-agent-machine": "Main Agent 机器"
 };
 
 function toolRequestSupported(request: ToolRequestRecord): boolean {
   if (request.kind === "adapter-install") return request.target === "remote-agent-host";
+  if (request.kind === "main-agent-save-file") return request.target === "main-agent-machine";
   if (request.kind === "file-transfer") return request.target === "local-user-machine" || request.target === "remote-agent-host";
   if (request.kind === "terminal") return request.target === "local-user-machine";
   return false;
@@ -463,7 +484,7 @@ function ToolRequests({
       {requests.map((request, index) => {
         const state = handled[index];
         const unsupported = !toolRequestSupported(request);
-        const actionLabel = request.kind === "file-transfer" ? "Transfer" : request.kind === "adapter-install" ? "Install" : "Run";
+        const actionLabel = request.kind === "main-agent-save-file" ? "Save" : request.kind === "file-transfer" ? "Transfer" : request.kind === "adapter-install" ? "Install" : "Run";
         return (
           <div className={`terminal-request-card ${request.kind === "file-transfer" ? "file-transfer-card" : ""}`} key={request.id}>
             <div>
@@ -488,7 +509,7 @@ function ToolRequests({
                   setHandled((current) => ({ ...current, [index]: "running" }));
                   approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated", actor: decisionActor(clientIdentity) })
                     .then((response) => {
-                      if (!response.execution?.wroteToTerminal) throw new Error(response.message || "Broker did not execute the request.");
+                      if (!response.execution?.wroteToTerminal && request.kind !== "main-agent-save-file") throw new Error(response.message || "Broker did not execute the request.");
                       if (request.kind !== "file-transfer") onReveal();
                       onLog("info", "tool-request-approved", { id: request.id, execution: response.execution });
                       setHandled((current) => ({ ...current, [index]: "approved" }));
@@ -627,6 +648,15 @@ function toolRequestCode(request: ToolRequestRecord): string {
   if (request.kind === "terminal") {
     return typeof request.payload.command === "string" ? request.payload.command : JSON.stringify(request.payload, null, 2);
   }
+  if (request.kind === "main-agent-save-file") {
+    const destination = destinationPayload(request.payload.destination);
+    return [
+      `fileId: ${typeof request.payload.fileId === "string" ? request.payload.fileId : ""}`,
+      `sourceLocalPath: ${typeof request.payload.sourceLocalPath === "string" ? request.payload.sourceLocalPath : ""}`,
+      `destination: ${destination}`,
+      `method: ${typeof request.payload.methodPreference === "string" ? request.payload.methodPreference : "rsync"}`
+    ].join("\n");
+  }
   return [
     `fileId: ${typeof request.payload.fileId === "string" ? request.payload.fileId : ""}`,
     `remotePath: ${typeof request.payload.remotePath === "string" ? request.payload.remotePath : ""}`
@@ -634,9 +664,16 @@ function toolRequestCode(request: ToolRequestRecord): string {
 }
 
 function toolRequestTitle(request: ToolRequestRecord): string {
+  if (request.kind === "main-agent-save-file") return "Save file to Main Agent";
   if (request.kind === "file-transfer") return "File transfer";
   if (request.kind === "adapter-install") return "Adapter install";
   return "Terminal command";
+}
+
+function destinationPayload(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const record = value as Record<string, unknown>;
+  return `${record.user ?? ""}@${record.host ?? ""}:${record.port ?? 22}${record.path ?? ""}`;
 }
 
 function confirmElevatedRisk(request: ToolRequestRecord): boolean {
@@ -648,30 +685,32 @@ function confirmElevatedRisk(request: ToolRequestRecord): boolean {
 function buildDefaultAttachmentContext(attachments: UploadedFileRef[]): string {
   if (!attachments.length) return "";
   return [
-    "[detaches_agent 文件上下文]",
-    `本次消息附带 ${attachments.length} 个文件。`,
+    "[[DETACH_AGENT_FILE_STAGED]]",
+    "用户已在 detaches_agent Web 添加文件。该文件当前只存在于 detaches_agent 本机，不在 Main Agent 机器上。",
+    "",
+    `fileCount: ${attachments.length}`,
     "",
     ...attachments.flatMap((file, index) => [
       `${index + 1}. ${file.name}`,
       `   fileId: ${file.id}`,
+      `   displayName: ${displayFileName(file)}`,
+      `   size: ${file.size}`,
       `   mimeType: ${file.mimeType || "application/octet-stream"}`,
-      `   size: ${formatFileSize(file.size)}`,
-      `   localPath: ${file.localPath || "not exposed"}`,
+      `   sourceLocalPath: ${file.localPath || "not exposed"}`,
       "   currentLocation: 用户本机 detaches_agent staging 区",
       "   remotePath: not uploaded",
       "   role: 主输入/待确认",
       ""
     ]),
-    "这些文件目前只在用户本机，尚未自动上传到远端。",
-    "重要：local-user-machine 只代表用户当前运行 detaches_agent 的本机，不代表 OpenClaw Gateway 主机，也不代表远端 Agent 主机。",
-    "如果你的目标是让远端 Agent/Gateway 主机读取文件，请使用 target=remote-agent-host，并且 remotePath 必须是当前生效远端账号下的绝对路径。",
-    "优先选择远端 workspace 或远端用户 home 下的可写路径，例如 /home/<remote-user>/.openclaw/workspace/attachments/<file>；不要使用相对路径，不要使用其他用户目录，不要默认写入 /Volumes 外部卷。",
-    "如果你只是要把文件保存到用户本机，才使用 target=local-user-machine。",
+    "如果你需要把该文件保存到 Main Agent 机器，请阅读 detach-agent-relationship skill，并生成 main-agent-save-file 请求。",
+    "保存目标路径必须由 Main Agent 根据自己的规则决定。",
+    "不要假设 Main Agent 已经能直接读取 sourceLocalPath；该路径只能作为 detaches_agent 本机传输源。",
+    "不要启动 HTTP 上传服务器，不要发明 curl/http-upload 方法；main-agent-save-file 只支持 rsync 或 scp。",
     "请求格式必须是唯一一个 fenced code block：",
-    "```detaches-file-transfer",
-    "{\"fileId\":\"上面的文件 id\",\"target\":\"remote-agent-host\",\"remotePath\":\"/home/<remote-user>/.openclaw/workspace/attachments/target-file\",\"reason\":\"说明为什么远端 agent 需要读取这个文件\"}",
+    "```main-agent-save-file",
+    "{\"fileId\":\"上面的文件 id\",\"sourceLocalPath\":\"上面的 sourceLocalPath\",\"displayName\":\"原始文件名\",\"size\":12345,\"destination\":{\"host\":\"Main Agent SSH host\",\"port\":22,\"user\":\"Main Agent SSH user\",\"path\":\"由 Main Agent 规则决定的绝对目标路径\"},\"methodPreference\":\"rsync\",\"reason\":\"说明为什么需要保存到 Main Agent\"}",
     "```",
-    "用户批准后，detaches_agent 会生成一次性下载链接；target=remote-agent-host 时远端主机会通过 reverse bridge curl 下载到 workspace，target=local-user-machine 时会保存到用户本机。",
+    "用户批准后，detaches_agent 会在本机调用 rsync/scp 传输；如果 Main Agent 机器没有开启 SSH/SFTP 等可达服务，则该功能不可用。",
     "用户批准前不要假装已经读取文件；如果传输失败，请根据 terminal 输出继续处理。"
   ].join("\n").trimEnd();
 }

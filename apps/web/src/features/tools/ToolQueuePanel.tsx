@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Eye, RefreshCw, Send, TerminalSquare, X, BellRing } from "lucide-react";
-import type { ClientIdentity, ToolBrokerSocketEvent, ToolDecisionActor, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget } from "@detaches/shared";
-import { approveToolRequest, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward } from "../../lib/api.js";
+import type { ClientIdentity, MainAgentFileTransferSnapshot, ToolBrokerSocketEvent, ToolDecisionActor, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget } from "@detaches/shared";
+import { approveToolRequest, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward, submitMainAgentTransferPassword } from "../../lib/api.js";
 import { isQueueToolRequestVisible, shouldSurfaceApproval, targetLabels, toolRequestSupported } from "./toolQueuePresentation.js";
 
 interface Props {
@@ -18,10 +18,14 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [summaries, setSummaries] = useState<Record<string, string>>({});
   const [attentionRequest, setAttentionRequest] = useState<ToolRequestRecord | null>(null);
+  const [transfers, setTransfers] = useState<Record<string, MainAgentFileTransferSnapshot>>({});
+  const [passwordTransfer, setPasswordTransfer] = useState<MainAgentFileTransferSnapshot | null>(null);
+  const [password, setPassword] = useState("");
   const surfacedRequestIds = useRef<Set<string>>(new Set());
 
   const surfaceApproval = useCallback((request: ToolRequestRecord, options: { requireRecent?: boolean } = {}) => {
     if (!shouldSurfaceApproval(request, options)) return;
+    if (options.requireRecent !== true && !isRecentlyCreated(request)) return;
     if (surfacedRequestIds.current.has(request.id)) return;
     surfacedRequestIds.current.add(request.id);
     setAttentionRequest(request);
@@ -64,10 +68,16 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
         setRequests((current) => isQueueToolRequestVisible(data.request)
           ? upsertToolRequest(current, data.request)
           : current.filter((request) => request.id !== data.request.id));
-        if (data.action === "created" || data.action === "ingested") {
+        if ((data.action === "created" || data.action === "ingested") && isRecentlyCreated(data.request)) {
           surfaceApproval(data.request);
         }
         void refresh();
+      }
+      if (data.type === "transfer") {
+        setTransfers((current) => ({ ...current, [data.transfer.requestId]: data.transfer }));
+        if (data.transfer.needsPassword || data.transfer.status === "waiting-password") {
+          setPasswordTransfer(data.transfer);
+        }
       }
     };
     ws.onerror = () => ws.close();
@@ -79,12 +89,20 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
     setBusy((current) => ({ ...current, [request.id]: true }));
     setError(null);
     try {
+      surfacedRequestIds.current.add(request.id);
       const response = await approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated", actor: decisionActor(clientIdentity) });
-      if (!response.execution?.wroteToTerminal) throw new Error(response.message || "Broker did not execute the request.");
+      if (!response.execution?.wroteToTerminal && request.kind !== "main-agent-save-file") throw new Error(response.message || "Broker did not execute the request.");
       if (request.kind !== "file-transfer") onRevealTerminal();
       setAttentionRequest((current) => current?.id === request.id ? null : current);
       const result = await fetchToolRequestResult(request.id);
       setSummaries((current) => ({ ...current, [request.id]: toolResultSummary(result) }));
+      if (request.kind === "main-agent-save-file") {
+        const transfer = transferFromResult(result);
+        if (transfer) {
+          setTransfers((current) => ({ ...current, [request.id]: transfer }));
+          if (transfer.needsPassword || transfer.status === "waiting-password") setPasswordTransfer(transfer);
+        }
+      }
       await refresh();
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : String(runError));
@@ -93,10 +111,27 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
     }
   }
 
+  async function submitPassword() {
+    if (!passwordTransfer) return;
+    setBusy((current) => ({ ...current, [passwordTransfer.requestId]: true }));
+    setError(null);
+    try {
+      const response = await submitMainAgentTransferPassword(passwordTransfer.transferId, password);
+      setPassword("");
+      setPasswordTransfer(null);
+      setTransfers((current) => ({ ...current, [response.transfer.requestId]: response.transfer }));
+    } catch (passwordError) {
+      setError(passwordError instanceof Error ? passwordError.message : String(passwordError));
+    } finally {
+      setBusy((current) => ({ ...current, [passwordTransfer.requestId]: false }));
+    }
+  }
+
   async function rejectRequest(request: ToolRequestRecord) {
     setBusy((current) => ({ ...current, [request.id]: true }));
     setError(null);
     try {
+      surfacedRequestIds.current.add(request.id);
       await rejectToolRequest(request.id, { actor: decisionActor(clientIdentity) });
       setAttentionRequest((current) => current?.id === request.id ? null : current);
       await refresh();
@@ -156,6 +191,44 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
           </div>
         </div>
       ) : null}
+      {passwordTransfer ? (
+        <div className="tool-approval-backdrop" role="presentation">
+          <div className="tool-approval-dialog" role="dialog" aria-modal="true" aria-label="SSH password required">
+            <div className="tool-approval-header">
+              <TerminalSquare size={18} />
+              <div>
+                <strong>SSH password required</strong>
+                <small>{passwordTransfer.destination.user}@{passwordTransfer.destination.host}:{passwordTransfer.destination.port}</small>
+              </div>
+              <button type="button" className="icon-button small" title="Dismiss" onClick={() => setPasswordTransfer(null)}>
+                <X size={15} />
+              </button>
+            </div>
+            <div className="tool-approval-body">
+              <p>密码仅用于本次传输，不会保存。</p>
+              <code>{passwordTransfer.sourceLocalPath}{"\n"}→ {passwordTransfer.destination.path}</code>
+              <input
+                type="password"
+                value={password}
+                autoFocus
+                placeholder="SSH password"
+                onChange={(event) => setPassword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void submitPassword();
+                }}
+              />
+            </div>
+            <div className="tool-approval-actions">
+              <button type="button" className="secondary-button" onClick={() => setPasswordTransfer(null)}>
+                Later
+              </button>
+              <button type="button" className="primary-button" disabled={!password || busy[passwordTransfer.requestId]} onClick={() => void submitPassword()}>
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="panel-heading compact">
         <div>
           <h2>Tool Queue</h2>
@@ -183,6 +256,7 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
                 <code>{toolRequestCode(request)}</code>
                 {unsupported ? <p className="request-error">{unsupportedTargetMessage(request)}</p> : null}
                 {summaries[request.id] ? <small>{summaries[request.id]}</small> : null}
+                {transfers[request.id] ? <TransferProgress transfer={transfers[request.id]} /> : null}
               </div>
               <div className="terminal-request-actions">
                 <button type="button" className="icon-button" title={request.risk?.level === "elevated" ? "Confirm run" : "Run"} disabled={disabled || request.status === "approved"} onClick={() => void runRequest(request)}>
@@ -229,6 +303,7 @@ function unsupportedTargetMessage(request: ToolRequestRecord): string {
 }
 
 function toolRequestTitle(request: ToolRequestRecord): string {
+  if (request.kind === "main-agent-save-file") return "Save file to Main Agent";
   if (request.kind === "file-transfer") return "File transfer";
   if (request.kind === "adapter-install") return "Adapter install";
   if (request.kind === "skill-install") return "Skill install";
@@ -252,6 +327,15 @@ function toolRequestCode(request: ToolRequestRecord): string {
       "action: install detaches adapter on remote-agent-host"
     ].join("\n");
   }
+  if (request.kind === "main-agent-save-file") {
+    const destination = destinationPayload(request.payload.destination);
+    return [
+      `fileId: ${typeof request.payload.fileId === "string" ? request.payload.fileId : ""}`,
+      `sourceLocalPath: ${typeof request.payload.sourceLocalPath === "string" ? request.payload.sourceLocalPath : ""}`,
+      `destination: ${destination}`,
+      `method: ${typeof request.payload.methodPreference === "string" ? request.payload.methodPreference : "rsync"}`
+    ].join("\n");
+  }
   if (request.kind === "skill-install" || request.kind === "skill-verify") {
     return [
       `skillName: ${typeof request.payload.skillName === "string" ? request.payload.skillName : "detach-agent-relationship"}`,
@@ -266,10 +350,33 @@ function toolRequestCode(request: ToolRequestRecord): string {
   ].join("\n");
 }
 
+function destinationPayload(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const record = value as Record<string, unknown>;
+  return `${record.user ?? ""}@${record.host ?? ""}:${record.port ?? 22}${record.path ?? ""}`;
+}
+
+function TransferProgress({ transfer }: { transfer: MainAgentFileTransferSnapshot }) {
+  const percent = typeof transfer.progress === "number" ? Math.round(transfer.progress * 100) : undefined;
+  return (
+    <div className={`transfer-progress ${transfer.status}`}>
+      <small>{transfer.status}{typeof percent === "number" ? ` · ${percent}%` : ""}{transfer.speed ? ` · ${transfer.speed}` : ""}</small>
+      <progress value={transfer.progress ?? 0} max={1} />
+      <code>{transfer.sourceLocalPath}{"\n"}→ {transfer.destination.user}@{transfer.destination.host}:{transfer.destination.path}</code>
+      {transfer.error ? <p className="request-error">{transfer.error}</p> : transfer.message ? <small>{transfer.message}</small> : null}
+    </div>
+  );
+}
+
 function upsertToolRequest(current: ToolRequestRecord[], next: ToolRequestRecord): ToolRequestRecord[] {
   const index = current.findIndex((request) => request.id === next.id);
   if (index === -1) return [next, ...current];
   return current.map((request, itemIndex) => itemIndex === index ? next : request);
+}
+
+function isRecentlyCreated(request: ToolRequestRecord, nowMs = Date.now()): boolean {
+  const createdAtMs = Date.parse(request.createdAt);
+  return Number.isFinite(createdAtMs) && nowMs - createdAtMs <= 5 * 60 * 1000;
 }
 
 function toolResultSummary(response: ToolExecutionResultResponse): string {
@@ -285,4 +392,14 @@ function toolResultSummary(response: ToolExecutionResultResponse): string {
         ? "forward pending"
         : "forward not started";
   return `${status}; ${forward}; captured ${result.outputBytes} bytes from terminal ${result.terminalId || ""}`.trim();
+}
+
+function transferFromResult(response: ToolExecutionResultResponse): MainAgentFileTransferSnapshot | null {
+  if (response.request.kind !== "main-agent-save-file" || !response.result.output) return null;
+  try {
+    const parsed = JSON.parse(response.result.output) as MainAgentFileTransferSnapshot;
+    return parsed?.transferId && parsed?.requestId ? parsed : null;
+  } catch {
+    return null;
+  }
 }

@@ -226,6 +226,14 @@ button, input, textarea {
   font-size: 12px;
 }
 
+.tool-approval-body input {
+  width: 100%;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+}
+
 .tool-approval-actions {
   display: flex;
   justify-content: flex-end;
@@ -1163,6 +1171,45 @@ h3 { font-size: 14px; }
   margin-top: 6px;
   font-size: 11px;
   color: #475569;
+}
+
+.file-status {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 6px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #eef6ff;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.transfer-progress {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.transfer-progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--accent);
+}
+
+.transfer-progress.succeeded {
+  border-color: #99f6e4;
+  background: #f0fdfa;
+}
+
+.transfer-progress.failed {
+  border-color: #fecaca;
+  background: #fef2f2;
 }
 
 .download-box,

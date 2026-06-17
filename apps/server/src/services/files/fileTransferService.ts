@@ -305,6 +305,18 @@ export class FileTransferService {
     await this.save();
   }
 
+  async stagedFile(fileId: string): Promise<UploadedFileRef | null> {
+    await this.load();
+    const file = this.stagedFiles.get(fileId);
+    if (!file || file.state === "consumed") return null;
+    try {
+      await fs.access(file.localPath);
+    } catch {
+      return null;
+    }
+    return file;
+  }
+
   private async requireAvailableFile(fileId: string, target: ToolTarget, agentId?: string): Promise<StagedFileRecord> {
     const file = this.stagedFiles.get(fileId);
     if (!file || file.state === "consumed") {

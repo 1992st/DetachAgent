@@ -56,7 +56,9 @@ export function FilePanel({
           <div className="file-row" key={file.id}>
             <strong>{file.name}</strong>
             <small>{Math.ceil(file.size / 1024)} KB</small>
-            {file.remotePath ? <code>{file.remotePath}</code> : <span className="muted">仅本地暂存</span>}
+            <span className="file-status waiting">仅本机暂存，等待 Main Agent 请求</span>
+            {file.localPath ? <code>sourceLocalPath: {file.localPath}</code> : null}
+            {file.remotePath ? <code>{file.remotePath}</code> : null}
           </div>
         ))}
       </div>

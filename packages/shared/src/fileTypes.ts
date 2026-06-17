@@ -1,4 +1,4 @@
-export type ToolTarget = "local-user-machine" | "remote-agent-host" | "gateway-managed";
+export type ToolTarget = "local-user-machine" | "remote-agent-host" | "gateway-managed" | "main-agent-machine";
 
 export interface UploadedFileRef {
   id: string;
@@ -45,4 +45,45 @@ export interface DownloadableArtifact {
   remotePath?: string;
   url: string;
   size?: number;
+}
+
+export type MainAgentFileTransferStatus =
+  | "pending"
+  | "probing"
+  | "waiting-password"
+  | "transferring"
+  | "succeeded"
+  | "failed";
+
+export interface MainAgentFileDestination {
+  host: string;
+  port: number;
+  user: string;
+  path: string;
+}
+
+export interface MainAgentFileTransferSnapshot {
+  transferId: string;
+  requestId: string;
+  sessionKey: string;
+  agentId?: string;
+  fileId: string;
+  sourceLocalPath: string;
+  displayName: string;
+  size: number;
+  destination: MainAgentFileDestination;
+  method: "rsync" | "scp" | "unknown";
+  status: MainAgentFileTransferStatus;
+  progress?: number;
+  transferredBytes?: number;
+  speed?: string;
+  message?: string;
+  error?: string;
+  needsPassword: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MainAgentFileTransferPasswordResponse {
+  transfer: MainAgentFileTransferSnapshot;
 }
