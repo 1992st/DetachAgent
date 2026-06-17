@@ -108,10 +108,9 @@ For a standard desktop app, use Electron or Tauri after the server/UI boundary i
 Implementation work:
 
 - Package the Node server with the frontend build.
-- Store settings in an OS app-data directory:
-  - macOS: `~/Library/Application Support/detaches_agent`
-  - Windows: `%APPDATA%\detaches_agent`
-  - Linux: `$XDG_CONFIG_HOME/detaches_agent` or `~/.config/detaches_agent`
+- Store settings in a consistent user home directory by default:
+  - all desktop platforms: `~/.detach_agent`
+  - tests/CI/packaged variants may override with `DETACHES_STORAGE_DIR`
 - Bundle or preflight `ssh.exe` and `curl.exe`.
 - Add auto-start/stop lifecycle for the SSH tunnel when the app opens/closes.
 

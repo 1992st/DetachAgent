@@ -389,11 +389,11 @@ export function SettingsPanel({ onSaved }: Props) {
           </div>
           <label>
             SSH identity / 私钥路径
-            <input
-              value={selectedProfile.remoteIdentityPath}
-              placeholder="/Users/zhangshutong/.ssh/detaches_agent_ed25519"
-              onChange={(e) => updateSelectedProfile({ remoteIdentityPath: e.target.value })}
-            />
+              <input
+                value={selectedProfile.remoteIdentityPath}
+              placeholder="~/.ssh/detaches_agent_ed25519"
+                onChange={(e) => updateSelectedProfile({ remoteIdentityPath: e.target.value })}
+              />
             {identityLooksInvalid ? <small className="field-warning">这里应填写私钥文件路径，不是 SSH 账号；账号请填在 SSH user。</small> : null}
           </label>
         </details>

@@ -30,17 +30,47 @@ async function macApps(): Promise<LocalTerminalApp[]> {
   return apps.filter((app, index, all) => all.findIndex((candidate) => candidate.appPath === app.appPath) === index);
 }
 
+async function windowsApps(): Promise<LocalTerminalApp[]> {
+  const candidates: Array<Omit<LocalTerminalApp, "available">> = [
+    { id: "windows-terminal", name: "Windows Terminal", appPath: "wt.exe" },
+    { id: "powershell", name: "PowerShell", appPath: "powershell.exe" },
+    { id: "cmd", name: "Command Prompt", appPath: "cmd.exe" }
+  ];
+  const apps = await Promise.all(candidates.map(async (app) => {
+    try {
+      await execFileAsync("where.exe", [app.appPath], { timeout: 1500 });
+      return { ...app, available: true };
+    } catch {
+      return { ...app, available: false };
+    }
+  }));
+  return apps;
+}
+
 export const localTerminalAppService = {
   async list(): Promise<LocalTerminalAppsResponse> {
-    if (process.platform !== "darwin") {
-      return { platform: process.platform, apps: [] };
-    }
-    return { platform: process.platform, apps: await macApps() };
+    if (process.platform === "darwin") return { platform: process.platform, apps: await macApps() };
+    if (process.platform === "win32") return { platform: process.platform, apps: await windowsApps() };
+    return { platform: process.platform, apps: [] };
   },
 
   async open(appId: string): Promise<LocalTerminalOpenResponse> {
+    if (process.platform === "win32") {
+      const apps = await windowsApps();
+      const app = apps.find((candidate) => candidate.id === appId);
+      if (!app) throw new Error(`Unknown terminal app: ${appId}`);
+      if (!app.available) throw new Error(`${app.name} is not available in PATH as ${app.appPath}.`);
+      if (app.id === "windows-terminal") {
+        await execFileAsync(app.appPath, [], { timeout: 5000 });
+      } else if (app.id === "powershell") {
+        await execFileAsync(app.appPath, ["-NoLogo"], { timeout: 5000 });
+      } else {
+        await execFileAsync(app.appPath, [], { timeout: 5000 });
+      }
+      return { ok: true, app, message: `${app.name} opened.` };
+    }
     if (process.platform !== "darwin") {
-      throw new Error("Opening local terminal apps is currently supported on macOS only.");
+      throw new Error("Opening local terminal apps is currently supported on macOS and Windows only.");
     }
     const apps = await macApps();
     const app = apps.find((candidate) => candidate.id === appId);

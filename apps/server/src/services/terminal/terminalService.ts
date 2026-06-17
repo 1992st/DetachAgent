@@ -4,6 +4,7 @@ import { spawn as spawnProcess, type ChildProcessWithoutNullStreams } from "node
 import { spawn, type IPty } from "node-pty";
 import { nanoid } from "nanoid";
 import type { TerminalInfo, TerminalStatus } from "@detaches/shared";
+import { platformService, type ShellLaunch } from "../platform/platformService.js";
 
 interface ManagedTerminal {
   id: string;
@@ -28,23 +29,8 @@ function sanitizeId(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "session";
 }
 
-function tmuxName(sessionKey: string): string {
+function terminalSessionName(sessionKey: string): string {
   return `detaches_${sanitizeId(sessionKey).slice(0, 80)}`;
-}
-
-function loginShell(): string {
-  const shell = process.env.SHELL;
-  if (shell?.startsWith("/") && shell.trim()) return shell;
-  return "/bin/zsh";
-}
-
-function ptyEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value === "string") env[key] = value;
-  }
-  env.TERM = "xterm-256color";
-  return env;
 }
 
 class TerminalService {
@@ -60,11 +46,10 @@ class TerminalService {
 
     const terminalId = nanoid();
     const createdAt = new Date().toISOString();
-    const command = this.localTerminalCommand(tmuxName(sessionKey));
-    const fallbackCommand = this.localShellCommand();
-    const shell = loginShell();
+    const launch = platformService.buildInteractiveShellLaunch({ sessionName: terminalSessionName(sessionKey) });
+    const fallbackLaunch = platformService.buildFallbackShellLaunch();
 
-    const child = this.spawnTerminal(shell, command, fallbackCommand, cols, rows);
+    const child = this.spawnTerminal(launch, fallbackLaunch, cols, rows);
 
     const terminal: ManagedTerminal = {
       id: terminalId,
@@ -72,7 +57,7 @@ class TerminalService {
       status: "starting",
       createdAt,
       lastActiveAt: createdAt,
-      command,
+      command: launch.displayCommand,
       process: child.process,
       buffer: "",
       emitter: new EventEmitter()
@@ -98,27 +83,6 @@ class TerminalService {
     });
 
     return terminal;
-  }
-
-  private localTerminalCommand(sessionName: string): string {
-    const shell = loginShell();
-    const quotedSessionName = `'${sessionName.replaceAll("'", "'\\''")}'`;
-    const quotedShell = `'${shell.replaceAll("'", "'\\''")}'`;
-    return [
-      "mkdir -p ~/.detaches_agent/workspaces",
-      "cd ~/.detaches_agent/workspaces",
-      `if command -v tmux >/dev/null 2>&1; then tmux new-session -A -s ${quotedSessionName}; else exec ${quotedShell} -l; fi`
-    ].join(" && ");
-  }
-
-  private localShellCommand(): string {
-    const shell = loginShell();
-    const quotedShell = `'${shell.replaceAll("'", "'\\''")}'`;
-    return [
-      "mkdir -p ~/.detaches_agent/workspaces",
-      "cd ~/.detaches_agent/workspaces",
-      `exec ${quotedShell} -l`
-    ].join(" && ");
   }
 
   info(terminal: ManagedTerminal): TerminalInfo {
@@ -160,18 +124,18 @@ class TerminalService {
     terminal.process.resize(safeCols, safeRows);
   }
 
-  private spawnTerminal(shell: string, command: string, fallbackCommand: string, cols: number, rows: number): {
+  private spawnTerminal(launch: ShellLaunch, fallbackLaunch: ShellLaunch, cols: number, rows: number): {
     process: TerminalProcess;
     onData: (handler: (data: string) => void) => void;
     onExit: (handler: (exitCode: number, signal?: number) => void) => void;
   } {
     try {
-      const pty = spawn(shell, ["-lc", command], {
+      const pty = spawn(launch.shell, launch.args, {
         name: "xterm-256color",
         cols,
         rows,
-        cwd: os.homedir(),
-        env: ptyEnv()
+        cwd: launch.cwd || os.homedir(),
+        env: launch.env
       });
       return {
         process: {
@@ -182,9 +146,9 @@ class TerminalService {
         onExit: (handler) => pty.onExit(({ exitCode, signal }) => handler(exitCode, signal))
       };
     } catch (error) {
-      const child = spawnProcess(shell, ["-lc", fallbackCommand], {
-        cwd: os.homedir(),
-        env: ptyEnv(),
+      const child = spawnProcess(fallbackLaunch.shell, fallbackLaunch.args, {
+        cwd: fallbackLaunch.cwd || os.homedir(),
+        env: fallbackLaunch.env,
         stdio: "pipe"
       });
       return this.wrapChildProcess(child, error instanceof Error ? error.message : String(error));

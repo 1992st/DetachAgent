@@ -6,15 +6,10 @@ import type { FileTransferPrepareResponse, ToolTarget, UploadedFileRef } from "@
 import { appConfig, publicServerBaseUrl, reverseBridgeBaseUrl } from "../../config/appConfig.js";
 import { runtimeConfig } from "../../config/settingsStore.js";
 import { gatewayClient } from "../gateway/gatewayClient.js";
+import { platformService } from "../platform/platformService.js";
 
 function normalizeRemotePath(remotePath: string, remoteHome: string): string {
-  const trimmed = remotePath.trim();
-  const expanded = trimmed === "~" ? remoteHome : trimmed.startsWith("~/") ? `${remoteHome}/${trimmed.slice(2)}` : trimmed;
-  const normalized = path.posix.normalize(expanded);
-  if (!normalized.startsWith("/")) {
-    throw new Error("Remote path must be absolute or start with ~/.");
-  }
-  return normalized.replace(/\/+$/, "") || "/";
+  return platformService.normalizeRemotePosixPath(remotePath, remoteHome);
 }
 
 function sanitizeFileName(name: string): string {
@@ -154,8 +149,8 @@ export class FileTransferService {
       return this.prepareRemoteAgentTransfer(input);
     }
     const file = await this.requireAvailableFile(fileId, target);
-    const cleanedRemotePath = input.remotePath.trim();
-    if (!cleanedRemotePath || cleanedRemotePath.includes("\0") || cleanedRemotePath.endsWith("/")) {
+    const cleanedRemotePath = platformService.normalizeLocalPath(input.remotePath) ?? input.remotePath.trim();
+    if (!cleanedRemotePath || cleanedRemotePath.includes("\0") || /[\\/]$/.test(cleanedRemotePath)) {
       void this.audit({ type: "transfer.error", fileId, target, reason: "remotePath must be a target file path." });
       throw new Error("remotePath must be a target file path.");
     }

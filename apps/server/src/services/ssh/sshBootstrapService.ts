@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import SftpClient from "ssh2-sftp-client";
+import { platformService } from "../platform/platformService.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -36,7 +36,7 @@ export async function bootstrapSshIdentity(input: SshBootstrapInput): Promise<Ss
   if (!user) throw new Error("SSH user is required.");
   if (!password) throw new Error("SSH password is required.");
 
-  const identityPath = expandHome(safeIdentityPath(input.identityPath));
+  const identityPath = platformService.expandHome(safeIdentityPath(input.identityPath));
   const publicKeyPath = `${identityPath}.pub`;
   await ensureLocalKey(identityPath);
   const publicKey = (await fs.readFile(publicKeyPath, "utf8")).trim();
@@ -94,13 +94,21 @@ async function ensureLocalKey(identityPath: string): Promise<void> {
     // Generate below.
   }
   await fs.mkdir(path.dirname(identityPath), { recursive: true, mode: 0o700 });
-  await execFileAsync("ssh-keygen", ["-t", "ed25519", "-f", identityPath, "-N", "", "-C", "detaches_agent"], { timeout: 15000 });
-  await fs.chmod(identityPath, 0o600);
-  await fs.chmod(`${identityPath}.pub`, 0o644);
+  const sshKeygen = await platformService.resolveCommand("ssh-keygen");
+  if (sshKeygen.available === false) {
+    throw new Error(`ssh-keygen is not available. Expected command: ${sshKeygen.command}.`);
+  }
+  await execFileAsync(sshKeygen.command, [...sshKeygen.argsPrefix, "-t", "ed25519", "-f", identityPath, "-N", "", "-C", "detaches_agent"], { timeout: 15000 });
+  await platformService.chmodPrivateKeyBestEffort(identityPath, `${identityPath}.pub`);
 }
 
 async function verifyKeyLogin(input: { host: string; port: number; user: string; identityPath: string }): Promise<void> {
-  await execFileAsync("ssh", [
+  const ssh = await platformService.resolveCommand("ssh");
+  if (ssh.available === false) {
+    throw new Error(`ssh is not available. Expected command: ${ssh.command}.`);
+  }
+  await execFileAsync(ssh.command, [
+    ...ssh.argsPrefix,
     "-o",
     "BatchMode=yes",
     "-o",
@@ -116,15 +124,9 @@ async function verifyKeyLogin(input: { host: string; port: number; user: string;
   ], { timeout: 15000 });
 }
 
-function expandHome(value: string): string {
-  if (value === "~") return os.homedir();
-  if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2));
-  return value;
-}
-
 function safeIdentityPath(value?: string): string {
   const trimmed = value?.trim() || "";
-  if (!trimmed) return "~/.ssh/detaches_agent_ed25519";
-  if (trimmed.startsWith("~/") || path.isAbsolute(trimmed)) return trimmed;
-  return "~/.ssh/detaches_agent_ed25519";
+  if (!trimmed) return platformService.getDefaultIdentityPath();
+  if (trimmed.startsWith("~/") || trimmed.startsWith("~\\") || path.isAbsolute(trimmed) || /^[a-zA-Z]:[\\/]/.test(trimmed)) return trimmed;
+  return platformService.getDefaultIdentityPath();
 }

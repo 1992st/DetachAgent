@@ -21,6 +21,7 @@ import { contextExportService } from "../services/context/contextExportService.j
 import { bootstrapSshIdentity } from "../services/ssh/sshBootstrapService.js";
 import { localTerminalAppService } from "../services/terminal/localTerminalAppService.js";
 import { resolveDirectGatewayUrl } from "../services/gateway/gatewayClient.js";
+import { platformService } from "../services/platform/platformService.js";
 
 const upload = multer({
   dest: path.join(appConfig.storageDir, "cache"),
@@ -140,7 +141,11 @@ async function reverseBridgeProbe(): Promise<{ ok: boolean; message: string; det
     `curl -fsS --max-time 8 ${probeUrl} >/dev/null`
   ];
   try {
-    await execFileAsync("ssh", args, { timeout: 15000 });
+    const ssh = await platformService.resolveCommand("ssh");
+    if (ssh.available === false) {
+      return { ok: false, message: `SSH client is not available. Expected command: ${ssh.command}.` };
+    }
+    await execFileAsync(ssh.command, [...ssh.argsPrefix, ...args], { timeout: 15000 });
     return {
       ok: true,
       message: `Remote agent host can reach detaches_agent through ${reverseBridgeBaseUrl(config)}.`

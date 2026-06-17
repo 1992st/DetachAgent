@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import type { PublicSettings, RemoteProfile } from "@detaches/shared";
-import { appConfig, type AppConfig } from "./appConfig.js";
+import { appConfig, repoRoot, type AppConfig } from "./appConfig.js";
 
 export interface RuntimeSettings {
   remoteHost: string;
@@ -36,6 +36,7 @@ type PersistedSettings = Partial<RuntimeSettings> & {
 };
 
 const settingsPath = path.join(appConfig.storageDir, "cache", "settings.json");
+const legacySettingsPath = path.join(repoRoot, "storage", "cache", "settings.json");
 
 function sanitizeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -103,6 +104,12 @@ export class SettingsStore {
       const parsed = JSON.parse(raw) as PersistedSettings;
       this.persisted = this.normalizePersisted(parsed);
     } catch {
+      const migrated = await this.loadLegacySettings();
+      if (migrated) {
+        this.persisted = migrated;
+        await this.save();
+        return;
+      }
       this.persisted = { activeProfileId: "default", profiles: [defaultProfile()] };
     }
   }
@@ -220,6 +227,17 @@ export class SettingsStore {
       activeProfileId: activeProfileId && profiles.some((profile) => profile.id === activeProfileId) ? activeProfileId : profiles[0].id,
       profiles
     };
+  }
+
+  private async loadLegacySettings(): Promise<{ activeProfileId: string; profiles: PersistedProfile[] } | null> {
+    if (path.resolve(settingsPath) === path.resolve(legacySettingsPath)) return null;
+    try {
+      const raw = await fs.readFile(legacySettingsPath, "utf8");
+      const parsed = JSON.parse(raw) as PersistedSettings;
+      return this.normalizePersisted(parsed);
+    } catch {
+      return null;
+    }
   }
 
   private sanitizeProfileUpdate(input: Record<string, unknown>): Partial<PersistedProfile> {

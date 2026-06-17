@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import type { AgentSummary } from "@detaches/shared";
 import { runtimeConfig } from "../../config/settingsStore.js";
+import { platformService } from "../platform/platformService.js";
 
 interface CommandResult {
   stdout: string;
@@ -44,10 +45,6 @@ function runCommand(command: string, args: string[], timeoutMs: number): Promise
       reject(new Error(stderr.trim() || `ssh exited with code ${code ?? "unknown"}`));
     });
   });
-}
-
-function runSshCommand(args: string[], timeoutMs: number): Promise<CommandResult> {
-  return runCommand("ssh", args, timeoutMs);
 }
 
 function parseDiskAgentLines(stdout: string): unknown[] {
@@ -100,10 +97,15 @@ export async function discoverAgentsViaCli(): Promise<AgentCliDiscoveryResult> {
   if (!config.remoteUser) {
     return { agents: [], skipped: "SSH user is not configured; CLI agent discovery skipped." };
   }
+  const ssh = await platformService.resolveCommand("ssh");
+  if (ssh.available === false) {
+    return { agents: [], skipped: `SSH client is not available. Expected command: ${ssh.command}.` };
+  }
 
   const target: SshTarget = {
     host: `${config.remoteUser}@${config.remoteHost}`,
     baseArgs: [
+    ...ssh.argsPrefix,
     "-p", String(config.remoteSshPort),
     "-o", "BatchMode=yes",
     "-o", "ConnectTimeout=8",
@@ -119,7 +121,7 @@ export async function discoverAgentsViaCli(): Promise<AgentCliDiscoveryResult> {
   const diskArgs = [...target.baseArgs, target.host, diskCommand];
 
   try {
-    const diskResult = await runSshCommand(diskArgs, 8000);
+    const diskResult = await runCommand(ssh.command, diskArgs, 8000);
     const raw = parseDiskAgentLines(diskResult.stdout);
     const agents = raw
       .map(summaryFromCliAgent)

@@ -15,6 +15,8 @@ const serverPort = Number(process.env.SMOKE_SERVER_PORT ?? 39888);
 const host = "127.0.0.1";
 const publicBaseUrl = `http://${host}:${serverPort}`;
 const reverseBridgeBaseUrl = `http://${host}:${serverPort}`;
+const repoRoot = path.resolve(new URL("../../..", import.meta.url).pathname);
+const smokeStorageDir = path.join(repoRoot, "storage-smoke");
 
 const observed = {
   connect: null,
@@ -248,7 +250,7 @@ async function main() {
   const mock = createMockGateway();
   mock.server.listen(gatewayPort, host);
   await once(mock.server, "listening");
-  await fs.rm(new URL("../../../storage-smoke", import.meta.url), { recursive: true, force: true });
+  await fs.rm(smokeStorageDir, { recursive: true, force: true });
 
   const server = spawn("node", ["dist/index.js"], {
     cwd: new URL("..", import.meta.url),
@@ -267,7 +269,7 @@ async function main() {
       DETACHES_PUBLIC_BASE_URL: publicBaseUrl,
       DETACHES_REVERSE_BRIDGE_REMOTE_HOST: host,
       DETACHES_REVERSE_BRIDGE_REMOTE_PORT: String(serverPort),
-      DETACHES_STORAGE_DIR: "./storage-smoke"
+      DETACHES_STORAGE_DIR: smokeStorageDir
     }
   });
 
@@ -529,7 +531,8 @@ async function main() {
       source: "detaches-ui"
     };
     const brokerSubmitToken = userChatSend.clientContext.detaches.broker.submitToken;
-    const autoDoctorContextPath = path.resolve(new URL("../../..", import.meta.url).pathname, "storage-smoke/cache/auto-doctor-context.json");
+    const autoDoctorContextPath = path.join(smokeStorageDir, "cache/auto-doctor-context.json");
+    await fs.mkdir(path.dirname(autoDoctorContextPath), { recursive: true });
     const autoDoctor = await execFileAsync(process.execPath, [
       adapterCli,
       "doctor",
@@ -975,7 +978,7 @@ async function main() {
     assert.equal(repeatedDownload.status, 200);
     assert.equal(await repeatedDownload.text(), "hello");
 
-    const auditPath = path.resolve(new URL("../../..", import.meta.url).pathname, "storage-smoke/logs/file-transfer-audit.jsonl");
+    const auditPath = path.join(smokeStorageDir, "logs/file-transfer-audit.jsonl");
     const auditEvents = (await fs.readFile(auditPath, "utf8"))
       .trim()
       .split("\n")
@@ -986,7 +989,7 @@ async function main() {
     assert.equal(auditEvents.some((event) => event.type === "transfer.download.cleanup" && event.fileId === upload.file.id && event.target === "local-user-machine" && event.deleted === false), true);
     assert.equal(auditEvents.some((event) => event.type === "transfer.error" && event.fileId === upload.file.id && event.target === "remote-agent-host" && event.agentId === "agent-alpha" && event.workspace === "/tmp/openclaw/workspace/agent-alpha"), true);
 
-    const toolAuditPath = path.resolve(new URL("../../..", import.meta.url).pathname, "storage-smoke/logs/tool-broker-audit.jsonl");
+    const toolAuditPath = path.join(smokeStorageDir, "logs/tool-broker-audit.jsonl");
     const toolAuditEvents = (await fs.readFile(toolAuditPath, "utf8"))
       .trim()
       .split("\n")
@@ -1026,7 +1029,7 @@ async function main() {
     assert.match(compatAttempts[1].message, /doctor --url/);
     const fallbackUrl = /contextExport\.consumeUrl: (http:\/\/[^\s]+)/.exec(compatAttempts[1].message)?.[1];
     assert.equal(typeof fallbackUrl, "string");
-    const fallbackDoctorContextPath = path.resolve(new URL("../../..", import.meta.url).pathname, "storage-smoke/cache/fallback-doctor-context.json");
+    const fallbackDoctorContextPath = path.join(smokeStorageDir, "cache/fallback-doctor-context.json");
     const fallbackDoctor = await execFileAsync(process.execPath, [
       adapterCli,
       "doctor",

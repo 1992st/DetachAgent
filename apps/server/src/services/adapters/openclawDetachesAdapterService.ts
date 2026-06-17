@@ -7,6 +7,7 @@ import { execFile } from "node:child_process";
 import type { OpenClawAdapterInstallPlan, OpenClawAdapterReadiness, OpenClawAdapterReadinessCheck, OpenClawAdapterReadinessState } from "@detaches/shared";
 import { repoRoot, reverseBridgeBaseUrl } from "../../config/appConfig.js";
 import { runtimeConfig } from "../../config/settingsStore.js";
+import { platformService } from "../platform/platformService.js";
 
 const gzip = promisify(zlib.gzip);
 const execFileAsync = promisify(execFile);
@@ -644,8 +645,12 @@ export const openclawDetachesAdapterService = {
       return readiness;
     }
     try {
+      const ssh = await platformService.resolveCommand("ssh");
+      if (ssh.available === false) {
+        throw new Error(`SSH client is not available. Expected command: ${ssh.command}.`);
+      }
       const script = remoteReadinessScript(installDir, info.id, info.version, workspaceDir);
-      const { stdout, stderr } = await execFileAsync("ssh", sshArgs(config, script), { timeout: 12000, maxBuffer: 1024 * 256 });
+      const { stdout, stderr } = await execFileAsync(ssh.command, [...ssh.argsPrefix, ...sshArgs(config, script)], { timeout: 12000, maxBuffer: 1024 * 256 });
       const line = stdout.trim().split("\n").filter(Boolean).at(-1);
       if (!line) throw new Error(stderr.trim() || "Remote readiness probe returned no output.");
       const parsed = JSON.parse(line) as { state?: OpenClawAdapterReadinessState; checks?: OpenClawAdapterReadinessCheck[] };
@@ -686,9 +691,12 @@ export const openclawDetachesAdapterService = {
     const baseUrl = reverseBridgeBaseUrl(config);
     const plan = await this.installPlan({ baseUrl, installDir: input.installDir, workspaceDir: input.workspaceDir });
     const args = sshArgs(config, remoteInstallScript(plan));
+    const ssh = await platformService.resolveCommand("ssh");
+    const sshCommand = ssh.available === false ? ssh.command : ssh.command;
+    const sshArgsForDisplay = [...ssh.argsPrefix, ...args];
     const bundleUrl = `${baseUrl}/api/adapters/openclaw-detaches/bundle`;
     return {
-      command: `curl -fL ${shellQuote(bundleUrl)} | ${shellJoin("ssh", args)}`,
+      command: `curl -fL ${shellQuote(bundleUrl)} | ${shellJoin(sshCommand, sshArgsForDisplay)}`,
       installDir: plan.installDir,
       remoteHost: config.remoteHost,
       remoteUser: config.remoteUser,

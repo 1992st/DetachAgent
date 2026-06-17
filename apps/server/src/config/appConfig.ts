@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { platformService } from "../services/platform/platformService.js";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -42,7 +43,7 @@ export const appConfig = {
   authToken: stringEnv("OPENCLAW_AUTH_TOKEN"),
   authPassword: stringEnv("OPENCLAW_AUTH_PASSWORD"),
   remoteWorkspaceRoot: stringEnv("OPENCLAW_REMOTE_WORKSPACE_ROOT", "~/.openclaw/workspace"),
-  storageDir: path.resolve(repoRoot, stringEnv("DETACHES_STORAGE_DIR", "./storage")),
+  storageDir: platformService.getAppDataDir(),
   maxUploadMb: intEnv("DETACHES_MAX_UPLOAD_MB", 100)
 };
 

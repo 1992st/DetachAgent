@@ -1,0 +1,32 @@
+appId: com.detaches.agent
+productName: Detaches Agent
+directories:
+  output: ../../release
+files:
+  - dist/**
+  - package.json
+  - ../../apps/server/dist/**
+  - ../../apps/server/package.json
+  - ../../apps/web/dist/**
+  - ../../apps/web/public/**
+  - ../../packages/shared/dist/**
+  - ../../packages/openclaw-detaches-adapter/**
+asar: true
+asarUnpack:
+  - ../../apps/server/node_modules/node-pty/**
+extraMetadata:
+  main: dist/main.js
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: detaches-agent-${version}-win-${arch}-setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Detaches Agent
+publish: null

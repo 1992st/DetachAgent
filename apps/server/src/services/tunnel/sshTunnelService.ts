@@ -1,11 +1,8 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import net from "node:net";
 import { runtimeConfig } from "../../config/settingsStore.js";
-
-const execFileAsync = promisify(execFile);
+import { platformService, type PortOwner } from "../platform/platformService.js";
 
 export interface TunnelStatus {
   ok: boolean;
@@ -19,12 +16,6 @@ export interface TunnelStatus {
   owner?: PortOwner | null;
   ownedByManagedProcess?: boolean;
   localForwardManaged?: boolean;
-}
-
-interface PortOwner {
-  command: string;
-  pid: number;
-  raw: string;
 }
 
 class SshTunnelService {
@@ -69,7 +60,7 @@ class SshTunnelService {
     let includeLocalForward = true;
     if (await this.isPortListening(config.gatewayLocalPort)) {
       const ownedByThisProcess = Boolean(this.process?.pid && !this.process.killed);
-      const owner = await this.portOwner(config.gatewayLocalPort);
+      const owner = await platformService.getPortOwner(config.gatewayLocalPort);
       const ownedBySsh = owner?.command.toLowerCase().includes("ssh") ?? false;
       if (ownedByThisProcess) {
         return {
@@ -108,7 +99,19 @@ class SshTunnelService {
     }
 
     this.stderr = "";
+    const ssh = await platformService.resolveCommand("ssh");
+    if (ssh.available === false) {
+      return {
+        ok: false,
+        message: `SSH client is not available. Expected command: ${ssh.command}.`,
+        localPort: config.gatewayLocalPort,
+        reverseHost: config.reverseBridgeRemoteHost,
+        reversePort: config.reverseBridgeRemotePort,
+        reverseBrokerUrl: `http://${config.reverseBridgeRemoteHost}:${config.reverseBridgeRemotePort}`
+      };
+    }
     const args = [
+      ...ssh.argsPrefix,
       "-N",
       ...(includeLocalForward
         ? ["-L", `${config.gatewayLocalPort}:${config.gatewayRemoteHost}:${config.gatewayRemotePort}`]
@@ -131,7 +134,7 @@ class SshTunnelService {
     }
     args.push(`${config.remoteUser}@${config.remoteHost}`);
 
-    this.process = spawn("ssh", args, { stdio: ["ignore", "pipe", "pipe"] });
+    this.process = spawn(ssh.command, args, { stdio: ["ignore", "pipe", "pipe"] });
     const child = this.process;
     child.stderr.on("data", (chunk: Buffer) => {
       this.stderr += chunk.toString("utf8");
@@ -205,20 +208,8 @@ class SshTunnelService {
     });
   }
 
-  private async portOwner(port: number): Promise<PortOwner | null> {
-    try {
-      const { stdout } = await execFileAsync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-F", "cp"], { timeout: 1500 });
-      const command = /^c(.+)$/m.exec(stdout)?.[1];
-      const pid = Number(/^p(\d+)$/m.exec(stdout)?.[1]);
-      if (!command || !Number.isFinite(pid)) return null;
-      return { command, pid, raw: stdout };
-    } catch {
-      return null;
-    }
-  }
-
   async localPortOwner(port: number): Promise<PortOwner | null> {
-    return this.portOwner(port);
+    return platformService.getPortOwner(port);
   }
 
   private waitForListeningOrExit(child: ChildProcessByStdio<null, Readable, Readable>, port: number, timeoutMs: number): Promise<boolean> {
