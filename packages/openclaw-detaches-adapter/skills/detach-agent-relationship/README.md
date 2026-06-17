@@ -17,6 +17,7 @@ detach-agent-relationship/
   SKILL.md
   VERSION
   README.md
+  CHANGELOG.md
 ```
 
 Update `VERSION` whenever `SKILL.md` behavior changes.

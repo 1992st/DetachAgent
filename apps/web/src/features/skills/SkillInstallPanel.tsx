@@ -1,53 +1,22 @@
-import { CheckCircle2, RefreshCw, ShieldCheck } from "lucide-react";
+import { Copy, FileText, RefreshCw, ShieldCheck } from "lucide-react";
 import { useState } from "react";
-import type { ToolRequestRecord } from "@detaches/shared";
-import { createToolRequest } from "../../lib/api.js";
 
 const skillName = "detach-agent-relationship";
-const skillVersion = "1.0.0";
+const skillVersion = "1.0.1";
 const protocolVersion = "1.0.0";
-const packageVersion = "1.0.0";
+const packageVersion = "1.0.1";
 const targetDir = "~/.openclaw/skills";
-const localSkillCacheDir = "~/.detach_agent/skills";
 const repositoryUrl = "https://github.com/1992st/DetachAgent.git";
-const repositoryLocalPath = "/Users/zhangshutong/code/detaches_agent";
 const skillSourcePath = "packages/openclaw-detaches-adapter/skills/detach-agent-relationship";
 
-export function SkillInstallPanel({ sessionKey, agentId }: { sessionKey: string | null; agentId: string | null }) {
-  const [busy, setBusy] = useState<"install" | "verify" | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [lastRequest, setLastRequest] = useState<ToolRequestRecord | null>(null);
+export function SkillInstallPanel({ sessionKey: _sessionKey, agentId: _agentId }: { sessionKey: string | null; agentId: string | null }) {
+  const [mode, setMode] = useState<"install" | "verify" | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
 
-  async function createSkillRequest(action: "install" | "verify") {
-    if (!sessionKey) {
-      setError("选择 Agent 后才能创建 Skill 请求。");
-      return;
-    }
-    setBusy(action);
-    setError(null);
-    setMessage(null);
-    try {
-      const response = await createToolRequest({
-        kind: action === "install" ? "skill-install" : "skill-verify",
-        target: "local-user-machine",
-        sessionKey,
-        agentId: agentId || undefined,
-        reason: action === "install"
-          ? "Install or update detach-agent-relationship into the Host/Main Agent OpenClaw global skills path."
-          : "Verify detach-agent-relationship is installed in the Host/Main Agent OpenClaw global skills path.",
-        source: "api",
-        payload: buildPayload(action)
-      });
-      setLastRequest(response.request);
-      setMessage(action === "install"
-        ? `已创建 Skill 安装审批：${response.request.id}`
-        : `已创建 Skill 验证审批：${response.request.id}`);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
-    } finally {
-      setBusy(null);
-    }
+  async function copy(value: string, label: string) {
+    await navigator.clipboard.writeText(value);
+    setCopied(label);
+    window.setTimeout(() => setCopied((current) => current === label ? null : current), 1600);
   }
 
   return (
@@ -59,63 +28,136 @@ export function SkillInstallPanel({ sessionKey, agentId }: { sessionKey: string 
         </div>
         <ShieldCheck size={17} />
       </div>
-      <div className="adapter-state-card ready">
+      <div className="adapter-state-card">
         <div>
-          <CheckCircle2 size={16} />
+          <FileText size={16} />
           <strong>{skillName}</strong>
         </div>
-        <small>本机缓存：{localSkillCacheDir}</small>
-        <small>目标路径：{targetDir}</small>
-        <small>skill v{skillVersion} · protocol v{protocolVersion}</small>
+        <small>安装说明 · 需在 Main Agent 机器执行</small>
+        <small>目标路径：{targetDir}/{skillName}</small>
+        <small>skill v{skillVersion} · protocol v{protocolVersion} · package v{packageVersion}</small>
       </div>
       <div className="adapter-actions">
-        <button type="button" className="secondary-button compact" onClick={() => void createSkillRequest("install")} disabled={!sessionKey || busy !== null}>
+        <button type="button" className="secondary-button compact" onClick={() => setMode((current) => current === "install" ? null : "install")}>
           <ShieldCheck size={14} />
-          {busy === "install" ? "创建中" : "安装/更新 Skill"}
+          安装/更新 Skill
         </button>
-        <button type="button" className="secondary-button compact" onClick={() => void createSkillRequest("verify")} disabled={!sessionKey || busy !== null}>
+        <button type="button" className="secondary-button compact" onClick={() => setMode((current) => current === "verify" ? null : "verify")}>
           <RefreshCw size={14} />
-          {busy === "verify" ? "创建中" : "验证安装"}
+          验证安装
         </button>
       </div>
-      {lastRequest ? (
-        <div className={`adapter-install-request ${lastRequest.status}`}>
-          <strong>Skill 请求：{lastRequest.status}</strong>
-          <small>{lastRequest.id}</small>
-          <p>已进入 Tool Queue，审批后执行。</p>
+      {mode ? (
+        <div className="skill-install-instructions">
+          <InstructionBlock
+            title={mode === "install" ? "Main Agent 机器执行命令" : "Main Agent 机器验证命令"}
+            description={mode === "install"
+              ? "复制到 Main Agent 机器的 terminal 执行，从 GitHub 拉取 relationship skill 并安装到 OpenClaw shared/global skills 路径。"
+              : "复制到 Main Agent 机器的 terminal 执行，检查 skill 文件和版本。"}
+            value={mode === "install" ? installCommand : verifyCommand}
+            copyLabel={`${mode}-command`}
+            copied={copied}
+            onCopy={copy}
+          />
+          <InstructionBlock
+            title={mode === "install" ? "发给 Main Agent 的 Prompt" : "发给 Main Agent 的验证 Prompt"}
+            description={mode === "install"
+              ? "当用户希望 Main Agent 自己处理安装时，复制这段 prompt 发给 Main Agent。"
+              : "当用户希望 Main Agent 自己检查安装状态时，复制这段 prompt 发给 Main Agent。"}
+            value={mode === "install" ? installPrompt : verifyPrompt}
+            copyLabel={`${mode}-prompt`}
+            copied={copied}
+            onCopy={copy}
+          />
         </div>
       ) : null}
-      {message ? <p className="adapter-request-message">{message}</p> : null}
-      {error ? <div className="panel-error tight">{error}</div> : null}
     </section>
   );
 }
 
-function buildPayload(action: "install" | "verify"): Record<string, unknown> {
-  return {
-    targetAgent: "openclaw",
-    targetRole: "host_main_agent",
-    installScope: "shared_managed",
-    action: action === "install" ? "install_or_update_skill" : "verify_skill_install",
-    skillName,
-    skillVersion,
-    protocolVersion,
-    packageVersion,
-    targetDir,
-    localSkillCacheDir,
-    targetPathPolicy: "openclaw_global_shared_skills",
-    prompt: action === "install"
-      ? `Install or update the complete attached skill package. Repository source: ${repositoryUrl}. Current Detach Agent checkout path: ${repositoryLocalPath}. Skill source path inside the repository: ${skillSourcePath}. If the attachment is unavailable, run this on the Host/Main Agent computer: tmp_dir=$(mktemp -d) && git clone --depth 1 ${repositoryUrl} "$tmp_dir/DetachAgent" && mkdir -p ~/.openclaw/skills && rm -rf ~/.openclaw/skills/detach-agent-relationship && cp -R "$tmp_dir/DetachAgent/${skillSourcePath}" ~/.openclaw/skills/detach-agent-relationship && rm -rf "$tmp_dir". If the Host/Main Agent computer can directly access the current checkout, copy from ${repositoryLocalPath}/${skillSourcePath}. First cache the skill on this machine under ~/.detach_agent/skills when using the attachment flow, then copy it into the OpenClaw shared/global skills path for the Host/Main Agent. Do not install into a workspace or Detach Agent machine unless explicitly requested.`
-      : "Verify the local ~/.detach_agent/skills cache and the OpenClaw shared/global skills installation for the Host/Main Agent.",
-    attachment: {
-      name: "detach-agent-relationship.skill.zip",
-      type: "application/zip",
-      path: "/skills/detach-agent-relationship.skill.zip",
-      url: `${window.location.origin}/skills/detach-agent-relationship.skill.zip`
-    },
-    expectedPackage: {
-      root: "detach-agent-relationship",
-      files: ["SKILL.md", "VERSION", "README.md"]
-    }
-  };
+function InstructionBlock({
+  title,
+  description,
+  value,
+  copyLabel,
+  copied,
+  onCopy
+}: {
+  title: string;
+  description: string;
+  value: string;
+  copyLabel: string;
+  copied: string | null;
+  onCopy: (value: string, label: string) => Promise<void>;
+}) {
+  return (
+    <div className="adapter-command-box">
+      <div>
+        <div>
+          <strong>{title}</strong>
+          <small>{description}</small>
+        </div>
+        <button type="button" className="copy-button" title={`Copy ${title}`} onClick={() => void onCopy(value, copyLabel)}>
+          <Copy size={14} />
+        </button>
+      </div>
+      <pre>{value}</pre>
+      {copied === copyLabel ? <small>已复制</small> : null}
+    </div>
+  );
 }
+
+const installCommand = [
+  "tmp_dir=$(mktemp -d)",
+  `git clone --depth 1 ${repositoryUrl} "$tmp_dir/DetachAgent"`,
+  `mkdir -p ${targetDir}`,
+  `rm -rf ${targetDir}/${skillName}`,
+  `cp -R "$tmp_dir/DetachAgent/${skillSourcePath}" ${targetDir}/${skillName}`,
+  `test -f ${targetDir}/${skillName}/SKILL.md`,
+  `test -f ${targetDir}/${skillName}/README.md`,
+  `test -f ${targetDir}/${skillName}/VERSION`,
+  `test -f ${targetDir}/${skillName}/CHANGELOG.md`,
+  `cat ${targetDir}/${skillName}/VERSION`,
+  "rm -rf \"$tmp_dir\""
+].join(" && ");
+
+const verifyCommand = [
+  `test -f ${targetDir}/${skillName}/SKILL.md`,
+  `test -f ${targetDir}/${skillName}/README.md`,
+  `test -f ${targetDir}/${skillName}/VERSION`,
+  `test -f ${targetDir}/${skillName}/CHANGELOG.md`,
+  `printf 'detach-agent-relationship version: '`,
+  `cat ${targetDir}/${skillName}/VERSION`
+].join(" && ");
+
+const installPrompt = `请在 Main Agent 机器上安装或更新 OpenClaw relationship skill。
+
+目标 skill: ${skillName}
+目标版本: ${skillVersion}
+GitHub 仓库: ${repositoryUrl}
+仓库内路径: ${skillSourcePath}
+安装路径: ${targetDir}/${skillName}
+
+请在 Main Agent 机器执行以下步骤：
+1. 从 GitHub clone 仓库。
+2. 将 ${skillSourcePath} 复制到 ${targetDir}/${skillName}。
+3. 确认安装目录包含 SKILL.md、README.md、VERSION、CHANGELOG.md。
+4. 确认 VERSION 内容为 ${skillVersion}。
+5. 安装后刷新或重启 Main Agent / OpenClaw skill 索引，让新 skill 生效。
+
+不要把这个 skill 安装到 Detach Agent 机器，除非这台机器同时也是 Main Agent 机器。`;
+
+const verifyPrompt = `请在 Main Agent 机器上验证 OpenClaw relationship skill 是否安装正确。
+
+目标 skill: ${skillName}
+期望版本: ${skillVersion}
+安装路径: ${targetDir}/${skillName}
+
+请检查：
+1. ${targetDir}/${skillName}/SKILL.md 存在。
+2. ${targetDir}/${skillName}/README.md 存在。
+3. ${targetDir}/${skillName}/VERSION 存在，内容为 ${skillVersion}。
+4. ${targetDir}/${skillName}/CHANGELOG.md 存在。
+5. Main Agent / OpenClaw 已刷新或重启 skill 索引，可以加载该 skill。
+
+请返回 installedPath、version、packageStructureStatus、reloadOrReindexStatus。`;

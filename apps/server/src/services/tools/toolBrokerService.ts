@@ -31,7 +31,7 @@ import { terminalService } from "../terminal/terminalService.js";
 import { openclawDetachesAdapterService } from "../adapters/openclawDetachesAdapterService.js";
 
 const DETACH_AGENT_SKILL_NAME = "detach-agent-relationship";
-const DETACH_AGENT_SKILL_VERSION = "1.0.0";
+const DETACH_AGENT_SKILL_VERSION = "1.0.1";
 const DETACH_AGENT_SKILL_ZIP_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../../../web/public/skills/detach-agent-relationship.skill.zip"
@@ -1000,6 +1000,7 @@ function buildOpenClawSkillInstallCommand(request: ToolRequestRecord): string {
     "test -f \"$TMP_DIR/$SKILL_NAME/SKILL.md\" || { echo \"Missing SKILL.md in skill package\" >&2; exit 3; }",
     "test -f \"$TMP_DIR/$SKILL_NAME/VERSION\" || { echo \"Missing VERSION in skill package\" >&2; exit 4; }",
     "test -f \"$TMP_DIR/$SKILL_NAME/README.md\" || { echo \"Missing README.md in skill package\" >&2; exit 5; }",
+    "test -f \"$TMP_DIR/$SKILL_NAME/CHANGELOG.md\" || { echo \"Missing CHANGELOG.md in skill package\" >&2; exit 8; }",
     "rm -rf \"$LOCAL_SKILL_CACHE_DIR/$SKILL_NAME\"",
     "cp -R \"$TMP_DIR/$SKILL_NAME\" \"$LOCAL_SKILL_CACHE_DIR/$SKILL_NAME\"",
     "test -f \"$LOCAL_SKILL_CACHE_DIR/$SKILL_NAME/SKILL.md\" || { echo \"Local skill cache missing SKILL.md: $LOCAL_SKILL_CACHE_DIR/$SKILL_NAME\" >&2; exit 7; }",
@@ -1042,10 +1043,12 @@ function buildOpenClawSkillVerifyCommand(request: ToolRequestRecord): string {
     "test -f \"$LOCAL_SKILL_DIR/SKILL.md\" || { echo \"Local skill cache missing SKILL.md\" >&2; exit 3; }",
     "test -f \"$LOCAL_SKILL_DIR/VERSION\" || { echo \"Local skill cache missing VERSION\" >&2; exit 4; }",
     "test -f \"$LOCAL_SKILL_DIR/README.md\" || { echo \"Local skill cache missing README.md\" >&2; exit 5; }",
+    "test -f \"$LOCAL_SKILL_DIR/CHANGELOG.md\" || { echo \"Local skill cache missing CHANGELOG.md\" >&2; exit 8; }",
     "if [ ! -d \"$SKILL_DIR\" ]; then mkdir -p \"$TARGET_DIR\"; cp -R \"$LOCAL_SKILL_DIR\" \"$SKILL_DIR\"; fi",
     "test -f \"$SKILL_DIR/SKILL.md\" || { echo \"Missing SKILL.md\" >&2; exit 3; }",
     "test -f \"$SKILL_DIR/VERSION\" || { echo \"Missing VERSION\" >&2; exit 4; }",
     "test -f \"$SKILL_DIR/README.md\" || { echo \"Missing README.md\" >&2; exit 5; }",
+    "test -f \"$SKILL_DIR/CHANGELOG.md\" || { echo \"Missing CHANGELOG.md\" >&2; exit 8; }",
     "VERSION=$(cat \"$SKILL_DIR/VERSION\")",
     "test \"$VERSION\" = \"$TARGET_VERSION\" || { echo \"Version mismatch: $VERSION expected $TARGET_VERSION\" >&2; exit 6; }",
     "echo \"detach-agent-relationship skill ready\"",

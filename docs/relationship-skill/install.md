@@ -32,16 +32,22 @@ Use one of these sources from this repository:
 When this project is hosted on Git, users can either clone the repository or
 download the packaged `detach-agent-relationship.skill.zip` release artifact.
 
-## Install From A Git Clone
+## Install From GitHub
 
 Run these commands on the Host/Main Agent computer:
 
 ```bash
-git clone https://github.com/1992st/DetachAgent.git
-cd DetachAgent
+tmp_dir=$(mktemp -d)
+git clone --depth 1 https://github.com/1992st/DetachAgent.git "$tmp_dir/DetachAgent"
 mkdir -p ~/.openclaw/skills
 rm -rf ~/.openclaw/skills/detach-agent-relationship
-cp -R packages/openclaw-detaches-adapter/skills/detach-agent-relationship ~/.openclaw/skills/detach-agent-relationship
+cp -R "$tmp_dir/DetachAgent/packages/openclaw-detaches-adapter/skills/detach-agent-relationship" ~/.openclaw/skills/detach-agent-relationship
+test -f ~/.openclaw/skills/detach-agent-relationship/SKILL.md
+test -f ~/.openclaw/skills/detach-agent-relationship/README.md
+test -f ~/.openclaw/skills/detach-agent-relationship/VERSION
+test -f ~/.openclaw/skills/detach-agent-relationship/CHANGELOG.md
+cat ~/.openclaw/skills/detach-agent-relationship/VERSION
+rm -rf "$tmp_dir"
 ```
 
 Repository details for this checkout:
@@ -62,7 +68,7 @@ cp -R /Users/zhangshutong/code/detaches_agent/packages/openclaw-detaches-adapter
 One-line install command:
 
 ```bash
-tmp_dir=$(mktemp -d) && git clone --depth 1 https://github.com/1992st/DetachAgent.git "$tmp_dir/DetachAgent" && mkdir -p ~/.openclaw/skills && rm -rf ~/.openclaw/skills/detach-agent-relationship && cp -R "$tmp_dir/DetachAgent/packages/openclaw-detaches-adapter/skills/detach-agent-relationship" ~/.openclaw/skills/detach-agent-relationship && rm -rf "$tmp_dir"
+tmp_dir=$(mktemp -d) && git clone --depth 1 https://github.com/1992st/DetachAgent.git "$tmp_dir/DetachAgent" && mkdir -p ~/.openclaw/skills && rm -rf ~/.openclaw/skills/detach-agent-relationship && cp -R "$tmp_dir/DetachAgent/packages/openclaw-detaches-adapter/skills/detach-agent-relationship" ~/.openclaw/skills/detach-agent-relationship && test -f ~/.openclaw/skills/detach-agent-relationship/SKILL.md && test -f ~/.openclaw/skills/detach-agent-relationship/README.md && test -f ~/.openclaw/skills/detach-agent-relationship/VERSION && test -f ~/.openclaw/skills/detach-agent-relationship/CHANGELOG.md && cat ~/.openclaw/skills/detach-agent-relationship/VERSION && rm -rf "$tmp_dir"
 ```
 
 Then restart the Host/Main Agent session or refresh the OpenClaw skill index so
@@ -84,6 +90,7 @@ The zip must extract to this folder structure:
   SKILL.md
   README.md
   VERSION
+  CHANGELOG.md
 ```
 
 Then restart the Host/Main Agent session or refresh the OpenClaw skill index.
@@ -113,10 +120,12 @@ Run these checks on the Host/Main Agent computer:
 test -f ~/.openclaw/skills/detach-agent-relationship/SKILL.md
 test -f ~/.openclaw/skills/detach-agent-relationship/README.md
 test -f ~/.openclaw/skills/detach-agent-relationship/VERSION
+test -f ~/.openclaw/skills/detach-agent-relationship/CHANGELOG.md
 cat ~/.openclaw/skills/detach-agent-relationship/VERSION
 ```
 
-The current package version is recorded in `VERSION`.
+The current package version is recorded in `VERSION`; this release expects
+`1.0.1`.
 
 ## Troubleshooting
 
@@ -141,7 +150,8 @@ computer where the Host/Main Agent process runs.
 `Zip extracted, but the skill is still broken`
 
 Check that the zip contains a top-level `detach-agent-relationship/` folder and
-that `SKILL.md`, `README.md`, and `VERSION` are inside that folder.
+that `SKILL.md`, `README.md`, `VERSION`, and `CHANGELOG.md` are inside that
+folder.
 
 `Skill exists, but the agent does not use it`
 
