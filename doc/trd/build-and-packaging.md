@@ -103,6 +103,72 @@ The local server listens on:
 http://127.0.0.1:38888
 ```
 
+`pnpm dev` starts only the local Detaches Agent server and web UI. It does not restart the remote OpenClaw Gateway. When `OPENCLAW_GATEWAY_TRANSPORT=ssh`, the local server may create or recreate its own local SSH tunnel process, but it does not restart the remote Gateway process.
+
+## Linux Development Runtime
+
+Linux V1 supports source/development usage, not Linux desktop installer packaging.
+
+Recommended first validation targets:
+
+- Ubuntu 22.04 x64
+- Ubuntu 24.04 x64
+
+Required Linux tools:
+
+- Node.js 22 LTS
+- Corepack / pnpm 9.15.9
+- Git
+- OpenSSH client: `ssh`, `ssh-keygen`
+- `curl`
+- `/bin/bash` or `/bin/sh`
+- native build tools for `node-pty`, usually `python3`, `make`, and `g++`
+
+Recommended optional tools:
+
+- `tmux` for better local terminal persistence
+- `lsof`, `ss`, or `netstat` for port-owner diagnostics
+
+Linux setup:
+
+```bash
+corepack enable
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm build
+```
+
+Linux development run:
+
+```bash
+pnpm dev
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173
+```
+
+Health check:
+
+```bash
+curl -fsS http://127.0.0.1:38888/api/health
+```
+
+Linux validation checklist:
+
+- `pnpm --filter @detaches/server test`
+- `pnpm --filter @detaches/openclaw-detaches-adapter test`
+- `pnpm --filter @detaches/server smoke`
+- direct Gateway health passes
+- SSH tunnel mode establishes local `-L` and remote `-R`
+- local terminal opens and can run a command
+- upload, download, and file transfer paths work
+- adapter local readiness and remote readiness work
+
+Do not mark Linux as fully supported until this checklist passes on a real Linux machine or Linux CI runner.
+
 ## Run Electron Desktop In Development
 
 First build server/web once:

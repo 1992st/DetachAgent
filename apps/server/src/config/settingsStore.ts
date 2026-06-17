@@ -230,6 +230,7 @@ export class SettingsStore {
   }
 
   private async loadLegacySettings(): Promise<{ activeProfileId: string; profiles: PersistedProfile[] } | null> {
+    if (process.env.DETACHES_DISABLE_LEGACY_SETTINGS_MIGRATION === "1") return null;
     if (path.resolve(settingsPath) === path.resolve(legacySettingsPath)) return null;
     try {
       const raw = await fs.readFile(legacySettingsPath, "utf8");

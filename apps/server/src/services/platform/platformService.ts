@@ -1,3 +1,4 @@
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -46,6 +47,7 @@ export interface PlatformOverrides {
   homeDir?: string;
   resourcesDir?: string;
   appName?: string;
+  pathExists?: (filePath: string) => boolean;
 }
 
 export class PlatformService {
@@ -114,7 +116,12 @@ export class PlatformService {
       return this.env().COMSPEC || "powershell.exe";
     }
     const shell = this.env().SHELL;
-    return shell?.startsWith("/") && shell.trim() ? shell : "/bin/zsh";
+    if (shell?.startsWith("/") && shell.trim()) return shell;
+    if (this.nodePlatform() === "linux") {
+      if (this.pathExists("/bin/bash")) return "/bin/bash";
+      return "/bin/sh";
+    }
+    return "/bin/zsh";
   }
 
   buildShellLaunch(command: string, options: { cwd?: string; login?: boolean } = {}): ShellLaunch {
@@ -140,7 +147,7 @@ export class PlatformService {
 
   buildInteractiveShellLaunch(options: { cwd?: string; sessionName?: string } = {}): ShellLaunch {
     if (this.nodePlatform() === "win32") {
-      const workspace = path.win32.join(this.homeDir(), ".detaches_agent", "workspaces");
+      const workspace = path.win32.join(this.homeDir(), ".detach_agent", "workspaces");
       const command = [
         `$workspace = ${this.powerShellQuote(workspace)}`,
         "New-Item -ItemType Directory -Force -Path $workspace | Out-Null",
@@ -153,8 +160,8 @@ export class PlatformService {
     const quotedSessionName = this.posixShellQuote(options.sessionName || "detaches");
     const quotedShell = this.posixShellQuote(shell);
     const command = [
-      "mkdir -p ~/.detaches_agent/workspaces",
-      "cd ~/.detaches_agent/workspaces",
+      "mkdir -p ~/.detach_agent/workspaces",
+      "cd ~/.detach_agent/workspaces",
       `if command -v tmux >/dev/null 2>&1; then tmux new-session -A -s ${quotedSessionName}; else exec ${quotedShell} -l; fi`
     ].join(" && ");
     return this.buildShellLaunch(command, { cwd: options.cwd || this.homeDir() });
@@ -167,8 +174,8 @@ export class PlatformService {
     const shell = this.getDefaultShell();
     const quotedShell = this.posixShellQuote(shell);
     const command = [
-      "mkdir -p ~/.detaches_agent/workspaces",
-      "cd ~/.detaches_agent/workspaces",
+      "mkdir -p ~/.detach_agent/workspaces",
+      "cd ~/.detach_agent/workspaces",
       `exec ${quotedShell} -l`
     ].join(" && ");
     return this.buildShellLaunch(command, { cwd: options.cwd || this.homeDir() });
@@ -225,6 +232,12 @@ export class PlatformService {
   }
 
   private async posixPortOwner(port: number): Promise<PortOwner | null> {
+    return await this.lsofPortOwner(port)
+      ?? (this.nodePlatform() === "linux" ? await this.ssPortOwner(port) : null)
+      ?? (this.nodePlatform() === "linux" ? await this.netstatPortOwner(port) : null);
+  }
+
+  private async lsofPortOwner(port: number): Promise<PortOwner | null> {
     try {
       const { stdout } = await execFileAsync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-F", "cp"], { timeout: 1500 });
       const command = /^c(.+)$/m.exec(stdout)?.[1];
@@ -234,6 +247,39 @@ export class PlatformService {
     } catch {
       return null;
     }
+  }
+
+  private async ssPortOwner(port: number): Promise<PortOwner | null> {
+    try {
+      const { stdout } = await execFileAsync("ss", ["-ltnp"], { timeout: 1500, maxBuffer: 1024 * 1024 });
+      return this.parseLinuxPortOwner(stdout, port);
+    } catch {
+      return null;
+    }
+  }
+
+  private async netstatPortOwner(port: number): Promise<PortOwner | null> {
+    try {
+      const { stdout } = await execFileAsync("netstat", ["-ltnp"], { timeout: 1500, maxBuffer: 1024 * 1024 });
+      return this.parseLinuxPortOwner(stdout, port);
+    } catch {
+      return null;
+    }
+  }
+
+  private parseLinuxPortOwner(stdout: string, port: number): PortOwner | null {
+    const line = stdout.split(/\r?\n/).find((item) => {
+      const columns = item.trim().split(/\s+/);
+      return columns.some((column) => column.endsWith(`:${port}`));
+    });
+    if (!line) return null;
+    const processMatch = /users:\(\("([^"]+)",pid=(\d+)/.exec(line)
+      ?? /(?:^|\s)(\d+)\/([^\s]+)\s*$/.exec(line);
+    if (!processMatch) return { command: "unknown", pid: 0, raw: line };
+    if (processMatch.length === 3 && /^\d+$/.test(processMatch[1] ?? "")) {
+      return { command: processMatch[2] ?? "unknown", pid: Number(processMatch[1]), raw: line };
+    }
+    return { command: processMatch[1] ?? "unknown", pid: Number(processMatch[2]), raw: line };
   }
 
   private async windowsPortOwner(port: number): Promise<PortOwner | null> {
@@ -267,6 +313,16 @@ export class PlatformService {
 
   private homeDir(): string {
     return this.overrides.homeDir || os.homedir();
+  }
+
+  private pathExists(filePath: string): boolean {
+    if (this.overrides.pathExists) return this.overrides.pathExists(filePath);
+    try {
+      fsSync.statSync(filePath);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private processEnv(): Record<string, string> {

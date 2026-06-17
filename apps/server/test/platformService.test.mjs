@@ -18,6 +18,20 @@ const posix = new PlatformService({
   }
 });
 
+const linuxWithBash = new PlatformService({
+  platform: "linux",
+  homeDir: "/home/alice",
+  env: {},
+  pathExists: (filePath) => filePath === "/bin/bash"
+});
+
+const linuxWithoutBash = new PlatformService({
+  platform: "linux",
+  homeDir: "/home/alice",
+  env: {},
+  pathExists: () => false
+});
+
 assert.equal(
   win.getAppDataDir(),
   "C:\\Users\\alice\\.detach_agent",
@@ -28,6 +42,12 @@ assert.equal(
   posix.getAppDataDir(),
   "/Users/alice/.detach_agent",
   "POSIX app data path should default to ~/.detach_agent"
+);
+
+assert.equal(
+  linuxWithBash.getAppDataDir(),
+  "/home/alice/.detach_agent",
+  "Linux app data path should default to ~/.detach_agent"
 );
 
 assert.equal(
@@ -51,6 +71,17 @@ assert.deepEqual(
   ["-NoLogo", "-NoExit", "-ExecutionPolicy", "Bypass"],
   "PowerShell launch should use non-interactive-safe flags"
 );
+
+assert.equal(linuxWithBash.getDefaultShell(), "/bin/bash", "Linux should fall back to /bin/bash when SHELL is unset and bash exists");
+assert.equal(linuxWithoutBash.getDefaultShell(), "/bin/sh", "Linux should fall back to /bin/sh when bash is unavailable");
+
+const linuxLaunch = linuxWithBash.buildInteractiveShellLaunch({ sessionName: "agent-main" });
+assert.equal(linuxLaunch.shell, "/bin/bash", "Linux interactive launch should use the Linux fallback shell");
+assert.match(linuxLaunch.displayCommand, /mkdir -p ~\/\.detach_agent\/workspaces/, "Linux terminal workspace should use ~/.detach_agent");
+assert.match(linuxLaunch.displayCommand, /cd ~\/\.detach_agent\/workspaces/, "Linux terminal should cd into the unified workspace path");
+
+const winLaunch = win.buildInteractiveShellLaunch();
+assert.match(winLaunch.displayCommand, /\\.detach_agent\\workspaces/, "Windows terminal workspace should use ~/.detach_agent");
 
 assert.equal(
   posix.normalizeRemotePosixPath("~/workspace/file.txt", "/home/alice"),

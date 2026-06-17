@@ -269,7 +269,8 @@ async function main() {
       DETACHES_PUBLIC_BASE_URL: publicBaseUrl,
       DETACHES_REVERSE_BRIDGE_REMOTE_HOST: host,
       DETACHES_REVERSE_BRIDGE_REMOTE_PORT: String(serverPort),
-      DETACHES_STORAGE_DIR: smokeStorageDir
+      DETACHES_STORAGE_DIR: smokeStorageDir,
+      DETACHES_DISABLE_LEGACY_SETTINGS_MIGRATION: "1"
     }
   });
 
