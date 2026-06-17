@@ -36,6 +36,7 @@ const DETACH_AGENT_SKILL_ZIP_PATH = path.resolve(
   "../../../../web/public/skills/detach-agent-relationship.skill.zip"
 );
 const OPENCLAW_GLOBAL_SKILLS_DIR = "~/.openclaw/skills";
+const DETACH_AGENT_LOCAL_SKILL_CACHE_DIR = "~/.detach_agent/skills";
 
 type AuditEvent =
   | { type: "tool.create"; request: ToolRequestRecord }
@@ -810,6 +811,7 @@ function buildOpenClawSkillInstallCommand(request: ToolRequestRecord): string {
   if (skillName !== DETACH_AGENT_SKILL_NAME) throw new Error(`Unsupported skillName: ${skillName}`);
   if (targetAgent !== "openclaw") throw new Error(`Unsupported targetAgent: ${targetAgent}`);
   const targetDir = shellPath(stringPayload(request, "targetDir") || OPENCLAW_GLOBAL_SKILLS_DIR);
+  const localSkillCacheDir = shellPath(stringPayload(request, "localSkillCacheDir") || DETACH_AGENT_LOCAL_SKILL_CACHE_DIR);
   const zipPath = shellQuote(DETACH_AGENT_SKILL_ZIP_PATH);
   const quotedSkill = shellQuote(DETACH_AGENT_SKILL_NAME);
   const quotedVersion = shellQuote(DETACH_AGENT_SKILL_VERSION);
@@ -817,26 +819,32 @@ function buildOpenClawSkillInstallCommand(request: ToolRequestRecord): string {
     "set -e",
     `ZIP=${zipPath}`,
     `TARGET_DIR=${targetDir}`,
+    `LOCAL_SKILL_CACHE_DIR=${localSkillCacheDir}`,
     `SKILL_NAME=${quotedSkill}`,
     `TARGET_VERSION=${quotedVersion}`,
     "TMP_DIR=$(mktemp -d)",
     "cleanup() { rm -rf \"$TMP_DIR\"; }",
     "trap cleanup EXIT",
     "test -f \"$ZIP\" || { echo \"Skill zip not found: $ZIP\" >&2; exit 2; }",
-    "mkdir -p \"$TARGET_DIR\"",
+    "mkdir -p \"$LOCAL_SKILL_CACHE_DIR\"",
     "unzip -q -o \"$ZIP\" -d \"$TMP_DIR\"",
     "test -f \"$TMP_DIR/$SKILL_NAME/SKILL.md\" || { echo \"Missing SKILL.md in skill package\" >&2; exit 3; }",
     "test -f \"$TMP_DIR/$SKILL_NAME/VERSION\" || { echo \"Missing VERSION in skill package\" >&2; exit 4; }",
     "test -f \"$TMP_DIR/$SKILL_NAME/README.md\" || { echo \"Missing README.md in skill package\" >&2; exit 5; }",
+    "rm -rf \"$LOCAL_SKILL_CACHE_DIR/$SKILL_NAME\"",
+    "cp -R \"$TMP_DIR/$SKILL_NAME\" \"$LOCAL_SKILL_CACHE_DIR/$SKILL_NAME\"",
+    "test -f \"$LOCAL_SKILL_CACHE_DIR/$SKILL_NAME/SKILL.md\" || { echo \"Local skill cache missing SKILL.md: $LOCAL_SKILL_CACHE_DIR/$SKILL_NAME\" >&2; exit 7; }",
+    "mkdir -p \"$TARGET_DIR\"",
     "OLD_VERSION=\"not-installed\"",
     "if [ -f \"$TARGET_DIR/$SKILL_NAME/VERSION\" ]; then OLD_VERSION=$(cat \"$TARGET_DIR/$SKILL_NAME/VERSION\"); fi",
     "rm -rf \"$TARGET_DIR/$SKILL_NAME\"",
-    "cp -R \"$TMP_DIR/$SKILL_NAME\" \"$TARGET_DIR/$SKILL_NAME\"",
+    "cp -R \"$LOCAL_SKILL_CACHE_DIR/$SKILL_NAME\" \"$TARGET_DIR/$SKILL_NAME\"",
     "NEW_VERSION=$(cat \"$TARGET_DIR/$SKILL_NAME/VERSION\")",
     "test \"$NEW_VERSION\" = \"$TARGET_VERSION\" || { echo \"Installed version mismatch: $NEW_VERSION expected $TARGET_VERSION\" >&2; exit 6; }",
     "echo \"detach-agent-relationship skill installed\"",
     "echo \"oldSkillVersion=$OLD_VERSION\"",
     "echo \"newSkillVersion=$NEW_VERSION\"",
+    "echo \"localSkillCachePath=$LOCAL_SKILL_CACHE_DIR/$SKILL_NAME\"",
     "echo \"installedPath=$TARGET_DIR/$SKILL_NAME\"",
     "echo \"installScope=openclaw_global_shared\"",
     "echo \"packageStructureStatus=ok\"",
@@ -850,15 +858,22 @@ function buildOpenClawSkillVerifyCommand(request: ToolRequestRecord): string {
   if (skillName !== DETACH_AGENT_SKILL_NAME) throw new Error(`Unsupported skillName: ${skillName}`);
   if (targetAgent !== "openclaw") throw new Error(`Unsupported targetAgent: ${targetAgent}`);
   const targetDir = shellPath(stringPayload(request, "targetDir") || OPENCLAW_GLOBAL_SKILLS_DIR);
+  const localSkillCacheDir = shellPath(stringPayload(request, "localSkillCacheDir") || DETACH_AGENT_LOCAL_SKILL_CACHE_DIR);
   const quotedSkill = shellQuote(DETACH_AGENT_SKILL_NAME);
   const quotedVersion = shellQuote(DETACH_AGENT_SKILL_VERSION);
   return [
     "set -e",
     `TARGET_DIR=${targetDir}`,
+    `LOCAL_SKILL_CACHE_DIR=${localSkillCacheDir}`,
     `SKILL_NAME=${quotedSkill}`,
     `TARGET_VERSION=${quotedVersion}`,
     "SKILL_DIR=\"$TARGET_DIR/$SKILL_NAME\"",
-    "test -d \"$SKILL_DIR\" || { echo \"Skill directory missing: $SKILL_DIR\" >&2; exit 2; }",
+    "LOCAL_SKILL_DIR=\"$LOCAL_SKILL_CACHE_DIR/$SKILL_NAME\"",
+    "test -d \"$LOCAL_SKILL_DIR\" || { echo \"Local skill cache missing: $LOCAL_SKILL_DIR\" >&2; exit 2; }",
+    "test -f \"$LOCAL_SKILL_DIR/SKILL.md\" || { echo \"Local skill cache missing SKILL.md\" >&2; exit 3; }",
+    "test -f \"$LOCAL_SKILL_DIR/VERSION\" || { echo \"Local skill cache missing VERSION\" >&2; exit 4; }",
+    "test -f \"$LOCAL_SKILL_DIR/README.md\" || { echo \"Local skill cache missing README.md\" >&2; exit 5; }",
+    "if [ ! -d \"$SKILL_DIR\" ]; then mkdir -p \"$TARGET_DIR\"; cp -R \"$LOCAL_SKILL_DIR\" \"$SKILL_DIR\"; fi",
     "test -f \"$SKILL_DIR/SKILL.md\" || { echo \"Missing SKILL.md\" >&2; exit 3; }",
     "test -f \"$SKILL_DIR/VERSION\" || { echo \"Missing VERSION\" >&2; exit 4; }",
     "test -f \"$SKILL_DIR/README.md\" || { echo \"Missing README.md\" >&2; exit 5; }",
@@ -866,6 +881,7 @@ function buildOpenClawSkillVerifyCommand(request: ToolRequestRecord): string {
     "test \"$VERSION\" = \"$TARGET_VERSION\" || { echo \"Version mismatch: $VERSION expected $TARGET_VERSION\" >&2; exit 6; }",
     "echo \"detach-agent-relationship skill ready\"",
     "echo \"skillVersion=$VERSION\"",
+    "echo \"localSkillCachePath=$LOCAL_SKILL_DIR\"",
     "echo \"installedPath=$SKILL_DIR\"",
     "echo \"installScope=openclaw_global_shared\"",
     "echo \"packageStructureStatus=ok\""

@@ -8,6 +8,7 @@ const skillVersion = "1.0.0";
 const protocolVersion = "1.0.0";
 const packageVersion = "1.0.0";
 const targetDir = "~/.openclaw/skills";
+const localSkillCacheDir = "~/.detach_agent/skills";
 
 export function SkillInstallPanel({ sessionKey, agentId }: { sessionKey: string | null; agentId: string | null }) {
   const [busy, setBusy] = useState<"install" | "verify" | null>(null);
@@ -60,6 +61,7 @@ export function SkillInstallPanel({ sessionKey, agentId }: { sessionKey: string 
           <CheckCircle2 size={16} />
           <strong>{skillName}</strong>
         </div>
+        <small>本机缓存：{localSkillCacheDir}</small>
         <small>目标路径：{targetDir}</small>
         <small>skill v{skillVersion} · protocol v{protocolVersion}</small>
       </div>
@@ -97,10 +99,11 @@ function buildPayload(action: "install" | "verify"): Record<string, unknown> {
     protocolVersion,
     packageVersion,
     targetDir,
+    localSkillCacheDir,
     targetPathPolicy: "openclaw_global_shared_skills",
     prompt: action === "install"
-      ? "Install or update the complete attached skill package into the OpenClaw shared/global skills path for the Host/Main Agent. Do not install into a workspace or Detach Agent machine unless explicitly requested."
-      : "Verify the complete detach-agent-relationship skill is installed in the OpenClaw shared/global skills path for the Host/Main Agent.",
+      ? "Install or update the complete attached skill package. First cache it on this machine under ~/.detach_agent/skills, then copy it into the OpenClaw shared/global skills path for the Host/Main Agent. Do not install into a workspace or Detach Agent machine unless explicitly requested."
+      : "Verify the local ~/.detach_agent/skills cache and the OpenClaw shared/global skills installation for the Host/Main Agent.",
     attachment: {
       name: "detach-agent-relationship.skill.zip",
       type: "application/zip",
