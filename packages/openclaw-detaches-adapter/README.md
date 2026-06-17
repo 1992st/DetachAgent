@@ -17,7 +17,12 @@ It does not execute commands or move files by itself. It validates session conte
 - `SKILL.md`: Workspace skill entry copied to `~/.openclaw/workspace/skills/detaches-agent/SKILL.md`.
 - `adapter.manifest.json`: Machine-readable protocol and capability manifest.
 - `skill.manifest.json`: Stable agent-side skill entry metadata.
+- `skills/detach-agent-relationship/`: Host/Main Agent relationship skill source.
 - `bin/detaches-agent-adapter.mjs`: CLI used by the Detach Agent runtime machine.
+
+The distributable relationship skill zip used by the web app lives at
+`apps/web/public/skills/detach-agent-relationship.skill.zip`. User-facing manual
+install instructions live at `docs/relationship-skill/install.md`.
 
 ## Basic Flow
 

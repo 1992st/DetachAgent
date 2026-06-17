@@ -1,6 +1,11 @@
 # detaches_agent
 
-Local Web UI and proxy server for connecting this machine to a remote OpenClaw Gateway.
+Local Web UI, approval broker, and OpenClaw adapter assets for letting a Main Agent
+control a remote or local PC through a connected Detach Agent window.
+
+This is the main code repository. Relationship Skill source, install artifacts,
+and user install documentation are kept here so the running app and the skill it
+installs stay versioned together.
 
 ## Quick Start
 
@@ -53,9 +58,24 @@ The UI `网络与 SSH` page also has a `测试网络` button that checks SSH rea
 If `OPENCLAW_REMOTE_USER` is missing, `/api/health` intentionally reports SSH as disabled. This keeps the UI usable for configuration and diagnostics.
 `pnpm smoke` starts a mock OpenClaw Gateway and the real local server, then verifies Gateway challenge/auth, `health`, `sessions.list`, `chat.history`, `chat.send`, `chat.abort`, and attachment payload mapping end to end.
 
+## Relationship Skill
+
+`detach-agent-relationship` is the Host/Main Agent skill used to keep Detach
+Agent sessions explicit about local machine, remote agent host, files, terminals,
+ports, tools, and approval authority.
+
+- Source skill: `packages/openclaw-detaches-adapter/skills/detach-agent-relationship/`
+- App-distributed zip: `apps/web/public/skills/detach-agent-relationship.skill.zip`
+- User install guide: `docs/relationship-skill/install.md`
+- Browser-accessible install guide: `apps/web/public/docs/relationship-skill/install.md`
+
+Install the skill on the machine running the Host/Main Agent. If SSH push from
+the Detach Agent machine is unavailable, the Host/Main Agent machine can pull the
+skill from this Git repository or from a shared artifact location.
+
 ## Current Scope
 
 - Gateway RPC: `health`, `sessions.list`, `chat.history`, `chat.send`, `chat.abort`.
 - Files: local upload cache, inline Gateway chat attachments using base64 payloads, plus best-effort SFTP to the remote OpenClaw workspace.
 - Remote control: UI and service modules are reserved, but real control is not enabled until approval/audit/timeout boundaries are implemented.
-- Agent-side adapter assets: `packages/openclaw-detaches-adapter` provides a manifest, OpenClaw `SKILL.md`, agent instructions, and a CLI. The CLI can run `doctor --url` against the per-message one-time context export, diagnose requestable targets/staged files, and emit or submit approval-broker requests. It does not execute tools by itself.
+- Agent-side adapter assets: `packages/openclaw-detaches-adapter` provides a manifest, OpenClaw `SKILL.md`, relationship skill source, agent instructions, and a CLI. The CLI can run `doctor --url` against the per-message one-time context export, diagnose requestable targets/staged files, and emit or submit approval-broker requests. It does not execute tools by itself.
