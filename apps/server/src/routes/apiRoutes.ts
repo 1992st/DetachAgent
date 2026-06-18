@@ -23,6 +23,7 @@ import { bootstrapSshIdentity } from "../services/ssh/sshBootstrapService.js";
 import { localTerminalAppService } from "../services/terminal/localTerminalAppService.js";
 import { resolveDirectGatewayUrl } from "../services/gateway/gatewayClient.js";
 import { platformService } from "../services/platform/platformService.js";
+import { cloudPromptLogService } from "../services/gateway/cloudPromptLogService.js";
 
 const upload = multer({
   dest: path.join(appConfig.storageDir, "cache"),
@@ -53,6 +54,15 @@ apiRoutes.post("/terminal/apps/:appId/open", async (req, res) => {
   }
 });
 
+apiRoutes.get("/logs/cloud-prompts", async (req, res) => {
+  try {
+    const limit = parsePositiveInt(req.query.limit, 100, 500);
+    res.json(await cloudPromptLogService.list(limit));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 function isLoopbackRequest(req: express.Request): boolean {
   const address = req.socket.remoteAddress || "";
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
@@ -60,6 +70,13 @@ function isLoopbackRequest(req: express.Request): boolean {
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function parsePositiveInt(value: unknown, fallback: number, max: number): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = Number.parseInt(typeof raw === "string" ? raw : "", 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
 }
 
 async function buildContextExportBody(

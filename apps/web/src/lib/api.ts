@@ -84,6 +84,28 @@ export async function fetchClientIdentity(): Promise<ClientIdentity> {
   return res.json();
 }
 
+export interface CloudPromptLogEntry {
+  ts: string;
+  event: "chat.send";
+  phase: "initial" | "fallback";
+  method: "chat.send";
+  sessionKey: string;
+  idempotencyKey?: string;
+  includeClientContext: boolean;
+  payload: unknown;
+}
+
+export interface CloudPromptLogListResponse {
+  path: string;
+  entries: CloudPromptLogEntry[];
+}
+
+export async function fetchCloudPromptLogs(limit = 100): Promise<CloudPromptLogListResponse> {
+  const res = await fetch(apiUrl(`/api/logs/cloud-prompts?limit=${encodeURIComponent(String(limit))}`));
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
 export async function createDetachesContextExport(input: { sessionKey: string; sessionMode?: "main" | "device" }): Promise<DetachesContextExportCreateResponse> {
   const res = await fetch(apiUrl("/api/context/exports"), {
     method: "POST",

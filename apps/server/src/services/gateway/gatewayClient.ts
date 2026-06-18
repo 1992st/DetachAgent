@@ -12,6 +12,7 @@ import type {
 import { runtimeConfig } from "../../config/settingsStore.js";
 import { platformService } from "../platform/platformService.js";
 import { sshTunnelService } from "../tunnel/sshTunnelService.js";
+import { cloudPromptLogService } from "./cloudPromptLogService.js";
 import {
   buildDeviceAuthPayloadV3,
   loadOrCreateDeviceIdentity,
@@ -114,18 +115,29 @@ export class GatewayClient extends EventEmitter {
         clientContext: includeClientContext ? params.clientContext : undefined
       };
     };
+    const sendChatRequest = async (includeClientContext: boolean, phase: "initial" | "fallback") => {
+      const payload = buildPayload(includeClientContext);
+      await cloudPromptLogService.logChatSend({
+        phase,
+        sessionKey: params.sessionKey,
+        idempotencyKey: payload.idempotencyKey,
+        includeClientContext,
+        payload
+      });
+      return this.request("chat.send", payload, 35000);
+    };
     const includeClientContext = Boolean(params.clientContext) && this.chatSendClientContextSupported !== false;
     if (!includeClientContext) {
-      return this.request("chat.send", buildPayload(false), 35000);
+      return sendChatRequest(false, "initial");
     }
     try {
-      const response = await this.request("chat.send", buildPayload(true), 35000);
+      const response = await sendChatRequest(true, "initial");
       this.chatSendClientContextSupported = true;
       return response;
     } catch (error) {
       if (!isClientContextUnsupportedError(error)) throw error;
       this.chatSendClientContextSupported = false;
-      return this.request("chat.send", buildPayload(false), 35000);
+      return sendChatRequest(false, "fallback");
     }
   }
 

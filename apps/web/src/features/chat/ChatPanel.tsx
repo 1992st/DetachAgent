@@ -1,7 +1,7 @@
 import { type CSSProperties, FormEvent, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, FileText, List, Minus, Paperclip, Plus, Send, Square, X } from "lucide-react";
 import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, MainAgentFileTransferSnapshot, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
-import { approveToolRequest, extractToolRequests, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward, submitMainAgentTransferPassword, wsUrl } from "../../lib/api.js";
+import { approveToolRequest, extractToolRequests, fetchCloudPromptLogs, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward, submitMainAgentTransferPassword, wsUrl } from "../../lib/api.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
 
 interface Props {
@@ -60,6 +60,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   const terminalRef = useRef<TerminalPanelHandle | null>(null);
   const logStreamRef = useRef<HTMLDivElement | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
+  const cloudPromptLogIdsRef = useRef<Set<string>>(new Set());
 
   useImperativeHandle(ref, () => ({
     revealTerminal: () => terminalRef.current?.reveal()
@@ -117,6 +118,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
       } else if (data.type === "sent") {
         setLastRunId(data.payload.runId ?? null);
         appendLog("info", "message-sent-ack", data.payload);
+        void refreshCloudPromptLogs();
       } else if (data.type === "error") {
         setMessages((current) => [
           ...current,
@@ -155,6 +157,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     el.scrollTop = el.scrollHeight;
   }, [logs, logOpen]);
 
+  useEffect(() => {
+    if (!logOpen) return;
+    void refreshCloudPromptLogs();
+    const timer = window.setInterval(() => void refreshCloudPromptLogs(), 2000);
+    return () => window.clearInterval(timer);
+  }, [logOpen]);
+
   const canSend = useMemo(() => Boolean(sessionKey && draft.trim() && socketRef.current?.readyState === WebSocket.OPEN), [sessionKey, draft, socketState]);
   const messagesStyle = useMemo(() => ({
     "--chat-message-font-size": `${chatFontSize}px`
@@ -181,6 +190,27 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
       ];
       return next.length > 500 ? next.slice(next.length - 500) : next;
     });
+  }
+
+  async function refreshCloudPromptLogs() {
+    try {
+      const response = await fetchCloudPromptLogs(100);
+      response.entries.forEach((entry) => {
+        const key = `${entry.ts}:${entry.phase}:${entry.idempotencyKey || ""}:${entry.sessionKey}`;
+        if (cloudPromptLogIdsRef.current.has(key)) return;
+        cloudPromptLogIdsRef.current.add(key);
+        appendLog("info", "cloud-prompt", {
+          logPath: response.path,
+          phase: entry.phase,
+          sessionKey: entry.sessionKey,
+          idempotencyKey: entry.idempotencyKey,
+          includeClientContext: entry.includeClientContext,
+          payload: entry.payload
+        });
+      });
+    } catch (error) {
+      appendLog("error", "cloud-prompt-log-load-failed", error);
+    }
   }
 
   function submit(event: FormEvent) {

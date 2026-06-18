@@ -558,6 +558,21 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.capabilities?.some((capability) => capability.name === "terminal" && capability.supportedTargets.includes("local-user-machine")), true);
     assert.equal(userChatSend.clientContext?.routeContext?.origin?.provider, "detaches_agent");
     assert.equal(userChatSend.attachments, undefined);
+    const cloudPromptLogPath = path.join(smokeStorageDir, "logs", "cloud-prompts.jsonl");
+    const cloudPromptEvents = await waitForJsonl(
+      cloudPromptLogPath,
+      (events) => events.some((event) => event.event === "chat.send" && event.payload?.idempotencyKey === "smoke-idempotency")
+    );
+    const userPromptEvent = cloudPromptEvents.find((event) => event.event === "chat.send" && event.payload?.idempotencyKey === "smoke-idempotency");
+    assert.equal(userPromptEvent.phase, "initial");
+    assert.equal(userPromptEvent.method, "chat.send");
+    assert.equal(userPromptEvent.sessionKey, chatSessionKey);
+    assert.equal(userPromptEvent.includeClientContext, true);
+    assert.match(userPromptEvent.payload.message, /^hello smoke/);
+    assert.match(userPromptEvent.payload.message, /\[\[DETACH_AGENT_FILE_STAGED\]\]/);
+    assert.match(userPromptEvent.payload.message, /detaches_agent 接入上下文/);
+    assert.equal(userPromptEvent.payload.clientContext.detaches.broker.submitToken, userChatSend.clientContext.detaches.broker.submitToken);
+    assert.match(userPromptEvent.payload.clientContext.detaches.files.staged[0].transfer.remotePathRule, /main-agent-save-file request/);
     const decisionActor = {
       deviceId: userChatSend.clientContext.detaches.userDevice.deviceId,
       deviceIdShort: userChatSend.clientContext.detaches.userDevice.deviceIdShort,
