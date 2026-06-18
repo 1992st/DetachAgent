@@ -30,7 +30,7 @@
     },
     "main-agent-machine": {
       "status": "supported",
-      "execution": "detaches_agent runs approved local rsync/scp from staged file to Host/Main Agent SSH destination"
+      "execution": "detaches_agent broker runs an approved structured rsync/scp transfer from staged file to Host/Main Agent SSH destination"
     }
   },
   "requestFences": {
@@ -47,7 +47,7 @@
     "broker-probe": "Verify a detaches_agent Tool Broker capabilities endpoint before submitting requests.",
     "terminal-request": "Emit a detaches-terminal fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Supports --context to read session and broker fields; use --submit to post with the context endpoint.",
     "file-transfer-request": "Emit a detaches-file-transfer fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Supports --context to read session and broker fields; use --submit to post with the context endpoint.",
-    "main-agent-save-file-request": "Emit a main-agent-save-file fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Host/Main Agent chooses destination path; detaches_agent runs rsync/scp after user approval."
+    "main-agent-save-file-request": "Emit a main-agent-save-file fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Host/Main Agent chooses destination path; detaches_agent broker runs a structured rsync/scp transfer after user approval."
   },
   "requestFormats": [
     "fence",

@@ -71,7 +71,10 @@ export interface MainAgentFileTransferSnapshot {
   sourceLocalPath: string;
   displayName: string;
   size: number;
+  requestedDestination?: Partial<MainAgentFileDestination>;
   destination: MainAgentFileDestination;
+  commandPreview?: string;
+  warnings?: string[];
   method: "rsync" | "scp" | "unknown";
   status: MainAgentFileTransferStatus;
   progress?: number;
@@ -79,7 +82,11 @@ export interface MainAgentFileTransferSnapshot {
   speed?: string;
   message?: string;
   error?: string;
+  exitCode?: number;
+  outputTail?: string;
   needsPassword: boolean;
+  passwordRequestedAt?: string;
+  passwordExpiresAt?: string;
   createdAt: string;
   updatedAt: string;
 }

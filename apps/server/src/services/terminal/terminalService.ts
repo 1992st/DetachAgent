@@ -1,10 +1,15 @@
 import os from "node:os";
 import { EventEmitter } from "node:events";
 import { spawn as spawnProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { createRequire } from "node:module";
 import { spawn, type IPty } from "node-pty";
 import { nanoid } from "nanoid";
 import type { TerminalInfo, TerminalStatus } from "@detaches/shared";
 import { platformService, type ShellLaunch } from "../platform/platformService.js";
+
+const require = createRequire(import.meta.url);
 
 interface ManagedTerminal {
   id: string;
@@ -19,8 +24,10 @@ interface ManagedTerminal {
 }
 
 interface TerminalProcess {
+  interactive: boolean;
   write(data: string): void;
   resize(cols: number, rows: number): void;
+  dispose(): void;
 }
 
 const MAX_REPLAY_CHARS = 120_000;
@@ -36,12 +43,17 @@ function terminalSessionName(sessionKey: string): string {
 class TerminalService {
   private terminals = new Map<string, ManagedTerminal>();
 
-  async ensure(sessionKey: string, cols = 100, rows = 28): Promise<ManagedTerminal> {
+  async ensure(sessionKey: string, cols = 100, rows = 28, options: { requireInteractive?: boolean } = {}): Promise<ManagedTerminal> {
     const existing = this.terminals.get(sessionKey);
     if (existing && existing.status !== "exited") {
-      existing.lastActiveAt = new Date().toISOString();
-      this.resize(existing, cols, rows);
-      return existing;
+      if (options.requireInteractive && !existing.process.interactive) {
+        this.disposeTerminal(existing, "restarting terminal because a real PTY is required");
+        this.terminals.delete(sessionKey);
+      } else {
+        existing.lastActiveAt = new Date().toISOString();
+        this.resize(existing, cols, rows);
+        return existing;
+      }
     }
 
     const terminalId = nanoid();
@@ -100,8 +112,8 @@ class TerminalService {
     return terminal.buffer;
   }
 
-  async snapshot(sessionKey: string): Promise<{ terminal: TerminalInfo; replay: string }> {
-    const terminal = await this.ensure(sessionKey);
+  async snapshot(sessionKey: string, options: { requireInteractive?: boolean } = {}): Promise<{ terminal: TerminalInfo; replay: string }> {
+    const terminal = await this.ensure(sessionKey, 100, 28, options);
     return { terminal: this.info(terminal), replay: this.replay(terminal) };
   }
 
@@ -110,10 +122,19 @@ class TerminalService {
     terminal.process.write(data);
   }
 
-  async runCommand(sessionKey: string, command: string): Promise<TerminalInfo> {
+  async runCommand(sessionKey: string, command: string, options: { requireInteractive?: boolean } = {}): Promise<TerminalInfo> {
     const cleaned = command.trimEnd();
     if (!cleaned.trim()) throw new Error("Command is empty.");
-    const terminal = await this.ensure(sessionKey);
+    const terminal = await this.ensure(sessionKey, 100, 28, { requireInteractive: options.requireInteractive });
+    if (options.requireInteractive && !terminal.process.interactive) {
+      throw new Error("A real PTY terminal is required for this command, but node-pty is unavailable. Password prompts cannot work in the pipe fallback terminal.");
+    }
+    if (!terminal.process.interactive) {
+      const visible = `\r\n[detaches_agent wrote command to pipe terminal; password prompts may not be interactive]\r\n${cleaned}\r\n`;
+      terminal.buffer = `${terminal.buffer}${visible}`.slice(-MAX_REPLAY_CHARS);
+      terminal.emitter.emit("data", visible);
+      terminal.emitter.emit("status", this.info(terminal));
+    }
     this.write(terminal, `${cleaned}\r`);
     return this.info(terminal);
   }
@@ -130,6 +151,7 @@ class TerminalService {
     onExit: (handler: (exitCode: number, signal?: number) => void) => void;
   } {
     try {
+      repairNodePtyHelperPermissions();
       const pty = spawn(launch.shell, launch.args, {
         name: "xterm-256color",
         cols,
@@ -139,8 +161,10 @@ class TerminalService {
       });
       return {
         process: {
+          interactive: true,
           write: (data) => pty.write(data),
-          resize: (nextCols, nextRows) => pty.resize(nextCols, nextRows)
+          resize: (nextCols, nextRows) => pty.resize(nextCols, nextRows),
+          dispose: () => pty.kill()
         },
         onData: (handler) => pty.onData(handler),
         onExit: (handler) => pty.onExit(({ exitCode, signal }) => handler(exitCode, signal))
@@ -162,8 +186,10 @@ class TerminalService {
   } {
     return {
       process: {
+        interactive: false,
         write: (data) => child.stdin.write(data.replaceAll("\r", "\n")),
-        resize: () => undefined
+        resize: () => undefined,
+        dispose: () => child.kill()
       },
       onData: (handler) => {
         handler(`[node-pty unavailable: ${fallbackReason}; using pipe terminal fallback]\r\n`);
@@ -173,6 +199,42 @@ class TerminalService {
       onExit: (handler) => child.on("exit", (code, signal) => handler(code ?? 0, typeof signal === "string" ? undefined : signal ?? undefined))
     };
   }
+
+  private disposeTerminal(terminal: ManagedTerminal, reason: string): void {
+    const line = `\r\n[detaches_agent] ${reason}\r\n`;
+    terminal.buffer = `${terminal.buffer}${line}`.slice(-MAX_REPLAY_CHARS);
+    terminal.emitter.emit("data", line);
+    terminal.process.dispose();
+  }
 }
 
 export const terminalService = new TerminalService();
+
+function repairNodePtyHelperPermissions(): void {
+  if (process.platform === "win32") return;
+  const helperPath = resolveNodePtySpawnHelperPath();
+  if (!helperPath) return;
+  try {
+    const stat = fs.statSync(helperPath);
+    if ((stat.mode & 0o111) === 0) {
+      fs.chmodSync(helperPath, stat.mode | 0o755);
+    }
+  } catch {
+    // Let node-pty surface the original spawn error; this repair is best effort.
+  }
+}
+
+function resolveNodePtySpawnHelperPath(): string | null {
+  try {
+    const unixTerminalPath = require.resolve("node-pty/lib/unixTerminal.js");
+    const packageRoot = path.dirname(path.dirname(unixTerminalPath));
+    const candidates = [
+      path.join(packageRoot, "build", "Release", "spawn-helper"),
+      path.join(packageRoot, "build", "Debug", "spawn-helper"),
+      path.join(packageRoot, "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper")
+    ];
+    return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+  } catch {
+    return null;
+  }
+}

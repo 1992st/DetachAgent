@@ -20,7 +20,7 @@ function usage(exitCode = 0) {
     "  broker-probe <detaches-agent-base-url-or-capabilities-url>",
     "  terminal-request --target <target> --command <command> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
     "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
-    "  main-agent-save-file-request --file-id <id> --source-local-path <path> --display-name <name> --size <bytes> --host <host> --port <port> --user <user> --path <dest> --reason <reason> [--method rsync|scp --context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
+    "  main-agent-save-file-request --file-id <id> --source-local-path <path> --display-name <name> --size <bytes> --user <ssh-user> --path <dest> --reason <reason> [--host <host> --port <port> --method rsync|scp --context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
     "",
     "This CLI does not execute tools. It only validates context and emits detaches_agent request blocks."
   ].join("\n");
@@ -240,9 +240,7 @@ function doctorContext(context) {
           `  --source-local-path ${commandQuote(inspection.files.staged[0].localPath || "<sourceLocalPath-from-prompt>")}`,
           `  --display-name ${commandQuote(inspection.files.staged[0].displayName || inspection.files.staged[0].name || "file")}`,
           `  --size ${commandQuote(String(inspection.files.staged[0].size || 0))}`,
-          `  --host ${commandQuote("<main-agent-ssh-host>")}`,
-          "  --port 22",
-          `  --user ${commandQuote("<main-agent-ssh-user>")}`,
+          `  --user ${commandQuote("<ssh-user-chosen-by-main-agent>")}`,
           `  --path ${commandQuote("<absolute-path-chosen-by-main-agent>")}`,
           `  --reason ${commandQuote("save the staged file to the Host/Main Agent machine")}`,
           "  --format broker-event",
@@ -297,6 +295,15 @@ function requireOption(args, name) {
 function optionalString(args, name) {
   const value = args[name];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function optionalDestination(args) {
+  const destination = { user: requireOption(args, "user"), path: requireOption(args, "path") };
+  const host = optionalString(args, "host");
+  const port = optionalString(args, "port");
+  if (host) destination.host = host;
+  if (port) destination.port = Number(port);
+  return destination;
 }
 
 function readContextOption(args) {
@@ -544,12 +551,7 @@ async function main() {
       sourceLocalPath: requireOption(args, "source-local-path"),
       displayName: requireOption(args, "display-name"),
       size: Number(requireOption(args, "size")),
-      destination: {
-        host: requireOption(args, "host"),
-        port: Number(requireOption(args, "port")),
-        user: requireOption(args, "user"),
-        path: requireOption(args, "path")
-      },
+      destination: optionalDestination(args),
       methodPreference: optionalString(args, "method") === "scp" ? "scp" : "rsync"
     }, "main-agent-save-file");
     return;

@@ -1,7 +1,7 @@
 import { type CSSProperties, FormEvent, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, FileText, List, Minus, Paperclip, Plus, Send, Square, X } from "lucide-react";
-import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
-import { approveToolRequest, extractToolRequests, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward } from "../../lib/api.js";
+import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, MainAgentFileTransferSnapshot, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
+import { approveToolRequest, extractToolRequests, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward, submitMainAgentTransferPassword } from "../../lib/api.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
 
 interface Props {
@@ -11,6 +11,7 @@ interface Props {
   clientIdentity: ClientIdentity | null;
   attachments: UploadedFileRef[];
   onSessionModeChange: (mode: ChatSessionMode) => void;
+  onNewSession: () => void;
   onClearAttachments: () => void;
   onNeedUpload: (files: FileList) => void;
 }
@@ -36,6 +37,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   clientIdentity,
   attachments,
   onSessionModeChange,
+  onNewSession,
   onClearAttachments,
   onNeedUpload
 }: Props, ref) {
@@ -253,6 +255,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
               主会话
             </button>
           </div>
+          <button type="button" className="secondary-button compact" onClick={onNewSession} disabled={!sessionKey} title="New session">
+            <Plus size={14} />
+            New session
+          </button>
           <div className="font-size-control" aria-label="Chat font size">
             <button type="button" className="icon-button small" title="减小聊天字体" onClick={() => updateChatFontSize(chatFontSize - 1)} disabled={chatFontSize <= 12}>
               <Minus size={14} />
@@ -434,6 +440,15 @@ function ToolRequests({
   const [handled, setHandled] = useState<Record<number, "approved" | "rejected" | "running" | "error" | "blocked">>({});
   const [errors, setErrors] = useState<Record<number, string>>({});
   const [resultSummaries, setResultSummaries] = useState<Record<number, string>>({});
+  const [transfers, setTransfers] = useState<Record<number, MainAgentFileTransferSnapshot>>({});
+  const [passwords, setPasswords] = useState<Record<number, string>>({});
+  const pollTimersRef = useRef<Record<number, number>>({});
+
+  useEffect(() => () => {
+    Object.values(pollTimersRef.current).forEach((timer) => window.clearTimeout(timer));
+    pollTimersRef.current = {};
+  }, []);
+
   useEffect(() => {
     if (!sessionKey || !text) {
       setRequests([]);
@@ -442,6 +457,10 @@ function ToolRequests({
     setHandled({});
     setErrors({});
     setResultSummaries({});
+    setTransfers({});
+    setPasswords({});
+    Object.values(pollTimersRef.current).forEach((timer) => window.clearTimeout(timer));
+    pollTimersRef.current = {};
     setRequests([]);
     const loadRequests = () => extractToolRequests({ text, sessionKey, agentId, sourceMessageId, sourceRunId })
       .then((response) => {
@@ -478,6 +497,55 @@ function ToolRequests({
   }, [text, sessionKey, agentId, sourceMessageId, sourceRunId]);
   if (!requests.length && !errors[0]) return null;
 
+  function scheduleMainAgentTransferPoll(request: ToolRequestRecord, index: number) {
+    if (request.kind !== "main-agent-save-file") return;
+    if (pollTimersRef.current[index]) window.clearTimeout(pollTimersRef.current[index]);
+    const poll = () => {
+      fetchToolRequestResult(request.id)
+        .then((response) => {
+          const transfer = transferFromResult(response);
+          if (transfer) {
+            setTransfers((current) => ({ ...current, [index]: transfer }));
+            setResultSummaries((current) => ({ ...current, [index]: mainAgentTransferSummary(transfer) }));
+          }
+          if (transfer && (transfer.status === "succeeded" || transfer.status === "failed")) {
+            delete pollTimersRef.current[index];
+            setHandled((current) => ({ ...current, [index]: transfer.status === "succeeded" ? "approved" : "error" }));
+            if (transfer.error) setErrors((current) => ({ ...current, [index]: transfer.error || "" }));
+            return;
+          }
+          pollTimersRef.current[index] = window.setTimeout(poll, transfer?.status === "waiting-password" ? 3000 : 1000);
+        })
+        .catch((error) => {
+          delete pollTimersRef.current[index];
+          onLog("error", "main-agent-transfer-poll-failed", { id: request.id, error });
+          setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
+          setHandled((current) => ({ ...current, [index]: "error" }));
+        });
+    };
+    pollTimersRef.current[index] = window.setTimeout(poll, 300);
+  }
+
+  function submitTransferPassword(index: number) {
+    const transfer = transfers[index];
+    const password = passwords[index];
+    if (!transfer || !password) return;
+    setHandled((current) => ({ ...current, [index]: "running" }));
+    submitMainAgentTransferPassword(transfer.transferId, password)
+      .then((response) => {
+        setPasswords((current) => ({ ...current, [index]: "" }));
+        setTransfers((current) => ({ ...current, [index]: response.transfer }));
+        setResultSummaries((current) => ({ ...current, [index]: mainAgentTransferSummary(response.transfer) }));
+        const request = requests[index];
+        if (request) scheduleMainAgentTransferPoll(request, index);
+      })
+      .catch((error) => {
+        onLog("error", "main-agent-transfer-password-failed", { transferId: transfer.transferId, error });
+        setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
+        setHandled((current) => ({ ...current, [index]: "error" }));
+      });
+  }
+
   return (
     <div className="terminal-requests">
       {errors[0] && !requests.length ? <p className="request-error">{errors[0]}</p> : null}
@@ -497,6 +565,24 @@ function ToolRequests({
               {unsupported ? <p className="request-error">{unsupportedTargetMessage(request)}</p> : null}
               {errors[index] ? <p className="request-error">{errors[index]}</p> : null}
               {resultSummaries[index] ? <small>{resultSummaries[index]}</small> : null}
+              {transfers[index] ? <InlineTransferProgress transfer={transfers[index]} /> : null}
+              {transfers[index]?.status === "waiting-password" || transfers[index]?.needsPassword ? (
+                <label className="inline-password-prompt">
+                  <span>SSH password required</span>
+                  <input
+                    type="password"
+                    value={passwords[index] || ""}
+                    placeholder={`${transfers[index].destination.user}@${transfers[index].destination.host}`}
+                    onChange={(event) => setPasswords((current) => ({ ...current, [index]: event.target.value }))}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") submitTransferPassword(index);
+                    }}
+                  />
+                  <button type="button" className="secondary-button compact" disabled={!passwords[index]} onClick={() => submitTransferPassword(index)}>
+                    Continue
+                  </button>
+                </label>
+              ) : null}
             </div>
             <div className="terminal-request-actions">
               <button
@@ -510,7 +596,7 @@ function ToolRequests({
                   approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated", actor: decisionActor(clientIdentity) })
                     .then((response) => {
                       if (!response.execution?.wroteToTerminal && request.kind !== "main-agent-save-file") throw new Error(response.message || "Broker did not execute the request.");
-                      if (request.kind !== "file-transfer") onReveal();
+                      if (request.kind !== "file-transfer" && request.kind !== "main-agent-save-file") onReveal();
                       onLog("info", "tool-request-approved", { id: request.id, execution: response.execution });
                       setHandled((current) => ({ ...current, [index]: "approved" }));
                       return fetchToolRequestResult(request.id);
@@ -519,6 +605,8 @@ function ToolRequests({
                       if (!response) return;
                       onLog("info", "tool-result-fetched", { id: request.id, result: response.result });
                       setResultSummaries((current) => ({ ...current, [index]: toolResultSummary(response) }));
+                      const transfer = transferFromResult(response);
+                      if (transfer) setTransfers((current) => ({ ...current, [index]: transfer }));
                     })
                     .catch((error) => {
                       onLog("error", "tool-request-approve-failed", { id: request.id, error });
@@ -604,21 +692,22 @@ function mergeToolRequests(primary: ToolRequestRecord[], updates: ToolRequestRec
 }
 
 function keepLastFileTransferPerFile(requests: ToolRequestRecord[]): ToolRequestRecord[] {
-  const lastIndexByFileId = new Map<string, number>();
+  const lastIndexByKey = new Map<string, number>();
   requests.forEach((request, index) => {
-    if (request.kind !== "file-transfer") return;
+    if (request.kind !== "file-transfer" && request.kind !== "main-agent-save-file") return;
     const fileId = typeof request.payload.fileId === "string" ? request.payload.fileId : "";
-    if (fileId) lastIndexByFileId.set(fileId, index);
+    if (fileId) lastIndexByKey.set(`${request.kind}:${fileId}`, index);
   });
   return requests.filter((request, index) => {
-    if (request.kind !== "file-transfer") return true;
+    if (request.kind !== "file-transfer" && request.kind !== "main-agent-save-file") return true;
     const fileId = typeof request.payload.fileId === "string" ? request.payload.fileId : "";
-    return !fileId || lastIndexByFileId.get(fileId) === index;
+    return !fileId || lastIndexByKey.get(`${request.kind}:${fileId}`) === index;
   });
 }
 
 function isInlineToolRequestVisible(request: ToolRequestRecord): boolean {
   if (request.status === "approved" || request.status === "succeeded" || request.status === "rejected") return false;
+  if (isPlaceholderToolRequest(request)) return false;
   if (
     request.kind === "file-transfer"
     && request.status === "failed"
@@ -627,6 +716,19 @@ function isInlineToolRequestVisible(request: ToolRequestRecord): boolean {
     return false;
   }
   return true;
+}
+
+function isPlaceholderToolRequest(request: ToolRequestRecord): boolean {
+  if (request.kind !== "main-agent-save-file") return false;
+  const destination = request.payload.destination && typeof request.payload.destination === "object" && !Array.isArray(request.payload.destination)
+    ? request.payload.destination as Record<string, unknown>
+    : {};
+  const haystack = [
+    request.payload.fileId,
+    request.payload.sourceLocalPath,
+    destination.path
+  ].map((value) => typeof value === "string" ? value : JSON.stringify(value ?? "")).join("\n").toLowerCase();
+  return /上面的|<file-id>|<absolute path|final-filename\.ext|原始文件名|请替换|替换为|your-|example\.|100\.x\.x\.x|192\.168\.x\.x|main agent.*ip|main agent.*host|detaches_agent.*host|detaches-agent.*host|ssh user/.test(haystack);
 }
 
 function toolResultSummary(response: ToolExecutionResultResponse): string {
@@ -642,6 +744,34 @@ function toolResultSummary(response: ToolExecutionResultResponse): string {
         ? "forward pending"
         : "forward not started";
   return `${status}; ${forward}; captured ${result.outputBytes} bytes from terminal ${result.terminalId || ""}`.trim();
+}
+
+function transferFromResult(response: ToolExecutionResultResponse): MainAgentFileTransferSnapshot | null {
+  if (response.request.kind !== "main-agent-save-file" || !response.result.output) return null;
+  try {
+    const parsed = JSON.parse(response.result.output) as MainAgentFileTransferSnapshot;
+    return parsed?.transferId && parsed?.requestId ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function mainAgentTransferSummary(transfer: MainAgentFileTransferSnapshot): string {
+  const percent = typeof transfer.progress === "number" ? ` · ${Math.round(transfer.progress * 100)}%` : "";
+  const message = transfer.error || transfer.message || "";
+  return `${transfer.status}${percent}${message ? ` · ${message}` : ""}`;
+}
+
+function InlineTransferProgress({ transfer }: { transfer: MainAgentFileTransferSnapshot }) {
+  return (
+    <div className={`transfer-progress ${transfer.status}`}>
+      <small>{mainAgentTransferSummary(transfer)}</small>
+      <progress value={transfer.progress ?? 0} max={1} />
+      <code>{transfer.sourceLocalPath}{"\n"}→ {transfer.destination.user}@{transfer.destination.host}:{transfer.destination.path}</code>
+      {transfer.commandPreview ? <code>{transfer.commandPreview}</code> : null}
+      {transfer.warnings?.map((warning) => <p className="request-warning" key={warning}>{warning}</p>)}
+    </div>
+  );
 }
 
 function toolRequestCode(request: ToolRequestRecord): string {
@@ -673,7 +803,11 @@ function toolRequestTitle(request: ToolRequestRecord): string {
 function destinationPayload(value: unknown): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "";
   const record = value as Record<string, unknown>;
-  return `${record.user ?? ""}@${record.host ?? ""}:${record.port ?? 22}${record.path ?? ""}`;
+  const user = typeof record.user === "string" && record.user.trim() ? record.user.trim() : "(missing user)";
+  const pathValue = typeof record.path === "string" && record.path.trim() ? record.path.trim() : "(missing path)";
+  const host = typeof record.host === "string" && record.host.trim() ? record.host.trim() : "current Main Agent SSH config";
+  const port = typeof record.port === "number" && record.port > 0 ? `:${record.port}` : "";
+  return `user: ${user}\nconnection: ${host}${port}\npath: ${pathValue}`;
 }
 
 function confirmElevatedRisk(request: ToolRequestRecord): boolean {
@@ -702,16 +836,23 @@ function buildDefaultAttachmentContext(attachments: UploadedFileRef[]): string {
       "   role: 主输入/待确认",
       ""
     ]),
-    "如果你需要把该文件保存到 Main Agent 机器，请阅读 detach-agent-relationship skill，并生成 main-agent-save-file 请求。",
-    "保存目标路径必须由 Main Agent 根据自己的规则决定。",
+    "如果用户明确要求保存该文件到 Main Agent 机器，请阅读 detach-agent-relationship skill，并生成 main-agent-save-file 请求。",
+    "destination.path 必须由 Main Agent 根据自己的规则决定，且必须是完整的绝对目标文件路径：包含目录、最终文件名和扩展名。",
+    "destination.path 不能是目录，不能是只到 screenshots/、docs/、_staging/ 等目录的路径；如果只知道目录，必须先根据 displayName 生成确定的文件名。",
+    "如果文件用途或归档目录不明确，不要编造分类目录或 _staging 目录；先询问用户用途，或选择 Main Agent 规则中明确允许的通用 screenshots/attachments 文件路径。",
+    "destination.user 和 destination.path 是 Main Agent 必须决定的核心字段；destination.user 是远端 SSH/Linux 用户，例如 aispeech。",
+    "destination.host/port 可省略，detaches_agent broker 会使用当前 Main Agent SSH/Gateway 配置补全。",
+    "不要在 destination.user/host/port 中填写占位符、示例值或“请替换”文本；如果不知道 destination.user，先说明无法生成保存请求。",
     "不要假设 Main Agent 已经能直接读取 sourceLocalPath；该路径只能作为 detaches_agent 本机传输源。",
     "不要启动 HTTP 上传服务器，不要发明 curl/http-upload 方法；main-agent-save-file 只支持 rsync 或 scp。",
+    "不要生成 ssh/rsync/scp/curl 命令，不要要求用户在 terminal 手动执行命令；只生成 main-agent-save-file JSON 请求。",
+    "detaches_agent 只负责把 staged 文件传输到 destination.path，不负责创建远端目录、验证远端文件或整理 Main Agent 文件系统。",
     "请求格式必须是唯一一个 fenced code block：",
     "```main-agent-save-file",
-    "{\"fileId\":\"上面的文件 id\",\"sourceLocalPath\":\"上面的 sourceLocalPath\",\"displayName\":\"原始文件名\",\"size\":12345,\"destination\":{\"host\":\"Main Agent SSH host\",\"port\":22,\"user\":\"Main Agent SSH user\",\"path\":\"由 Main Agent 规则决定的绝对目标路径\"},\"methodPreference\":\"rsync\",\"reason\":\"说明为什么需要保存到 Main Agent\"}",
+    "{\"fileId\":\"上面的文件 id\",\"sourceLocalPath\":\"上面的 sourceLocalPath\",\"displayName\":\"原始文件名\",\"size\":12345,\"destination\":{\"user\":\"aispeech\",\"path\":\"/absolute/path/to/final-filename.ext\"},\"methodPreference\":\"rsync\",\"reason\":\"说明为什么需要保存到 Main Agent，以及为什么选择这个具体文件路径\"}",
     "```",
-    "用户批准后，detaches_agent 会在本机调用 rsync/scp 传输；如果 Main Agent 机器没有开启 SSH/SFTP 等可达服务，则该功能不可用。",
-    "用户批准前不要假装已经读取文件；如果传输失败，请根据 terminal 输出继续处理。"
+    "用户批准后，detaches_agent broker 会执行结构化 rsync/scp 传输；如果 SSH 需要密码，detaches_agent UI 会显示一次性密码输入框。",
+    "用户批准前不要假装已经读取文件；如果传输失败，只根据 [detaches_agent 工具结果] 报告失败原因，不要尝试替代传输方法。"
   ].join("\n").trimEnd();
 }
 
@@ -771,14 +912,137 @@ function findExistingStreamMessage(messages: ChatMessage[], identity: string | n
 }
 
 function mergeStreamText(previous: string, incoming: string, payload: Record<string, unknown>): string {
+  previous = collapseRepeatedText(previous);
+  incoming = collapseRepeatedText(incoming);
   if (!previous) return incoming;
   if (incoming === previous) return previous;
   if (incoming.startsWith(previous)) return incoming;
   if (previous.includes(incoming)) return previous;
   if (incoming.includes(previous)) return incoming;
+  const overlap = suffixPrefixOverlap(previous, incoming);
+  if (overlap >= 24) return collapseRepeatedText(`${previous}${incoming.slice(overlap)}`);
+  const repeatedPrefix = longestRepeatedPrefix(incoming);
+  if (repeatedPrefix && previous.endsWith(repeatedPrefix)) {
+    return collapseRepeatedText(`${previous}${incoming.slice(repeatedPrefix.length)}`);
+  }
   const eventType = String(payload.type ?? payload.event ?? payload.kind ?? "");
-  if (eventType.includes("delta") || typeof payload.delta === "string") return `${previous}${incoming}`;
-  return incoming.length >= previous.length ? incoming : `${previous}${incoming}`;
+  const hasExplicitDelta = eventType.includes("delta") || typeof payload.delta === "string";
+  if (hasExplicitDelta && looksLikeSmallDelta(previous, incoming)) return collapseRepeatedText(`${previous}${incoming}`);
+  return incoming.length >= previous.length ? collapseRepeatedText(incoming) : collapseRepeatedText(`${previous}${incoming}`);
+}
+
+function looksLikeSmallDelta(previous: string, incoming: string): boolean {
+  if (incoming.length <= 160) return true;
+  if (incoming.length < previous.length * 0.35) return true;
+  return false;
+}
+
+function collapseRepeatedText(text: string): string {
+  let current = text;
+  for (let pass = 0; pass < 6; pass += 1) {
+    const next = collapseRepeatedChunks(collapseRepeatedLines(collapseRepeatedParagraphRuns(current)));
+    if (next === current) return current;
+    current = next;
+  }
+  return current;
+}
+
+function collapseRepeatedParagraphRuns(text: string): string {
+  const pieces = text.split(/(\n{2,})/);
+  const seen = new Map<string, number>();
+  const output: string[] = [];
+  for (let index = 0; index < pieces.length; index += 1) {
+    const piece = pieces[index];
+    if (/^\n{2,}$/.test(piece)) {
+      output.push(piece);
+      continue;
+    }
+    const key = piece.trim();
+    const previousIndex = meaningfulRepeatChunk(key) ? seen.get(key) : undefined;
+    if (previousIndex !== undefined) {
+      output.splice(previousIndex);
+      rebuildParagraphSeen(output, seen);
+    }
+    if (piece) {
+      seen.set(key, output.length);
+      output.push(piece);
+    }
+  }
+  return output.join("");
+}
+
+function rebuildParagraphSeen(output: string[], seen: Map<string, number>): void {
+  seen.clear();
+  output.forEach((piece, index) => {
+    if (/^\n{2,}$/.test(piece)) return;
+    const key = piece.trim();
+    if (meaningfulRepeatChunk(key)) seen.set(key, index);
+  });
+}
+
+function collapseRepeatedLines(text: string): string {
+  const lines = text.split("\n");
+  const output: string[] = [];
+  for (const line of lines) {
+    const current = line.trim();
+    const previous = output.at(-1)?.trim() ?? "";
+    if (meaningfulRepeatChunk(current) && meaningfulRepeatChunk(previous)) {
+      if (current === previous || previous.startsWith(current)) continue;
+      if (current.startsWith(previous)) {
+        output[output.length - 1] = line;
+        continue;
+      }
+    }
+    output.push(line);
+  }
+  return output.join("\n");
+}
+
+function collapseRepeatedChunks(text: string): string {
+  let current = text;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const scanStart = Math.max(0, current.length - 8000);
+    const maxSize = Math.min(500, Math.floor((current.length - scanStart) / 2));
+    for (let size = maxSize; size >= 8; size -= 1) {
+      for (let start = scanStart; start + size * 2 <= current.length; start += 1) {
+        const chunk = current.slice(start, start + size);
+        if (!meaningfulRepeatChunk(chunk)) continue;
+        let repeats = 1;
+        while (current.slice(start + size * repeats, start + size * (repeats + 1)) === chunk) repeats += 1;
+        if (repeats > 1) {
+          current = `${current.slice(0, start + size)}${current.slice(start + size * repeats)}`;
+          changed = true;
+          break;
+        }
+      }
+      if (changed) break;
+    }
+  }
+  return current;
+}
+
+function meaningfulRepeatChunk(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length >= 6 && /[\p{L}\p{N}]/u.test(trimmed) && !trimmed.startsWith("```");
+}
+
+function suffixPrefixOverlap(previous: string, incoming: string): number {
+  const max = Math.min(previous.length, incoming.length, 2000);
+  for (let length = max; length >= 24; length -= 1) {
+    if (previous.endsWith(incoming.slice(0, length))) return length;
+  }
+  return 0;
+}
+
+function longestRepeatedPrefix(text: string): string {
+  const max = Math.min(400, Math.floor(text.length / 2));
+  for (let length = max; length >= 24; length -= 1) {
+    const prefix = text.slice(0, length);
+    if (text.slice(length).startsWith(prefix)) return prefix;
+  }
+  return "";
 }
 
 function runIdentity(payload: Record<string, unknown>): string | undefined {

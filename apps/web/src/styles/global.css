@@ -242,6 +242,161 @@ button, input, textarea {
   border-top: 1px solid var(--line);
 }
 
+.save-password-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: rgb(15 23 42 / 24%);
+}
+
+.save-password-dialog {
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 64px rgb(15 23 42 / 24%);
+}
+
+.save-password-header {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.save-password-header strong,
+.save-password-header small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.save-password-header strong {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.save-password-header small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.save-password-content {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.save-password-content section {
+  display: grid;
+  gap: 8px;
+}
+
+.save-password-content h3 {
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.save-password-content p {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.save-password-content p span,
+.save-password-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.save-password-grid {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.save-password-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.save-password-content code {
+  display: block;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre;
+  padding: 10px;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #d1fae5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.save-password-content input {
+  width: 100%;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 11px;
+  font-size: 13px;
+}
+
+.save-password-note {
+  display: block !important;
+  color: var(--muted) !important;
+}
+
+.save-password-warning,
+.request-warning {
+  padding: 8px 10px;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+}
+
+.save-password-actions {
+  min-height: 58px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  background: #fff;
+}
+
 .panel-heading.compact {
   min-height: 60px;
   padding: 12px;
@@ -765,36 +920,33 @@ h3 { font-size: 14px; }
 }
 
 .terminal-output {
+  position: relative;
   flex: 1;
   min-height: 0;
   height: auto;
   margin: 0;
   padding: 12px;
-  overflow: auto;
+  overflow: hidden;
   background: #020617;
   color: #d1fae5;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.terminal-output:empty::before {
+  content: attr(data-empty-text);
+  position: absolute;
+  inset: 12px;
+  color: #64748b;
   font-size: 12px;
   line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  pointer-events: none;
 }
 
-.terminal-input-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  padding: 10px;
-  background: #0f172a;
+.terminal-output .xterm {
+  height: 100%;
 }
 
-.terminal-input-row input {
-  min-width: 0;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  background: #020617;
-  color: #dbeafe;
-  padding: 9px 10px;
+.terminal-output .xterm-viewport {
+  overflow-y: auto;
 }
 
 .terminal-mini {
@@ -988,6 +1140,32 @@ h3 { font-size: 14px; }
   display: flex;
   align-items: flex-start;
   gap: 6px;
+}
+
+.inline-password-prompt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.inline-password-prompt span {
+  grid-column: 1 / -1;
+  color: #1e40af;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.inline-password-prompt input {
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
 }
 
 .attachment-chip,
@@ -1484,6 +1662,19 @@ h3 { font-size: 14px; }
   height: 28px;
   padding: 0 9px;
   font-size: 12px;
+}
+
+.agent-config-import-button {
+  border-color: #fdba74;
+  background: #fff7ed;
+  color: #9a3412;
+  box-shadow: 0 1px 0 rgb(251 146 60 / 16%);
+}
+
+.agent-config-import-button:hover:not(:disabled) {
+  border-color: #fb923c;
+  background: #ffedd5;
+  color: #7c2d12;
 }
 
 .secondary-button:disabled {

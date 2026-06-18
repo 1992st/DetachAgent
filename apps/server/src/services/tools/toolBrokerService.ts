@@ -21,7 +21,8 @@ import type {
   ToolRequestStatus,
   ToolRiskAssessment,
   ToolExecutionResultResponse,
-  ToolTarget
+  ToolTarget,
+  MainAgentFileTransferSnapshot
 } from "@detaches/shared";
 import { appConfig } from "../../config/appConfig.js";
 import { fileTransferService } from "../files/fileTransferService.js";
@@ -95,7 +96,9 @@ interface ToolBrokerState {
 class ToolBrokerService {
   private requests = new Map<string, ToolRequestRecord>();
   private executions = new Map<string, ToolExecutionRecord>();
+  private transferForwardStatus = new Map<string, ToolResultForwardStatus>();
   private loaded = false;
+  private transferListenerAttached = false;
   private saveChain: Promise<void> = Promise.resolve();
   readonly emitter = new EventEmitter();
 
@@ -284,7 +287,7 @@ class ToolBrokerService {
         const transfer = await mainAgentFileTransferService.start(request);
         const updated = this.update(request, "running", undefined, decision("approved", input));
         await this.save();
-        await this.audit({ type: "tool.approve", requestId, status: updated.status, command: `main-agent-save-file:${transfer.transferId}`, actor: input.actor, riskAccepted: input.riskAccepted });
+        await this.audit({ type: "tool.approve", requestId, status: updated.status, command: `main-agent-save-file:${transfer.transferId}`, executionId: transfer.transferId, actor: input.actor, riskAccepted: input.riskAccepted });
         return {
           request: updated,
           execution: {
@@ -295,7 +298,9 @@ class ToolBrokerService {
             completed: false,
             forwardStatus: "not-started"
           },
-          message: transfer.needsPassword ? "File transfer is waiting for SSH password." : "Main Agent file transfer started."
+          message: transfer.needsPassword
+            ? "Main Agent file transfer is waiting for SSH password."
+            : "Main Agent file transfer started."
         };
       } catch (error) {
         return this.fail(request, error instanceof Error ? error.message : String(error));
@@ -363,29 +368,29 @@ class ToolBrokerService {
     const request = this.requireRequest(requestId);
     if (request.kind === "main-agent-save-file") {
       const transfer = mainAgentFileTransferService.findByRequest(requestId);
-      if (transfer && (transfer.status === "succeeded" || transfer.status === "failed") && request.status === "running") {
-        const updated = this.update(request, transfer.status === "succeeded" ? "succeeded" : "failed", transfer.error);
-        await this.save();
-        void this.forwardResultToAgent(updated.id, { delayMs: 0 });
-        return this.result(requestId);
-      }
-      const output = transfer ? JSON.stringify(transfer, null, 2) : "";
-      return {
-        request: this.requests.get(requestId) ?? request,
-        result: {
-          executionId: transfer?.transferId ?? "",
-          requestId,
-          status: (this.requests.get(requestId) ?? request).status,
-          sessionKey: request.sessionKey,
-          completed: transfer?.status === "succeeded" || transfer?.status === "failed",
-          exitCode: transfer?.status === "succeeded" ? 0 : transfer?.status === "failed" ? 1 : undefined,
-          forwardStatus: "not-started",
-          output,
-          outputBytes: Buffer.byteLength(output, "utf8"),
-          capturedAt: new Date().toISOString(),
-          message: "Main Agent file transfer status snapshot."
+      if (transfer) {
+        if ((transfer.status === "succeeded" || transfer.status === "failed") && request.status === "running") {
+          await this.completeMainAgentFileTransfer(transfer);
+          return this.result(requestId);
         }
-      };
+        const output = JSON.stringify(transfer, null, 2);
+        return {
+          request: this.requests.get(requestId) ?? request,
+          result: {
+            executionId: transfer.transferId,
+            requestId,
+            status: (this.requests.get(requestId) ?? request).status,
+            sessionKey: request.sessionKey,
+            completed: transfer.status === "succeeded" || transfer.status === "failed",
+            exitCode: transfer.status === "succeeded" ? 0 : transfer.status === "failed" ? 1 : undefined,
+            forwardStatus: "not-started",
+            output,
+            outputBytes: Buffer.byteLength(output, "utf8"),
+            capturedAt: new Date().toISOString(),
+            message: "Main Agent file transfer status snapshot."
+          }
+        };
+      }
     }
     const execution = [...this.executions.values()].find((item) => item.requestId === requestId);
     if (!execution) {
@@ -470,14 +475,21 @@ class ToolBrokerService {
     sourceRunId?: string;
     payload: Record<string, unknown>;
   }): ToolRequestRecord | null {
-    return [...this.requests.values()].find((request) => {
+    const inputFingerprint = toolPayloadFingerprint(input);
+    const sameScope = (request: ToolRequestRecord) => {
       if (request.source !== "text-extract") return false;
       if (request.kind !== input.kind || request.target !== input.target || request.sessionKey !== input.sessionKey) return false;
       if ((request.agentId || "") !== (input.agentId || "")) return false;
+      return toolPayloadFingerprint(request) === inputFingerprint;
+    };
+    return [...this.requests.values()].find((request) => {
+      if (!sameScope(request)) return false;
       if (input.sourceMessageId && request.sourceMessageId !== input.sourceMessageId) return false;
       if (!input.sourceMessageId && input.sourceRunId && request.sourceRunId !== input.sourceRunId) return false;
-      return toolPayloadFingerprint(request) === toolPayloadFingerprint(input);
-    }) ?? null;
+      return true;
+    }) ?? [...this.requests.values()]
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .find((request) => sameScope(request) && reusableDuplicateStatus(request.status)) ?? null;
   }
 
   private update(request: ToolRequestRecord, status: ToolRequestStatus, error?: string, lastDecision?: ToolRequestRecord["lastDecision"]): ToolRequestRecord {
@@ -505,11 +517,11 @@ class ToolBrokerService {
     return { request: updated, message: error };
   }
 
-  private async runInTerminal(request: ToolRequestRecord, command: string): Promise<ToolExecutionRecord> {
+  private async runInTerminal(request: ToolRequestRecord, command: string, options: { requireInteractive?: boolean } = {}): Promise<ToolExecutionRecord> {
     const executionId = nanoid();
-    const before = await terminalService.snapshot(request.sessionKey);
+    const before = await terminalService.snapshot(request.sessionKey, { requireInteractive: options.requireInteractive });
     const wrappedCommand = wrapCommandForCompletion(command, executionId);
-    const terminal = await terminalService.runCommand(request.sessionKey, wrappedCommand);
+    const terminal = await terminalService.runCommand(request.sessionKey, wrappedCommand, { requireInteractive: options.requireInteractive });
     const execution: ToolExecutionRecord = {
       executionId,
       requestId: request.id,
@@ -597,7 +609,7 @@ class ToolBrokerService {
   private async forwardResultToAgent(requestId: string, options?: { delayMs?: number; force?: boolean }): Promise<void> {
     await this.load();
     const request = this.requireRequest(requestId);
-    if (request.kind === "main-agent-save-file") {
+    if (request.kind === "main-agent-save-file" && mainAgentFileTransferService.findByRequest(requestId)) {
       await this.forwardMainAgentFileTransferResult(request, options);
       return;
     }
@@ -628,6 +640,11 @@ class ToolBrokerService {
           outputTail: output.slice(-4000)
         }, null, 2),
         "```",
+        "",
+        "Result-handling instruction for the receiving agent:",
+        "- Treat this broker message as the authoritative tool-result interface.",
+        "- Do not attempt alternative transfer/control methods such as starting HTTP upload servers, using curl POST, manually running scp/rsync/ssh, or asking the user to copy files/IPs/tokens.",
+        "- Report the result to the user from the JSON above. If it failed, explain the failure and ask the user to retry or fix the reported broker/SSH issue; do not invent a workaround outside the detaches_agent tool flow.",
         "",
         "This is a terminal replay snapshot, not a guaranteed command-completion signal."
       ].join("\n");
@@ -662,8 +679,12 @@ class ToolBrokerService {
   private async forwardMainAgentFileTransferResult(request: ToolRequestRecord, options?: { delayMs?: number; force?: boolean }): Promise<void> {
     const transfer = mainAgentFileTransferService.findByRequest(request.id);
     if (!transfer) return;
+    const forwardStatus = this.transferForwardStatus.get(transfer.transferId);
+    if (!options?.force && (forwardStatus === "sent" || forwardStatus === "pending")) return;
+    this.transferForwardStatus.set(transfer.transferId, "pending");
     await delay(options?.delayMs ?? 600);
     try {
+      const latestRequest = this.requests.get(request.id) ?? request;
       const message = [
         "[detaches_agent 工具结果]",
         "Main Agent file transfer snapshot from the user's local detaches_agent broker.",
@@ -674,15 +695,27 @@ class ToolBrokerService {
           executionId: transfer.transferId,
           kind: request.kind,
           target: request.target,
-          status: request.status,
+          status: latestRequest.status,
           completed: transfer.status === "succeeded" || transfer.status === "failed",
           transferStatus: transfer.status,
           sourceLocalPath: transfer.sourceLocalPath,
+          requestedDestination: transfer.requestedDestination,
           destination: transfer.destination,
+          commandPreview: transfer.commandPreview,
+          warnings: transfer.warnings,
           method: transfer.method,
-          error: transfer.error
+          passwordRequestedAt: transfer.passwordRequestedAt,
+          passwordExpiresAt: transfer.passwordExpiresAt,
+          exitCode: transfer.exitCode,
+          error: transfer.error,
+          outputTail: transfer.outputTail
         }, null, 2),
-        "```"
+        "```",
+        "",
+        "Result-handling instruction for the receiving agent:",
+        "- Treat this broker message as the authoritative main-agent-save-file result interface.",
+        "- Do not attempt alternative transfer methods such as starting HTTP upload servers, using curl POST, manually running scp/rsync/ssh, or asking the user to copy files/IPs/tokens.",
+        "- Report the result to the user from the JSON above. If it failed, explain the failure and ask the user to retry or fix the reported broker/SSH issue; do not invent a workaround outside the detaches_agent tool flow."
       ].join("\n");
       await gatewayClient.sendChat({
         sessionKey: request.sessionKey,
@@ -696,8 +729,10 @@ class ToolBrokerService {
           executionId: transfer.transferId
         }
       });
+      this.transferForwardStatus.set(transfer.transferId, "sent");
       await this.audit({ type: "tool.result.forward", requestId: request.id, executionId: transfer.transferId, status: "sent", ok: true });
     } catch (error) {
+      this.transferForwardStatus.set(transfer.transferId, "failed");
       await this.audit({
         type: "tool.result.forward",
         requestId: request.id,
@@ -724,6 +759,7 @@ class ToolBrokerService {
   private async load(): Promise<void> {
     if (this.loaded) return;
     this.loaded = true;
+    this.attachMainAgentTransferListener();
     try {
       const raw = await fs.readFile(this.statePath(), "utf8");
       const parsed = JSON.parse(raw) as Partial<ToolBrokerState>;
@@ -742,6 +778,29 @@ class ToolBrokerService {
         });
       }
     }
+  }
+
+  private attachMainAgentTransferListener(): void {
+    if (this.transferListenerAttached) return;
+    this.transferListenerAttached = true;
+    mainAgentFileTransferService.emitter.on("transfer", (transfer: MainAgentFileTransferSnapshot) => {
+      if (transfer.status !== "succeeded" && transfer.status !== "failed") return;
+      void this.completeMainAgentFileTransfer(transfer);
+    });
+  }
+
+  private async completeMainAgentFileTransfer(transfer: MainAgentFileTransferSnapshot): Promise<void> {
+    await this.load();
+    const request = this.requests.get(transfer.requestId);
+    if (!request || request.kind !== "main-agent-save-file") return;
+    if (request.status === "succeeded" || request.status === "rejected") return;
+    const updated = this.update(
+      request,
+      transfer.status === "succeeded" ? "succeeded" : "failed",
+      transfer.error
+    );
+    await this.save();
+    await this.forwardMainAgentFileTransferResult(updated, { delayMs: 0 });
   }
 
   private async save(): Promise<void> {
@@ -834,6 +893,10 @@ function toolPayloadFingerprint(input: Pick<ToolRequestCreateInput, "kind" | "ta
   ].join("\0");
 }
 
+function reusableDuplicateStatus(status: ToolRequestStatus): boolean {
+  return status === "pending" || status === "running" || status === "failed" || status === "blocked";
+}
+
 function parseFileTransferRequests(text: string): ParsedToolRequest[] {
   const requests: ParsedToolRequest[] = [];
   const fencePattern = /```(?:detaches-file-transfer|file-transfer)\s*\n([\s\S]*?)```/gi;
@@ -889,6 +952,7 @@ function parseMainAgentSaveFileRequests(text: string): ParsedToolRequest[] {
       const fileId = typeof parsed.fileId === "string" ? parsed.fileId.trim() : "";
       const sourceLocalPath = typeof parsed.sourceLocalPath === "string" ? parsed.sourceLocalPath.trim() : "";
       const destination = mainAgentDestinationPayload(parsed.destination);
+      if (isPlaceholderMainAgentSaveFile(fileId, sourceLocalPath, parsed.destination)) continue;
       if (fileId && sourceLocalPath && destination) {
         requests.push({
           kind: "main-agent-save-file",
@@ -909,6 +973,20 @@ function parseMainAgentSaveFileRequests(text: string): ParsedToolRequest[] {
     }
   }
   return requests;
+}
+
+function isPlaceholderMainAgentSaveFile(fileId: string, sourceLocalPath: string, destination: unknown): boolean {
+  const pathValue = targetObject(destination) && typeof destination.path === "string" ? destination.path : "";
+  const haystack = [
+    fileId,
+    sourceLocalPath,
+    pathValue
+  ].join("\n").toLowerCase();
+  return isMainAgentSaveFilePlaceholderText(haystack);
+}
+
+function isMainAgentSaveFilePlaceholderText(value: string): boolean {
+  return /上面的|<file-id>|<absolute path|final-filename\.ext|原始文件名|请替换|替换为|your-|example\.|100\.x\.x\.x|192\.168\.x\.x|main agent.*ip|main agent.*host|detaches_agent.*host|detaches-agent.*host|ssh user/.test(value.toLowerCase());
 }
 
 function keepLastFileTransferPerFile(requests: ParsedToolRequest[]): ParsedToolRequest[] {
@@ -955,18 +1033,25 @@ function parseToolTarget(value: unknown): ToolTarget {
 function destinationFingerprint(value: unknown): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "";
   const record = value as Record<string, unknown>;
-  return [record.host, record.port, record.user, record.path].map((item) => String(item ?? "")).join(":");
+  const host = typeof record.host === "string" && !isMainAgentSaveFilePlaceholderText(record.host) ? record.host.trim() : "";
+  const user = typeof record.user === "string" && !isMainAgentSaveFilePlaceholderText(record.user) ? record.user.trim() : "";
+  const port = typeof record.port === "number" ? record.port : Number(record.port);
+  const normalizedPort = Number.isFinite(port) && port > 0 ? Math.max(1, Math.min(65535, Math.floor(port))) : 0;
+  const remotePath = typeof record.path === "string" ? record.path.trim() : "";
+  return [host, normalizedPort, user, remotePath].map((item) => String(item ?? "")).join(":");
 }
 
 function mainAgentDestinationPayload(value: unknown): { host: string; port: number; user: string; path: string } | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  const host = typeof record.host === "string" ? record.host.trim() : "";
-  const user = typeof record.user === "string" ? record.user.trim() : "";
+  const rawHost = typeof record.host === "string" ? record.host.trim() : "";
+  const rawUser = typeof record.user === "string" ? record.user.trim() : "";
   const remotePath = typeof record.path === "string" ? record.path.trim() : "";
   const port = typeof record.port === "number" ? record.port : Number(record.port);
-  if (!host || !user || !remotePath.startsWith("/") || !Number.isFinite(port)) return null;
-  return { host, user, path: remotePath, port: Math.max(1, Math.min(65535, Math.floor(port))) };
+  if (!remotePath.startsWith("/") || !rawUser || isMainAgentSaveFilePlaceholderText(rawUser)) return null;
+  const host = isMainAgentSaveFilePlaceholderText(rawHost) ? "" : rawHost;
+  const user = rawUser;
+  return { host, user, path: remotePath, port: Number.isFinite(port) ? Math.max(1, Math.min(65535, Math.floor(port))) : 0 };
 }
 
 function stringPayload(request: ToolRequestRecord, key: string): string {

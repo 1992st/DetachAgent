@@ -24,6 +24,7 @@ export function App() {
   const [clientError, setClientError] = useState<string | null>(null);
   const [sessionMode, setSessionMode] = useState<ChatSessionMode>("device");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [sessionOverrides, setSessionOverrides] = useState<Record<string, string>>({});
   const [attachmentsBySession, setAttachmentsBySession] = useState<Record<string, UploadedFileRef[]>>({});
   const [uploading, setUploading] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -90,7 +91,10 @@ export function App() {
   }, [refreshHealth, refreshClientIdentity, refreshAgents, refreshDiagnostics]);
 
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
-  const selectedSession = selectedAgent ? sessionKeyForAgent(selectedAgent, sessionMode, clientIdentity) : null;
+  const selectedSessionScope = selectedAgent ? sessionScopeKey(selectedAgent.id, sessionMode) : null;
+  const selectedSession = selectedAgent && selectedSessionScope
+    ? sessionOverrides[selectedSessionScope] ?? sessionKeyForAgent(selectedAgent, sessionMode, clientIdentity)
+    : null;
   const attachments = selectedSession ? attachmentsBySession[selectedSession] ?? [] : [];
 
   const loadTerminalApps = useCallback(async () => {
@@ -136,6 +140,13 @@ export function App() {
     }
   }
 
+  function handleNewSession() {
+    if (!selectedAgent || !selectedSessionScope) return;
+    const nextSession = newSessionKeyForAgent(selectedAgent, sessionMode, clientIdentity);
+    setSessionOverrides((current) => ({ ...current, [selectedSessionScope]: nextSession }));
+    setAttachmentsBySession((current) => ({ ...current, [nextSession]: [] }));
+  }
+
   return (
     <div className="shell">
       <ConnectionBar
@@ -174,6 +185,7 @@ export function App() {
             clientIdentity={clientIdentity}
             attachments={attachments}
             onSessionModeChange={setSessionMode}
+            onNewSession={handleNewSession}
             onClearAttachments={() => {
               if (!selectedSession) return;
               setAttachmentsBySession((current) => ({ ...current, [selectedSession]: [] }));
@@ -220,4 +232,14 @@ function sessionKeyForAgent(agent: AgentSummary, sessionMode: ChatSessionMode, i
   if (sessionMode === "main") return `agent:${agentId}:main`;
   const namespace = identity?.sessionNamespace ?? "detaches:local";
   return `agent:${agentId}:${namespace}`;
+}
+
+function newSessionKeyForAgent(agent: AgentSummary, sessionMode: ChatSessionMode, identity: ClientIdentity | null): string {
+  const base = sessionKeyForAgent(agent, sessionMode, identity);
+  const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return `${base}:new:${suffix}`;
+}
+
+function sessionScopeKey(agentId: string, sessionMode: ChatSessionMode): string {
+  return `${normalizeAgentId(agentId)}:${sessionMode}`;
 }

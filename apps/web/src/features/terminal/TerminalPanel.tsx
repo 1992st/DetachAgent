@@ -1,5 +1,8 @@
-import { FormEvent, forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Copy, Eraser, Minimize2, TerminalSquare, X } from "lucide-react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 import type { TerminalInfo, TerminalSocketServerEvent } from "@detaches/shared";
 
 interface Props {
@@ -26,11 +29,12 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
   const [open, setOpen] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [status, setStatus] = useState<TerminalInfo | null>(null);
-  const [output, setOutput] = useState("");
-  const [input, setInput] = useState("");
   const [socketState, setSocketState] = useState("idle");
   const socketRef = useRef<WebSocket | null>(null);
-  const outputRef = useRef<HTMLPreElement | null>(null);
+  const terminalHostRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const outputRef = useRef("");
 
   useImperativeHandle(ref, () => ({
     reveal() {
@@ -42,7 +46,8 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
   useEffect(() => {
     socketRef.current?.close();
     socketRef.current = null;
-    setOutput("");
+    outputRef.current = "";
+    terminalRef.current?.clear();
     setStatus(null);
     if (!sessionKey) {
       setSocketState("idle");
@@ -61,22 +66,73 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
       const data = JSON.parse(event.data) as TerminalSocketServerEvent;
       if (data.type === "ready") {
         setStatus(data.terminal);
-        setOutput(data.replay);
+        outputRef.current = data.replay;
+        terminalRef.current?.reset();
+        if (data.replay) terminalRef.current?.write(data.replay);
       } else if (data.type === "data") {
-        setOutput((current) => `${current}${data.data}`.slice(-120_000));
+        outputRef.current = `${outputRef.current}${data.data}`.slice(-120_000);
+        terminalRef.current?.write(data.data);
       } else if (data.type === "status") {
         setStatus(data.terminal);
       } else if (data.type === "error") {
-        setOutput((current) => `${current}\n[terminal error] ${data.message}\n`);
+        const message = `\r\n[terminal error] ${data.message}\r\n`;
+        outputRef.current = `${outputRef.current}${message}`.slice(-120_000);
+        terminalRef.current?.write(message);
       }
     };
     return () => ws.close();
-  }, [sessionKey]);
+  }, [emptyText, sessionKey]);
 
   useEffect(() => {
-    if (!outputRef.current) return;
-    outputRef.current.scrollTop = outputRef.current.scrollHeight;
-  }, [output]);
+    if (!open || minimized || !terminalHostRef.current || terminalRef.current) return;
+    const terminal = new Terminal({
+      cursorBlink: true,
+      convertEol: true,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+      fontSize: 12,
+      lineHeight: 1.35,
+      theme: {
+        background: "#020617",
+        foreground: "#d1fae5",
+        cursor: "#e2e8f0",
+        selectionBackground: "#334155"
+      }
+    });
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.open(terminalHostRef.current);
+    terminal.onData((data) => {
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ type: "input", data }));
+      }
+    });
+    terminalRef.current = terminal;
+    fitAddonRef.current = fitAddon;
+    fitAddon.fit();
+    if (outputRef.current) terminal.write(outputRef.current);
+    const resizeObserver = new ResizeObserver(() => {
+      fitAddon.fit();
+      socketRef.current?.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }));
+    });
+    resizeObserver.observe(terminalHostRef.current);
+    return () => {
+      resizeObserver.disconnect();
+      terminal.dispose();
+      terminalRef.current = null;
+      fitAddonRef.current = null;
+    };
+  }, [minimized, open]);
+
+  useEffect(() => {
+    if (!open || minimized) return;
+    requestAnimationFrame(() => {
+      fitAddonRef.current?.fit();
+      const terminal = terminalRef.current;
+      if (terminal) {
+        socketRef.current?.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }));
+      }
+    });
+  }, [minimized, open]);
 
   useEffect(() => {
     if (!autoOpenKey || !sessionKey) return;
@@ -84,15 +140,13 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
     setMinimized(false);
   }, [autoOpenKey, sessionKey]);
 
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!input || socketRef.current?.readyState !== WebSocket.OPEN) return;
-    socketRef.current.send(JSON.stringify({ type: "input", data: `${input}\r` }));
-    setInput("");
+  async function copyOutput() {
+    await navigator.clipboard.writeText(outputRef.current);
   }
 
-  async function copyOutput() {
-    await navigator.clipboard.writeText(output);
+  function clearOutput() {
+    outputRef.current = "";
+    terminalRef.current?.clear();
   }
 
   return (
@@ -121,7 +175,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
               <button type="button" className="icon-button" title="Copy terminal output" onClick={() => void copyOutput()}>
                 <Copy size={15} />
               </button>
-              <button type="button" className="icon-button" title="Clear view" onClick={() => setOutput("")}>
+              <button type="button" className="icon-button" title="Clear view" onClick={clearOutput}>
                 <Eraser size={15} />
               </button>
               <button type="button" className="icon-button" title="缩小 terminal" onClick={() => setMinimized(true)}>
@@ -140,16 +194,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
               </button>
             </div>
           </div>
-          <pre className="terminal-output" ref={outputRef}>{output || emptyText}</pre>
-          <form className="terminal-input-row" onSubmit={submit}>
-            <input
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="输入本机命令后按 Enter..."
-              disabled={socketRef.current?.readyState !== WebSocket.OPEN}
-            />
-            <button className="secondary-button" disabled={!input || socketRef.current?.readyState !== WebSocket.OPEN}>Enter</button>
-          </form>
+          <div className="terminal-output" ref={terminalHostRef} data-empty-text={emptyText} />
           </div>
         </div>
       ) : null}

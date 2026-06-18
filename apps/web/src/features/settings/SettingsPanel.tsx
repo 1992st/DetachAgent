@@ -318,7 +318,7 @@ export function SettingsPanel({ onSaved }: Props) {
         <section className="settings-section">
           <div className="settings-section-heading">
             <h3>Main Agent Gateway</h3>
-            <button type="button" className="secondary-button compact" onClick={() => setAssistantOpen(true)}>
+            <button type="button" className="secondary-button compact agent-config-import-button" onClick={() => setAssistantOpen(true)}>
               <FileInput size={16} />
               导入 Agent 配置
             </button>

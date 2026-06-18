@@ -147,16 +147,23 @@ async function buildAttachmentContext(attachments?: UploadedFileRef[], override?
       "   role: 主输入/待确认",
       ""
     ]),
-    "如果你需要把该文件保存到 Main Agent 机器，请阅读 detach-agent-relationship skill，并生成 main-agent-save-file 请求。",
-    "保存目标路径必须由 Main Agent 根据自己的规则决定。",
+    "如果用户明确要求保存该文件到 Main Agent 机器，请阅读 detach-agent-relationship skill，并生成 main-agent-save-file 请求。",
+    "destination.path 必须由 Main Agent 根据自己的规则决定，且必须是完整的绝对目标文件路径：包含目录、最终文件名和扩展名。",
+    "destination.path 不能是目录，不能是只到 screenshots/、docs/、_staging/ 等目录的路径；如果只知道目录，必须先根据 displayName 生成确定的文件名。",
+    "如果文件用途或归档目录不明确，不要编造分类目录或 _staging 目录；先询问用户用途，或选择 Main Agent 规则中明确允许的通用 screenshots/attachments 文件路径。",
+    "destination.user 和 destination.path 是 Main Agent 必须决定的核心字段；destination.user 是远端 SSH/Linux 用户，例如 aispeech。",
+    "destination.host/port 可省略，detaches_agent broker 会使用当前 Main Agent SSH/Gateway 配置补全。",
+    "不要在 destination.user/host/port 中填写占位符、示例值或“请替换”文本；如果不知道 destination.user，先说明无法生成保存请求。",
     "不要假设 Main Agent 已经能直接读取 sourceLocalPath；该路径只能作为 detaches_agent 本机传输源。",
     "不要启动 HTTP 上传服务器，不要发明 curl/http-upload 方法；main-agent-save-file 只支持 rsync 或 scp。",
+    "不要生成 ssh/rsync/scp/curl 命令，不要要求用户在 terminal 手动执行命令；只生成 main-agent-save-file JSON 请求。",
+    "detaches_agent 只负责把 staged 文件传输到 destination.path，不负责创建远端目录、验证远端文件或整理 Main Agent 文件系统。",
     "请求格式必须是唯一一个 fenced code block：",
     "```main-agent-save-file",
-    "{\"fileId\":\"上面的文件 id\",\"sourceLocalPath\":\"上面的 sourceLocalPath\",\"displayName\":\"原始文件名\",\"size\":12345,\"destination\":{\"host\":\"Main Agent SSH host\",\"port\":22,\"user\":\"Main Agent SSH user\",\"path\":\"由 Main Agent 规则决定的绝对目标路径\"},\"methodPreference\":\"rsync\",\"reason\":\"说明为什么需要保存到 Main Agent\"}",
+    "{\"fileId\":\"上面的文件 id\",\"sourceLocalPath\":\"上面的 sourceLocalPath\",\"displayName\":\"原始文件名\",\"size\":12345,\"destination\":{\"user\":\"aispeech\",\"path\":\"/absolute/path/to/final-filename.ext\"},\"methodPreference\":\"rsync\",\"reason\":\"说明为什么需要保存到 Main Agent，以及为什么选择这个具体文件路径\"}",
     "```",
-    "用户批准后，detaches_agent 会在本机调用 rsync/scp 传输；如果 Main Agent 机器没有开启 SSH/SFTP 等可达服务，则该功能不可用。",
-    "用户批准前不要假装已经读取文件；如果传输失败，请根据 terminal 输出继续处理。"
+    "用户批准后，detaches_agent broker 会执行结构化 rsync/scp 传输；如果 SSH 需要密码，detaches_agent UI 会显示一次性密码输入框。",
+    "用户批准前不要假装已经读取文件；如果传输失败，只根据 [detaches_agent 工具结果] 报告失败原因，不要尝试替代传输方法。"
   ].join("\n").trimEnd();
 }
 

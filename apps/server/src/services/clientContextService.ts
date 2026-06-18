@@ -60,7 +60,7 @@ export async function buildDetachesSessionContext(
       supportedTargets: ["remote-agent-host", "local-user-machine", "main-agent-machine"],
       defaultTarget: "main-agent-machine" as const,
       requiresApproval: true,
-      remotePathRule: `For target=main-agent-machine, use a main-agent-save-file request. sourceLocalPath must be this staged localPath, and destination.path must be an absolute path chosen by the Main Agent according to Host/Main Agent rules. detaches_agent will use local rsync/scp only after user approval and one-time password input when required.`
+      remotePathRule: `For target=main-agent-machine, use a main-agent-save-file request. sourceLocalPath must be this staged localPath. destination.user must be the Host/Main Agent SSH/Linux user chosen by the Main Agent, and destination.path must be a complete absolute file path chosen by the Main Agent according to Host/Main Agent rules. destination.host/port may be omitted; detaches_agent broker fills them from its current Main Agent SSH/Gateway settings. After user approval, detaches_agent broker executes one structured rsync/scp transfer; any SSH password is entered in the detaches_agent UI and is not saved. Do not generate terminal commands or alternative upload methods.`
     }
   }));
   return {
