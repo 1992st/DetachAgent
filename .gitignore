@@ -3,7 +3,8 @@ dist/
 .turbo/
 .vite/
 .desktop-runtime/
-release/
+release/*
+!release/detaches-agent-0.1.0-win-x64-setup.exe
 .codex/tmp/
 .codex/tools/
 main.js

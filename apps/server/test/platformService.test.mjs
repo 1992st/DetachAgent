@@ -64,6 +64,18 @@ assert.equal(
 
 assert.equal(win.normalizeLocalPath("Downloads\\demo.txt"), null, "Windows relative local paths should be rejected");
 
+assert.deepEqual(
+  win.executableNames("scp"),
+  ["scp", "scp.exe", "scp.cmd", "scp.bat"],
+  "Windows executable resolution should try common executable extensions"
+);
+
+assert.deepEqual(
+  posix.executableNames("scp"),
+  ["scp"],
+  "POSIX executable resolution should not append Windows executable extensions"
+);
+
 const powerShell = win.buildShellLaunch("Write-Host ok", { cwd: "C:\\Users\\alice" });
 assert.equal(powerShell.shell, "powershell.exe", "Windows shell launch should default to PowerShell");
 assert.deepEqual(

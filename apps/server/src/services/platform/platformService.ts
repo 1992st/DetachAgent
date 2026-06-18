@@ -108,6 +108,11 @@ export class PlatformService {
     }
   }
 
+  executableNames(command: string): string[] {
+    if (this.nodePlatform() !== "win32" || path.extname(command)) return [command];
+    return [command, `${command}.exe`, `${command}.cmd`, `${command}.bat`];
+  }
+
   getDefaultShell(): string {
     if (this.nodePlatform() === "win32") {
       return this.env().COMSPEC || "powershell.exe";

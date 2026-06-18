@@ -468,17 +468,7 @@ function scpArgs(transfer: TransferRecord, scp: TransferCommand, sshArgs: string
 }
 
 async function resolveTransferCommand(command: "rsync" | "scp"): Promise<TransferCommand | null> {
-  const paths = transferSearchPath();
-  for (const dir of paths) {
-    const candidate = path.join(dir, command);
-    try {
-      await fs.access(candidate, fs.constants.X_OK);
-      return { command: candidate, argsPrefix: [] };
-    } catch {
-      // Try the next PATH entry.
-    }
-  }
-  return null;
+  return resolveExecutable(command);
 }
 
 async function resolveSshCommand(command: string, argsPrefix: string[]): Promise<TransferCommand | null> {
@@ -490,13 +480,20 @@ async function resolveSshCommand(command: string, argsPrefix: string[]): Promise
       return null;
     }
   }
+  const resolved = await resolveExecutable(command);
+  return resolved ? { ...resolved, argsPrefix } : null;
+}
+
+async function resolveExecutable(command: string): Promise<TransferCommand | null> {
   for (const dir of transferSearchPath()) {
-    const candidate = path.join(dir, command);
-    try {
-      await fs.access(candidate, fs.constants.X_OK);
-      return { command: candidate, argsPrefix };
-    } catch {
-      // Try the next PATH entry.
+    for (const name of platformService.executableNames(command)) {
+      const candidate = path.join(dir, name);
+      try {
+        await fs.access(candidate, fs.constants.X_OK);
+        return { command: candidate, argsPrefix: [] };
+      } catch {
+        // Try the next executable name or PATH entry.
+      }
     }
   }
   return null;
