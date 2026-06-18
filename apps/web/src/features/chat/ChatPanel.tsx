@@ -1,7 +1,7 @@
 import { type CSSProperties, FormEvent, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, FileText, List, Minus, Paperclip, Plus, Send, Square, X } from "lucide-react";
 import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, MainAgentFileTransferSnapshot, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
-import { approveToolRequest, extractToolRequests, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward, submitMainAgentTransferPassword } from "../../lib/api.js";
+import { approveToolRequest, extractToolRequests, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward, submitMainAgentTransferPassword, wsUrl } from "../../lib/api.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
 
 interface Props {
@@ -79,9 +79,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
       appendLog("info", "session-idle", { sessionKey });
       return;
     }
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const params = new URLSearchParams({ sessionMode });
-    const ws = new WebSocket(`${protocol}://${window.location.host}/api/chat/${encodeURIComponent(sessionKey)}?${params}`);
+    const ws = new WebSocket(wsUrl(`/api/chat/${encodeURIComponent(sessionKey)}?${params}`));
     socketRef.current = ws;
     setSocketState("connecting");
     appendLog("info", "socket-connecting", { sessionKey, sessionMode });

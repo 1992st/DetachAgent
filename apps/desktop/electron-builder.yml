@@ -5,18 +5,15 @@ directories:
 files:
   - dist/**
   - package.json
-  - ../../apps/server/dist/**
-  - ../../apps/server/package.json
-  - ../../apps/web/dist/**
-  - ../../apps/web/public/**
-  - ../../packages/shared/dist/**
-  - ../../packages/openclaw-detaches-adapter/**
 asar: true
-asarUnpack:
-  - ../../apps/server/node_modules/node-pty/**
+extraResources:
+  - from: ../../.desktop-runtime/app
+    to: app
 extraMetadata:
   main: dist/main.js
 win:
+  signAndEditExecutable: false
+  verifyUpdateCodeSignature: false
   target:
     - target: nsis
       arch:

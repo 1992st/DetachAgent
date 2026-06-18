@@ -83,6 +83,21 @@ assert.match(linuxLaunch.displayCommand, /cd ~\/\.detach_agent\/workspaces/, "Li
 const winLaunch = win.buildInteractiveShellLaunch();
 assert.match(winLaunch.displayCommand, /\\.detach_agent\\workspaces/, "Windows terminal workspace should use ~/.detach_agent");
 
+const winCurl = win.buildLocalCurlDownloadCommand("http://127.0.0.1:38888/file", "C:\\Users\\alice\\Downloads\\demo.txt");
+assert.match(winCurl, /\$target = 'C:\\Users\\alice\\Downloads\\demo.txt'/, "Windows local download should target a PowerShell path");
+assert.match(winCurl, /curl\.exe -fL/, "Windows local download should use curl.exe");
+
+const posixCurl = posix.buildLocalCurlDownloadCommand("http://127.0.0.1:38888/file", "/tmp/demo.txt");
+assert.match(posixCurl, /^mkdir -p '\/tmp' && curl -fL/, "POSIX local download should create the parent directory and use curl");
+
+const winCompletion = win.wrapCommandForCompletion("Write-Output ok", "exec-123");
+assert.match(winCompletion, /powershell\.exe/, "Windows completion wrapper should launch PowerShell");
+assert.match(winCompletion, /-EncodedCommand/, "Windows completion wrapper should use encoded PowerShell script");
+
+const posixCompletion = posix.wrapCommandForCompletion("printf ok", "exec-123");
+assert.match(posixCompletion, /__DETACHES_TOOL_START__:exec-123/, "POSIX completion wrapper should print a start marker");
+assert.match(posixCompletion, /__DETACHES_TOOL_END__:exec-123/, "POSIX completion wrapper should print an end marker");
+
 assert.equal(
   posix.normalizeRemotePosixPath("~/workspace/file.txt", "/home/alice"),
   "/home/alice/workspace/file.txt",

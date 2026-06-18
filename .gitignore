@@ -2,6 +2,11 @@ node_modules/
 dist/
 .turbo/
 .vite/
+.desktop-runtime/
+release/
+.codex/tmp/
+.codex/tools/
+main.js
 .env
 .env.local
 .DS_Store

@@ -65,23 +65,20 @@ export class PlatformService {
     };
   }
 
+  currentNodePlatform(): NodeJS.Platform {
+    return this.nodePlatform();
+  }
+
   getAppDataDir(): string {
     const env = this.env();
-    const appName = this.overrides.appName || "detaches_agent";
     const configured = env.DETACHES_STORAGE_DIR?.trim();
-    if (configured) return path.resolve(this.expandHome(configured));
+    if (configured) return this.localPath().resolve(this.expandHome(configured));
 
-    if (this.nodePlatform() === "win32") {
-      return path.win32.join(this.homeDir(), ".detach_agent");
-    }
-    return path.join(this.homeDir(), ".detach_agent");
+    return this.localPath().join(this.homeDir(), ".detach_agent");
   }
 
   getDefaultIdentityPath(): string {
-    if (this.nodePlatform() === "win32") {
-      return path.win32.join(this.homeDir(), ".ssh", "detaches_agent_ed25519");
-    }
-    return path.join(this.homeDir(), ".ssh", "detaches_agent_ed25519");
+    return this.localPath().join(this.homeDir(), ".ssh", "detaches_agent_ed25519");
   }
 
   expandHome(value: string): string {
@@ -90,7 +87,7 @@ export class PlatformService {
       const rest = value.slice(2);
       return this.nodePlatform() === "win32"
         ? path.win32.join(this.homeDir(), rest)
-        : path.join(this.homeDir(), rest);
+        : path.posix.join(this.homeDir(), rest);
     }
     return value;
   }
@@ -145,6 +142,80 @@ export class PlatformService {
     return { shell, args, cwd, env, displayCommand: command };
   }
 
+  buildNonInteractiveShellLaunch(command: string, options: { cwd?: string; login?: boolean } = {}): ShellLaunch {
+    const cwd = options.cwd || this.homeDir();
+    const env = this.processEnv();
+    env.TERM = env.TERM || "xterm-256color";
+    if (this.nodePlatform() === "win32") {
+      const shell = this.env().POWERSHELL_EXE || "powershell.exe";
+      const args = [
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        command
+      ];
+      return { shell, args, cwd, env, displayCommand: command };
+    }
+    const shell = this.getDefaultShell();
+    const args = [options.login === false ? "-c" : "-lc", command];
+    return { shell, args, cwd, env, displayCommand: command };
+  }
+
+  buildLocalCurlDownloadCommand(downloadUrl: string, targetPath: string): string {
+    if (this.nodePlatform() === "win32") {
+      return [
+        "$ErrorActionPreference = 'Stop'",
+        `$target = ${this.powerShellQuote(targetPath)}`,
+        "$parent = Split-Path -Parent $target",
+        "if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }",
+        `curl.exe -fL --speed-limit 1024 --speed-time 45 ${this.powerShellQuote(downloadUrl)} -o $target`
+      ].join("; ");
+    }
+    return [
+      "mkdir -p",
+      this.posixShellQuote(path.posix.dirname(targetPath)),
+      "&&",
+      "curl -fL",
+      "--speed-limit 1024",
+      "--speed-time 45",
+      this.posixShellQuote(downloadUrl),
+      "-o",
+      this.posixShellQuote(targetPath)
+    ].join(" ");
+  }
+
+  wrapCommandForCompletion(command: string, executionId: string): string {
+    if (this.nodePlatform() === "win32") {
+      const script = [
+        `Write-Output ${this.powerShellQuote(`__DETACHES_TOOL_START__:${executionId}`)}`,
+        "$__detaches_status = 0",
+        "try {",
+        "& {",
+        command,
+        "}",
+        "if (-not $?) { $__detaches_status = 1 }",
+        "} catch {",
+        "Write-Error $_",
+        "$__detaches_status = 1",
+        "}",
+        `Write-Output "__DETACHES_TOOL_END__:${executionId}:$__detaches_status"`
+      ].join("\n");
+      const encoded = Buffer.from(script, "utf16le").toString("base64");
+      const shell = this.env().POWERSHELL_EXE || "powershell.exe";
+      return `& ${this.powerShellQuote(shell)} -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encoded}`;
+    }
+    return [
+      `printf '%s\\n' ${this.posixShellQuote(`__DETACHES_TOOL_START__:${executionId}`)}`,
+      "{",
+      command,
+      "\n}",
+      "__detaches_status=$?",
+      `printf '%s\\n' "__DETACHES_TOOL_END__:${executionId}:$__detaches_status"`
+    ].join("\n");
+  }
+
   buildInteractiveShellLaunch(options: { cwd?: string; sessionName?: string } = {}): ShellLaunch {
     if (this.nodePlatform() === "win32") {
       const workspace = path.win32.join(this.homeDir(), ".detach_agent", "workspaces");
@@ -187,7 +258,7 @@ export class PlatformService {
     if (this.nodePlatform() === "win32") {
       return path.win32.isAbsolute(cleaned) ? path.win32.normalize(cleaned) : null;
     }
-    return path.isAbsolute(cleaned) ? path.normalize(cleaned) : null;
+    return path.posix.isAbsolute(cleaned) ? path.posix.normalize(cleaned) : null;
   }
 
   normalizeRemotePosixPath(remotePath: string, remoteHome: string): string {
@@ -211,8 +282,13 @@ export class PlatformService {
     if (publicKeyPath) await fs.chmod(publicKeyPath, 0o644).catch(() => undefined);
   }
 
+  resolvePackagedResourcePath(...segments: string[]): string | null {
+    const resourcesDir = this.resourcesDir();
+    return resourcesDir ? path.join(resourcesDir, "app", ...segments) : null;
+  }
+
   private async bundledCommand(name: PlatformCommand): Promise<ResolvedCommand | null> {
-    const resourcesDir = this.overrides.resourcesDir || this.env().DETACHES_RESOURCES_DIR;
+    const resourcesDir = this.resourcesDir();
     if (!resourcesDir) return null;
     const platformDir = this.nodePlatform() === "win32" ? "win32" : this.nodePlatform();
     const command = path.join(resourcesDir, "bin", platformDir, this.defaultCommandName(name));
@@ -323,6 +399,14 @@ export class PlatformService {
     } catch {
       return false;
     }
+  }
+
+  private resourcesDir(): string | undefined {
+    return this.overrides.resourcesDir || this.env().DETACHES_RESOURCES_DIR;
+  }
+
+  private localPath(): path.PlatformPath {
+    return this.nodePlatform() === "win32" ? path.win32 : path.posix;
   }
 
   private processEnv(): Record<string, string> {

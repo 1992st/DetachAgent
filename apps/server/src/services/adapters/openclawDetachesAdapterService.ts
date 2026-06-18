@@ -12,7 +12,8 @@ import { platformService } from "../platform/platformService.js";
 const gzip = promisify(zlib.gzip);
 const execFileAsync = promisify(execFile);
 
-const adapterRoot = path.join(repoRoot, "packages", "openclaw-detaches-adapter");
+const adapterRoot = platformService.resolvePackagedResourcePath("packages", "openclaw-detaches-adapter")
+  ?? path.join(repoRoot, "packages", "openclaw-detaches-adapter");
 const adapterFiles = [
   { path: "package.json", mode: 0o644, mimeType: "application/json" },
   { path: "adapter.manifest.json", mode: 0o644, mimeType: "application/json" },

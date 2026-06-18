@@ -1,7 +1,7 @@
 import { CheckCircle2, Clipboard, KeyRound, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { DetachesContextExportCreateResponse, OpenClawAdapterInstallPlan, OpenClawAdapterReadiness, ToolBrokerSocketEvent, ToolRequestRecord } from "@detaches/shared";
-import { createDetachesContextExport, createToolRequest, fetchOpenClawAdapterInstallPlan, fetchOpenClawAdapterReadiness, fetchToolRequests } from "../../lib/api.js";
+import { createDetachesContextExport, createToolRequest, fetchOpenClawAdapterInstallPlan, fetchOpenClawAdapterReadiness, fetchToolRequests, wsUrl } from "../../lib/api.js";
 
 const defaultInstallDir = "~/.detach_agent";
 const defaultWorkspaceDir = "~/.openclaw/workspace";
@@ -59,10 +59,9 @@ export function AdapterStatusPanel({ sessionKey, agentId }: { sessionKey: string
 
   useEffect(() => {
     if (!sessionKey) return;
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const params = new URLSearchParams({ sessionKey });
     if (agentId) params.set("agentId", agentId);
-    const ws = new WebSocket(`${protocol}://${window.location.host}/api/tools/stream?${params}`);
+    const ws = new WebSocket(wsUrl(`/api/tools/stream?${params}`));
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data) as ToolBrokerSocketEvent;
       if (data.type !== "request" || data.request.kind !== "adapter-install") return;

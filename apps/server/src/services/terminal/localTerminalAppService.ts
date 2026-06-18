@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { LocalTerminalApp, LocalTerminalAppsResponse, LocalTerminalOpenResponse } from "@detaches/shared";
+import { platformService } from "../platform/platformService.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -49,13 +50,15 @@ async function windowsApps(): Promise<LocalTerminalApp[]> {
 
 export const localTerminalAppService = {
   async list(): Promise<LocalTerminalAppsResponse> {
-    if (process.platform === "darwin") return { platform: process.platform, apps: await macApps() };
-    if (process.platform === "win32") return { platform: process.platform, apps: await windowsApps() };
-    return { platform: process.platform, apps: [] };
+    const platform = platformService.currentNodePlatform();
+    if (platform === "darwin") return { platform, apps: await macApps() };
+    if (platform === "win32") return { platform, apps: await windowsApps() };
+    return { platform, apps: [] };
   },
 
   async open(appId: string): Promise<LocalTerminalOpenResponse> {
-    if (process.platform === "win32") {
+    const platform = platformService.currentNodePlatform();
+    if (platform === "win32") {
       const apps = await windowsApps();
       const app = apps.find((candidate) => candidate.id === appId);
       if (!app) throw new Error(`Unknown terminal app: ${appId}`);
@@ -69,7 +72,7 @@ export const localTerminalAppService = {
       }
       return { ok: true, app, message: `${app.name} opened.` };
     }
-    if (process.platform !== "darwin") {
+    if (platform !== "darwin") {
       throw new Error("Opening local terminal apps is currently supported on macOS and Windows only.");
     }
     const apps = await macApps();
