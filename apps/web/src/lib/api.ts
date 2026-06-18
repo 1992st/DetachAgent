@@ -5,6 +5,9 @@ import type {
   DetachesContextExportCreateResponse,
   DiagnosticsResponse,
   FileTransferPrepareResponse,
+  InteractionRecord,
+  InteractionResolveInput,
+  InteractionResultResponse,
   FileUploadResponse,
   LocalTerminalAppsResponse,
   LocalTerminalOpenResponse,
@@ -16,6 +19,7 @@ import type {
   PublicSettings,
   RemoteProfileUpdate,
   SettingsUpdate,
+  SshCredentialPasswordResponse,
   ToolGatewayEventInput,
   ToolRequestApproveInput,
   ToolRequestCreateInput,
@@ -215,6 +219,42 @@ export async function submitMainAgentTransferPassword(transferId: string, passwo
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ password })
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function submitSshSessionPassword(password: string): Promise<SshCredentialPasswordResponse> {
+  const res = await fetch(apiUrl("/api/ssh/session-password"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password })
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function dismissSshSessionPassword(): Promise<SshCredentialPasswordResponse> {
+  const res = await fetch(apiUrl("/api/ssh/session-password/dismiss"), { method: "POST" });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function resolveInteraction(interactionId: string, input: InteractionResolveInput): Promise<InteractionResultResponse> {
+  const res = await fetch(apiUrl(`/api/interactions/${encodeURIComponent(interactionId)}/resolve`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function rejectInteraction(interactionId: string, error?: string): Promise<InteractionResultResponse> {
+  const res = await fetch(apiUrl(`/api/interactions/${encodeURIComponent(interactionId)}/reject`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ error })
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();

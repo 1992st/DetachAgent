@@ -1,8 +1,10 @@
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { MainAgentFileTransferSnapshot, ToolBrokerSocketEvent, ToolRequestRecord } from "@detaches/shared";
+import type { InteractionRecord, MainAgentFileTransferSnapshot, SshCredentialSessionSnapshot, ToolBrokerSocketEvent, ToolRequestRecord } from "@detaches/shared";
 import { toolBrokerService, type ToolBrokerEvent } from "../services/tools/toolBrokerService.js";
 import { mainAgentFileTransferService } from "../services/files/mainAgentFileTransferService.js";
+import { sshCredentialSessionService } from "../services/ssh/sshCredentialSessionService.js";
+import { interactionBrokerService } from "../services/interactions/interactionBrokerService.js";
 
 function send(socket: WebSocket, event: ToolBrokerSocketEvent): void {
   if (socket.readyState === socket.OPEN) {
@@ -35,13 +37,26 @@ export function attachToolBrokerSocket(server: HttpServer): void {
       if (agentId && transfer.agentId !== agentId) return;
       send(socket, { type: "transfer", transfer });
     };
+    const onCredential = (credential: SshCredentialSessionSnapshot) => {
+      send(socket, { type: "ssh-credential", credential });
+    };
+    const onInteraction = (event: { action: "created" | "updated" | "duplicate" | "resolved" | "rejected" | "expired"; interaction: InteractionRecord }) => {
+      if (matchesInteraction(event.interaction, sessionKey, agentId)) {
+        send(socket, { type: "interaction", action: event.action, interaction: event.interaction });
+      }
+    };
     toolBrokerService.emitter.on("request", onRequest);
     mainAgentFileTransferService.emitter.on("transfer", onTransfer);
+    sshCredentialSessionService.emitter.on("credential", onCredential);
+    interactionBrokerService.emitter.on("interaction", onInteraction);
     send(socket, { type: "ready", filters: { sessionKey, agentId } });
+    send(socket, { type: "ssh-credential", credential: sshCredentialSessionService.status() });
 
     socket.on("close", () => {
       toolBrokerService.emitter.off("request", onRequest);
       mainAgentFileTransferService.emitter.off("transfer", onTransfer);
+      sshCredentialSessionService.emitter.off("credential", onCredential);
+      interactionBrokerService.emitter.off("interaction", onInteraction);
     });
   });
 }
@@ -49,5 +64,11 @@ export function attachToolBrokerSocket(server: HttpServer): void {
 function matches(request: ToolRequestRecord, sessionKey?: string, agentId?: string): boolean {
   if (sessionKey && request.sessionKey !== sessionKey) return false;
   if (agentId && request.agentId !== agentId) return false;
+  return true;
+}
+
+function matchesInteraction(interaction: InteractionRecord, sessionKey?: string, agentId?: string): boolean {
+  if (sessionKey && interaction.sessionKey !== sessionKey) return false;
+  if (agentId && interaction.agentId !== agentId) return false;
   return true;
 }

@@ -19,11 +19,21 @@
     },
     "broker": {
       "gatewayEventEndpoint": "http://127.0.0.1:38888/api/tools/events/gateway",
+      "interactionEventEndpoint": "http://127.0.0.1:38888/api/interactions/events/gateway",
       "eventSource": "gateway-event",
       "idempotencyField": "sourceEventId",
       "submitToken": "client-context-submit-token",
       "submitTokenHeader": "Authorization",
       "requestFormats": ["broker-event", "fence"]
+    },
+    "localControl": {
+      "baseUrl": "http://127.0.0.1:38888",
+      "toolEventEndpoint": "http://127.0.0.1:38888/api/tools/events/gateway",
+      "interactionEventEndpoint": "http://127.0.0.1:38888/api/interactions/events/gateway",
+      "fixedPort": 38888,
+      "submitTokenHeader": "Authorization",
+      "addressSource": "remote-reachable-context",
+      "note": "Use this context-provided URL from the Host/Main Agent machine."
     },
     "contextExport": {
       "createEndpoint": "http://127.0.0.1:38888/api/context/exports",

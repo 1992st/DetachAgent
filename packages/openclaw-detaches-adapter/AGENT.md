@@ -103,6 +103,8 @@ Terminal request:
 {"target":"local-user-machine","command":"pwd","reason":"check the user's local working directory"}
 ```
 
+`local-user-machine` terminal requests run in a local terminal owned by the user's detaches_agent UI. Do not SSH into the user's local machine, do not ask for the user's local SSH username/password/port, and do not wrap local-user-machine commands in `ssh`. The user approves the request in detaches_agent; no SSH password is required for this local terminal execution path.
+
 File transfer request:
 
 ```detaches-file-transfer

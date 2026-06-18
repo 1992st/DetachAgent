@@ -633,9 +633,13 @@ function ToolRequests({
                     .then((response) => {
                       if (!response) return;
                       onLog("info", "tool-result-fetched", { id: request.id, result: response.result });
-                      setResultSummaries((current) => ({ ...current, [index]: toolResultSummary(response) }));
                       const transfer = transferFromResult(response);
+                      setResultSummaries((current) => ({
+                        ...current,
+                        [index]: transfer ? mainAgentTransferSummary(transfer) : toolResultSummary(response)
+                      }));
                       if (transfer) setTransfers((current) => ({ ...current, [index]: transfer }));
+                      if (request.kind === "main-agent-save-file") scheduleMainAgentTransferPoll(request, index);
                     })
                     .catch((error) => {
                       onLog("error", "tool-request-approve-failed", { id: request.id, error });

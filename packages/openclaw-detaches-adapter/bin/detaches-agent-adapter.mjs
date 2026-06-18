@@ -21,6 +21,7 @@ function usage(exitCode = 0) {
     "  terminal-request --target <target> --command <command> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
     "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
     "  main-agent-save-file-request --file-id <id> --source-local-path <path> --display-name <name> --size <bytes> --user <ssh-user> --path <dest> --reason <reason> [--host <host> --port <port> --method rsync|scp --context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
+    "  credential-request --reason <reason> --source-event-id <id> [--context <detaches-context-json> --prompt <text> --target-user <user> --target-host <host> --target-port <port> --submit-token <token> --submit-url <url> --wait --timeout-ms 300000]",
     "",
     "This CLI does not execute tools. It only validates context and emits detaches_agent request blocks."
   ].join("\n");
@@ -141,6 +142,9 @@ function inspectContext(context) {
   if (!context?.broker?.gatewayEventEndpoint) {
     warnings.push("broker.gatewayEventEndpoint is missing; fall back to fenced requests or ask detaches_agent to resend updated context.");
   }
+  if (!context?.broker?.interactionEventEndpoint && !context?.localControl?.interactionEventEndpoint) {
+    warnings.push("interaction event endpoint is missing; ask detaches_agent to resend updated context before requesting credentials.");
+  }
   return {
     ok: errors.length === 0,
     errors,
@@ -182,6 +186,7 @@ function doctorContext(context) {
   const fileCapability = inspection.capabilities.find((capability) => capability.name === "file-transfer");
   const mainAgentSaveCapability = inspection.capabilities.find((capability) => capability.name === "main-agent-save-file");
   const brokerEndpoint = inspection.broker?.gatewayEventEndpoint;
+  const interactionEndpoint = inspection.broker?.interactionEventEndpoint || context?.localControl?.interactionEventEndpoint;
   const submitTokenAvailable = typeof inspection.broker?.submitToken === "string" && inspection.broker.submitToken.length > 0;
   const preferredFormat = inspection.broker?.requestFormats?.includes("broker-event") && brokerEndpoint && submitTokenAvailable
     ? "broker-event"
@@ -196,6 +201,11 @@ function doctorContext(context) {
   const nextActions = [
     "Treat this as a detaches_agent mediated session, not plain webchat.",
     "Use the supported target list from this context; do not invent or fallback targets.",
+    "If the context export URL or broker endpoint is unreachable, report that detaches_agent must bring up its SSH reverse bridge; do not ask the user to run ssh -R manually.",
+    "To control the user's local machine, submit a detaches-terminal request for target local-user-machine; do not SSH into the user's machine and do not ask for local SSH credentials.",
+    "local-user-machine terminal requests are executed by detaches_agent's local terminal after user approval; this path does not need an SSH password.",
+    "If an SSH login or another real credential is required, submit credential.request to the interaction endpoint and wait up to 300000ms; do not ask the user to paste passwords into chat.",
+    "This adapter script runs on the Host/Main Agent machine. Use context-provided broker/localControl URLs, not 127.0.0.1, unless that exact URL came from context.",
     "Submit broker-event requests when possible; otherwise emit exactly one fenced request block.",
     "Wait for detaches_agent approved tool output before claiming execution or file handling completed."
   ];
@@ -247,6 +257,20 @@ function doctorContext(context) {
           `  --source-event-id ${commandQuote(sourceEventIdHint(context, "main-agent-save-file"))}`,
           "  --submit"
         ].join(" \\\n")
+      : null,
+    credentialRequest: interactionEndpoint && submitTokenAvailable
+      ? [
+          `node ${cli} credential-request`,
+          `  --context ${commandQuote("<context-json-file>")}`,
+          `  --reason ${commandQuote("SSH login requires a password")}`,
+          `  --prompt ${commandQuote("Enter the SSH password for this login")}`,
+          `  --target-user ${commandQuote("<ssh-user>")}`,
+          `  --target-host ${commandQuote("<ssh-host>")}`,
+          `  --target-port ${commandQuote("22")}`,
+          `  --source-event-id ${commandQuote(sourceEventIdHint(context, "credential"))}`,
+          "  --wait",
+          "  --timeout-ms 300000"
+        ].join(" \\\n")
       : null
   };
   const blockedTargets = Object.fromEntries(Object.entries(inspection.targetSupport)
@@ -270,6 +294,7 @@ function doctorContext(context) {
     preferredRequestFormat: preferredFormat,
     broker: {
       endpoint: brokerEndpoint ?? null,
+      interactionEndpoint: interactionEndpoint ?? null,
       submitTokenAvailable,
       submitTokenHeader: inspection.broker?.submitTokenHeader ?? null,
       idempotencyField: inspection.broker?.idempotencyField ?? null
@@ -455,6 +480,126 @@ async function emitRequest(args, kind, target, reason, payload, fence) {
   console.log(text || JSON.stringify({ ok: true }));
 }
 
+function interactionSubmitUrlFromContext(context, args) {
+  return optionalString(args, "submit-url")
+    || context?.broker?.interactionEventEndpoint
+    || context?.localControl?.interactionEventEndpoint
+    || "";
+}
+
+async function submitCredentialRequest(args) {
+  const context = readContextOption(args);
+  const sessionKey = optionalString(args, "session-key") || context?.sessionKey;
+  if (!sessionKey) failWithCode("DETACHES_CONTEXT_INVALID", "Missing --session-key or --context with sessionKey.");
+  const submitToken = optionalString(args, "submit-token") || context?.broker?.submitToken;
+  if (!submitToken) failWithCode("DETACHES_AUTH_REQUIRED", "Missing submit token.");
+  const submitUrl = interactionSubmitUrlFromContext(context, args);
+  if (!submitUrl) failWithCode("DETACHES_ENDPOINT_UNREACHABLE", "Missing interaction submit URL.");
+  const targetPort = optionalString(args, "target-port");
+  const event = {
+    kind: "credential.request",
+    sessionKey,
+    agentId: optionalString(args, "agent-id") || context?.agentId || undefined,
+    reason: requireOption(args, "reason"),
+    source: "gateway-event",
+    sourceEventId: requireOption(args, "source-event-id"),
+    payload: {
+      title: optionalString(args, "title") || "Main agent credential request",
+      prompt: optionalString(args, "prompt") || "Enter the credential requested by the main agent.",
+      target: {
+        user: optionalString(args, "target-user"),
+        host: optionalString(args, "target-host"),
+        port: targetPort ? Number(targetPort) : undefined,
+        label: optionalString(args, "target-label")
+      }
+    }
+  };
+  const submitted = await postJson(submitUrl, event, submitToken);
+  if (args.wait !== true) {
+    console.log(JSON.stringify(submitted, null, 2));
+    return;
+  }
+  const interactionId = submitted?.interaction?.id;
+  if (!interactionId) failWithCode("DETACHES_PROTOCOL_ERROR", "Interaction create response did not include interaction.id.");
+  const resultUrl = interactionResultUrl(submitUrl, interactionId, submitToken);
+  const timeoutMs = parseTimeoutMs(optionalString(args, "timeout-ms"));
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    await sleep(1000);
+    const result = await getJson(resultUrl);
+    const status = result?.interaction?.status;
+    if (status === "resolved") {
+      console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      return;
+    }
+    if (status === "rejected") failWithCode("DETACHES_INTERACTION_REJECTED", result?.interaction?.error || "Credential request rejected.");
+    if (status === "expired") failWithCode("DETACHES_INTERACTION_EXPIRED", result?.interaction?.error || "Credential request expired.");
+  }
+  failWithCode("DETACHES_INTERACTION_TIMEOUT", `Timed out after ${timeoutMs}ms waiting for credential interaction.`);
+}
+
+function interactionResultUrl(submitUrl, interactionId, submitToken) {
+  const url = new URL(submitUrl);
+  url.pathname = url.pathname.replace(/\/events\/gateway\/?$/, `/${encodeURIComponent(interactionId)}`);
+  url.search = "";
+  url.searchParams.set("submitToken", submitToken);
+  return url.toString();
+}
+
+async function postJson(url, body, submitToken) {
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${submitToken}`
+      },
+      body: JSON.stringify(body)
+    });
+  } catch (error) {
+    failWithCode("DETACHES_ENDPOINT_UNREACHABLE", error instanceof Error ? error.message : String(error));
+  }
+  return parseJsonResponse(response);
+}
+
+async function getJson(url) {
+  let response;
+  try {
+    response = await fetch(url, { headers: { Accept: "application/json" } });
+  } catch (error) {
+    failWithCode("DETACHES_ENDPOINT_UNREACHABLE", error instanceof Error ? error.message : String(error));
+  }
+  return parseJsonResponse(response);
+}
+
+async function parseJsonResponse(response) {
+  const text = await response.text();
+  let payload;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    failWithCode("DETACHES_PROTOCOL_ERROR", `Non-JSON response: ${text}`);
+  }
+  if (!response.ok) failWithCode(payload?.errorCode || "DETACHES_PROTOCOL_ERROR", payload?.error || `HTTP ${response.status}`);
+  return payload;
+}
+
+function parseTimeoutMs(value) {
+  const parsed = Number(value || 300000);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 300000;
+  return Math.min(parsed, 300000);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function failWithCode(code, message) {
+  console.error(JSON.stringify({ ok: false, errorCode: code, error: message }, null, 2));
+  process.exit(1);
+}
+
 function assertKnownTarget(target) {
   const manifest = readManifest();
   if (!Object.prototype.hasOwnProperty.call(manifest.targets, target)) {
@@ -554,6 +699,11 @@ async function main() {
       destination: optionalDestination(args),
       methodPreference: optionalString(args, "method") === "scp" ? "scp" : "rsync"
     }, "main-agent-save-file");
+    return;
+  }
+
+  if (command === "credential-request") {
+    await submitCredentialRequest(args);
     return;
   }
 

@@ -87,11 +87,21 @@ export async function buildDetachesSessionContext(
     },
     broker: {
       gatewayEventEndpoint: `${baseUrl}/api/tools/events/gateway`,
+      interactionEventEndpoint: `${baseUrl}/api/interactions/events/gateway`,
       eventSource: "gateway-event",
       idempotencyField: "sourceEventId",
       submitToken: brokerTokenService.tokenForSession(sessionKey),
       submitTokenHeader: "Authorization",
       requestFormats: ["broker-event", "fence"]
+    },
+    localControl: {
+      baseUrl,
+      toolEventEndpoint: `${baseUrl}/api/tools/events/gateway`,
+      interactionEventEndpoint: `${baseUrl}/api/interactions/events/gateway`,
+      fixedPort: config.reverseBridgeRemotePort,
+      submitTokenHeader: "Authorization",
+      addressSource: "remote-reachable-context",
+      note: "This URL is the detaches_agent server address reachable from the Host/Main Agent machine. The adapter script runs on the Host/Main Agent machine and must use this context-provided URL, not 127.0.0.1."
     },
     contextExport: {
       createEndpoint: `${baseUrl}/api/context/exports`,
@@ -107,7 +117,7 @@ export async function buildDetachesSessionContext(
       doctorCommand: "doctor",
       generatedForMessage: Boolean(contextExportRecord),
       note: contextExportRecord
-        ? "A one-time context URL was generated for this message. It is reachable from the remote agent host through the SSH reverse bridge and must be treated as sensitive."
+        ? "A one-time context URL was generated for this message. It is reachable from the remote agent host through the SSH reverse bridge when that bridge is ready and must be treated as sensitive."
         : "Ask the user to generate a one-time context URL in the detaches_agent Adapter panel when the remote agent host needs a fresh full clientContext. Do not invent or request broker tokens in chat."
     },
     capabilities: [
@@ -198,9 +208,13 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
     `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}`,
     consumeUrl ? `contextExport.consumeUrl: ${consumeUrl}` : "contextExport.consumeUrl: unavailable",
-    "contextExport.consumeUrl 是远端 agent host 上可访问的一次性 SSH reverse bridge 地址；需要完整上下文或工具 broker 能力时，优先使用它获取机器可读上下文。",
-    "若远端已安装 detaches-agent skill，并且 contextExport.consumeUrl 可用，请在真实 Detach Agent runtime machine / OpenClaw agent host 上运行 `node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --url \"$CONSUME_URL\" --output-context /tmp/detaches-client-context.json`；如果已经保存 context，则运行 `doctor --context <context-json>`。",
-    "不要要求用户手动 scp、寻找本机局域网 IP、复制 broker token，或把远端请求改成本机执行。",
+    `localControl.baseUrl: ${context.localControl?.baseUrl || "unavailable"}`,
+    `localControl.interactionEventEndpoint: ${context.localControl?.interactionEventEndpoint || "unavailable"}`,
+    "通道选择：1) 普通用户本机命令使用 detaches-terminal 或 broker terminal 请求；2) 需要密码/secret 时才使用 credential-request interaction；3) context/broker 直连使用 localControl/broker 提供的 URL。",
+    "main agent 侧脚本运行在 main agent 的 PC/主机上；连接 detaches_agent server 时必须使用 localControl/broker 里提供的远端可达 URL，不要猜测或替换为 main agent 自己的 127.0.0.1。",
+    "本机 terminal 控制不走 SSH，不询问用户本机 SSH 用户名/密码/端口；用户只审批 tool request，普通 terminal 操作不得触发密码弹窗。",
+    "SSH 只用于 reverse bridge 可达性、保存 staged 文件到 Main Agent 机器、或用户明确批准的 SSH 登录/凭据请求。",
+    "若远端已安装 detaches-agent skill，并且 contextExport.consumeUrl 可用，请在真实 Host/Main Agent machine 上运行 `node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --url \"$CONSUME_URL\" --output-context /tmp/detaches-client-context.json`；如果已经保存 context，则运行 `doctor --context <context-json>`。",
     "工具请求必须经过 detaches_agent 审批；不要声称命令、文件读取、传输或归档已完成，除非已收到 approved tool output。",
     "不要把 remote-agent-host/gateway-managed 请求退化成本机 local-user-machine。"
   ].join("\n");
@@ -218,8 +232,11 @@ export function renderDetachesClientContextFallback(context: DetachesSessionCont
     `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}`,
     consumeUrl ? `contextExport.consumeUrl: ${consumeUrl}` : "contextExport.consumeUrl: unavailable",
-    "contextExport.consumeUrl 是远端 agent host 上可访问的一次性 SSH reverse bridge 地址，包含本会话 broker 能力；不要泄露、复用或要求用户手动复制文件/IP。",
-    "如果需要本机控制、文件传输或完整机器可读上下文，请只在真实 OpenClaw agent host 上运行：",
+    `localControl.baseUrl: ${context.localControl?.baseUrl || "unavailable"}`,
+    "本机普通命令输出 detaches-terminal 请求即可；需要密码/secret 时才使用 credential-request；脚本/API 必须连接 localControl/broker 提供的 detaches_agent 可达地址，不要把 main agent 自己的 127.0.0.1 当作用户本机 server。",
+    "本机 terminal 不走 SSH；不要询问用户本机 SSH 用户名/密码/端口，也不要要求用户手动运行 ssh -R、scp、复制 broker token 或寻找本机 IP。",
+    "如果 consumeUrl 暂时不可访问，应说明 broker/context 直连暂不可用；fenced detaches-terminal fallback 仍可用。",
+    "如果需要 broker-event 或完整机器可读上下文，请只在真实 Host/Main Agent machine 上运行：",
     "node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --url \"$CONSUME_URL\" --output-context /tmp/detaches-client-context.json",
     "如果 contextExport.consumeUrl 是 unavailable，请向用户说明当前消息没有可消费的完整上下文入口，而不是编造 broker token 或要求读取 chat.send.clientContext.detaches。",
     "工具请求仍必须经过 detaches_agent UI 审批；不要声称命令、文件读取、传输或归档已完成，除非已收到 approved tool output。"

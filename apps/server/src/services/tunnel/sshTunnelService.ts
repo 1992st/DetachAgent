@@ -1,8 +1,12 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
 import net from "node:net";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { appConfig } from "../../config/appConfig.js";
 import { runtimeConfig } from "../../config/settingsStore.js";
 import { platformService, type PortOwner } from "../platform/platformService.js";
+import { sshCredentialSessionService } from "../ssh/sshCredentialSessionService.js";
 
 export interface TunnelStatus {
   ok: boolean;
@@ -18,14 +22,17 @@ export interface TunnelStatus {
   localForwardManaged?: boolean;
 }
 
+type AskpassSecret = { dir: string; passwordPath: string; scriptPath: string };
+
 class SshTunnelService {
   private process: ChildProcessByStdio<null, Readable, Readable> | null = null;
   private stderr = "";
   private ensurePromise: Promise<TunnelStatus> | null = null;
+  private reverseEnsurePromise: Promise<TunnelStatus> | null = null;
 
   async ensure(): Promise<TunnelStatus> {
     if (this.ensurePromise) return this.ensurePromise;
-    this.ensurePromise = this.ensureInternal();
+    this.ensurePromise = this.ensureInternal({ includeLocalForward: true });
     try {
       return await this.ensurePromise;
     } finally {
@@ -33,7 +40,17 @@ class SshTunnelService {
     }
   }
 
-  private async ensureInternal(): Promise<TunnelStatus> {
+  async ensureReverseBridge(): Promise<TunnelStatus> {
+    if (this.reverseEnsurePromise) return this.reverseEnsurePromise;
+    this.reverseEnsurePromise = this.ensureInternal({ includeLocalForward: false });
+    try {
+      return await this.reverseEnsurePromise;
+    } finally {
+      this.reverseEnsurePromise = null;
+    }
+  }
+
+  private async ensureInternal(options: { includeLocalForward: boolean }): Promise<TunnelStatus> {
     const config = await runtimeConfig();
     if (!config.remoteUser) {
       return {
@@ -57,12 +74,12 @@ class SshTunnelService {
       };
     }
 
-    let includeLocalForward = true;
+    let includeLocalForward = options.includeLocalForward;
     if (await this.isPortListening(config.gatewayLocalPort)) {
       const ownedByThisProcess = Boolean(this.process?.pid && !this.process.killed);
       const owner = await platformService.getPortOwner(config.gatewayLocalPort);
       const ownedBySsh = owner?.command.toLowerCase().includes("ssh") ?? false;
-      if (ownedByThisProcess) {
+      if (ownedByThisProcess && options.includeLocalForward) {
         return {
           ok: true,
           message: "SSH tunnel is already listening.",
@@ -76,7 +93,7 @@ class SshTunnelService {
           localForwardManaged: true
         };
       }
-      if (ownedBySsh) {
+      if (ownedBySsh || !options.includeLocalForward) {
         includeLocalForward = false;
       } else {
         return {
@@ -98,7 +115,6 @@ class SshTunnelService {
       this.process.kill();
     }
 
-    this.stderr = "";
     const ssh = await platformService.resolveCommand("ssh");
     if (ssh.available === false) {
       return {
@@ -110,7 +126,19 @@ class SshTunnelService {
         reverseBrokerUrl: `http://${config.reverseBridgeRemoteHost}:${config.reverseBridgeRemotePort}`
       };
     }
-    const args = [
+    const credentialTarget = sshCredentialSessionService.targetFromConfig(config);
+    if (!credentialTarget) {
+      return {
+        ok: false,
+        message: "Remote SSH target is incomplete; SSH tunnel disabled.",
+        localPort: config.gatewayLocalPort,
+        reverseHost: config.reverseBridgeRemoteHost,
+        reversePort: config.reverseBridgeRemotePort,
+        reverseBrokerUrl: `http://${config.reverseBridgeRemoteHost}:${config.reverseBridgeRemotePort}`
+      };
+    }
+
+    const baseArgs = [
       ...ssh.argsPrefix,
       "-N",
       ...(includeLocalForward
@@ -121,8 +149,6 @@ class SshTunnelService {
       "-p",
       String(config.remoteSshPort),
       "-o",
-      "BatchMode=yes",
-      "-o",
       "ExitOnForwardFailure=yes",
       "-o",
       "ServerAliveInterval=15",
@@ -130,36 +156,61 @@ class SshTunnelService {
       "ServerAliveCountMax=3"
     ];
     if (config.remoteIdentityPath) {
-      args.push("-i", config.remoteIdentityPath);
+      baseArgs.push("-i", config.remoteIdentityPath);
     }
-    args.push(`${config.remoteUser}@${config.remoteHost}`);
+    baseArgs.push(`${config.remoteUser}@${config.remoteHost}`);
 
-    this.process = spawn(ssh.command, args, { stdio: ["ignore", "pipe", "pipe"] });
-    const child = this.process;
-    child.stderr.on("data", (chunk: Buffer) => {
-      this.stderr += chunk.toString("utf8");
-      if (this.stderr.length > 8000) this.stderr = this.stderr.slice(-8000);
-    });
-    child.on("exit", () => {
-      this.process = null;
-    });
-
-    const listening = includeLocalForward
-      ? await this.waitForListeningOrExit(child, config.gatewayLocalPort, 3500)
-      : await this.waitForProcessReadyOrExit(child, 1500);
+    const cachedPassword = sshCredentialSessionService.getPassword(credentialTarget);
+    const firstAttempt = cachedPassword
+      ? await this.spawnTunnel(ssh.command, [...baseArgs, ...sshPasswordAuthArgs()], includeLocalForward, config.gatewayLocalPort, cachedPassword)
+      : await this.spawnTunnel(ssh.command, [...baseArgs, ...sshBatchModeArgs()], includeLocalForward, config.gatewayLocalPort);
+    let activeAttempt = firstAttempt;
+    if (!firstAttempt.listening && cachedPassword) {
+      sshCredentialSessionService.markFailed(credentialTarget, firstAttempt.stderr || "SSH password authentication failed.", { clearPassword: true });
+    }
+    if (!firstAttempt.listening && (cachedPassword || isPasswordAuthFailure(firstAttempt.stderr))) {
+      let password: string;
+      try {
+        password = await sshCredentialSessionService.requestPassword(credentialTarget, {
+          force: Boolean(cachedPassword),
+          message: "SSH password required to open the tunnel and reverse bridge."
+        });
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+          localPort: config.gatewayLocalPort,
+          reverseHost: config.reverseBridgeRemoteHost,
+          reversePort: config.reverseBridgeRemotePort,
+          reverseBrokerUrl: `http://${config.reverseBridgeRemoteHost}:${config.reverseBridgeRemotePort}`,
+          stderr: firstAttempt.stderr || undefined,
+          localForwardManaged: includeLocalForward
+        };
+      }
+      activeAttempt = await this.spawnTunnel(ssh.command, [...baseArgs, ...sshPasswordAuthArgs()], includeLocalForward, config.gatewayLocalPort, password);
+      if (!activeAttempt.listening) {
+        sshCredentialSessionService.markFailed(credentialTarget, activeAttempt.stderr || "SSH tunnel did not become ready.", { clearPassword: true });
+      }
+    }
+    if (activeAttempt.listening) {
+      sshCredentialSessionService.markReady(credentialTarget, "SSH tunnel is ready; password remains in memory for this app session.");
+    }
+    const listening = activeAttempt.listening;
     return {
       ok: listening,
       message: listening
         ? includeLocalForward
           ? "SSH tunnel is ready with local Gateway forward and remote reverse broker bridge."
-          : "SSH reverse broker bridge is ready; local Gateway forward is owned by an external ssh process."
-        : this.stderr || "SSH tunnel did not become ready.",
+          : options.includeLocalForward
+            ? "SSH reverse broker bridge is ready; local Gateway forward is owned by an external ssh process."
+            : "SSH reverse broker bridge is ready."
+        : activeAttempt.stderr || "SSH tunnel did not become ready.",
       localPort: config.gatewayLocalPort,
       reverseHost: config.reverseBridgeRemoteHost,
       reversePort: config.reverseBridgeRemotePort,
       reverseBrokerUrl: `http://${config.reverseBridgeRemoteHost}:${config.reverseBridgeRemotePort}`,
       pid: this.process?.pid,
-      stderr: this.stderr || undefined,
+      stderr: activeAttempt.stderr || undefined,
       localForwardManaged: includeLocalForward
     };
   }
@@ -170,6 +221,10 @@ class SshTunnelService {
       this.process.kill();
     }
     this.process = null;
+    void runtimeConfig().then((config) => {
+      const target = sshCredentialSessionService.targetFromConfig(config);
+      if (target) sshCredentialSessionService.clear(target);
+    }).catch(() => sshCredentialSessionService.clear());
   }
 
   private isPortListening(port: number): Promise<boolean> {
@@ -210,6 +265,23 @@ class SshTunnelService {
 
   async localPortOwner(port: number): Promise<PortOwner | null> {
     return platformService.getPortOwner(port);
+  }
+
+  async status(): Promise<TunnelStatus> {
+    const config = await runtimeConfig();
+    const running = Boolean(this.process?.pid && !this.process.killed);
+    return {
+      ok: running,
+      message: running
+        ? "SSH reverse bridge process is running."
+        : "SSH reverse bridge is not running. Use the network test to establish it when broker/context reachability is needed.",
+      localPort: config.gatewayLocalPort,
+      reverseHost: config.reverseBridgeRemoteHost,
+      reversePort: config.reverseBridgeRemotePort,
+      reverseBrokerUrl: `http://${config.reverseBridgeRemoteHost}:${config.reverseBridgeRemotePort}`,
+      pid: this.process?.pid,
+      localForwardManaged: config.gatewayTransport === "ssh"
+    };
   }
 
   private waitForListeningOrExit(child: ChildProcessByStdio<null, Readable, Readable>, port: number, timeoutMs: number): Promise<boolean> {
@@ -254,6 +326,98 @@ class SshTunnelService {
       timer = setTimeout(() => finish(!child.killed), timeoutMs);
     });
   }
+
+  private async spawnTunnel(
+    command: string,
+    args: string[],
+    includeLocalForward: boolean,
+    gatewayLocalPort: number,
+    password?: string
+  ): Promise<{ listening: boolean; stderr: string }> {
+    this.stderr = "";
+    if (this.process && !this.process.killed) {
+      this.process.kill();
+    }
+    let askpass: AskpassSecret | null = null;
+    try {
+      askpass = password ? await createAskpassSecret(password) : null;
+      this.process = spawn(command, args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: askpass ? askpassEnv(askpass) : process.env
+      });
+      const child = this.process;
+      child.stderr.on("data", (chunk: Buffer) => {
+        this.stderr += chunk.toString("utf8");
+        if (this.stderr.length > 8000) this.stderr = this.stderr.slice(-8000);
+      });
+      child.on("exit", () => {
+        if (this.process === child) this.process = null;
+      });
+
+      const listening = includeLocalForward
+        ? await this.waitForListeningOrExit(child, gatewayLocalPort, 3500)
+        : await this.waitForProcessReadyOrExit(child, 1500);
+      if (!listening && this.process === child && !child.killed) {
+        child.kill();
+      }
+      return { listening, stderr: this.stderr };
+    } finally {
+      if (askpass) await cleanupAskpassSecret(askpass);
+    }
+  }
 }
 
 export const sshTunnelService = new SshTunnelService();
+
+function sshBatchModeArgs(): string[] {
+  return [
+    "-o",
+    "BatchMode=yes"
+  ];
+}
+
+function sshPasswordAuthArgs(): string[] {
+  return [
+    "-o",
+    "BatchMode=no",
+    "-o",
+    "PreferredAuthentications=publickey,password,keyboard-interactive",
+    "-o",
+    "NumberOfPasswordPrompts=1",
+    "-o",
+    "StrictHostKeyChecking=accept-new"
+  ];
+}
+
+function isPasswordAuthFailure(stderr: string): boolean {
+  return /permission denied|password|keyboard-interactive|publickey|authentication failed|too many authentication failures/i.test(stderr);
+}
+
+async function createAskpassSecret(password: string): Promise<AskpassSecret> {
+  const dir = await fs.mkdtemp(path.join(appConfig.storageDir, "cache", "ssh-tunnel-askpass-"));
+  const passwordPath = path.join(dir, "password.txt");
+  const scriptPath = path.join(dir, "askpass.sh");
+  await fs.writeFile(passwordPath, password, { mode: 0o600 });
+  await fs.writeFile(scriptPath, [
+    "#!/bin/sh",
+    `cat ${shellQuote(passwordPath)}`
+  ].join("\n"), { mode: 0o700 });
+  return { dir, passwordPath, scriptPath };
+}
+
+async function cleanupAskpassSecret(secret: AskpassSecret): Promise<void> {
+  await fs.rm(secret.dir, { recursive: true, force: true }).catch(() => undefined);
+}
+
+function askpassEnv(secret: AskpassSecret): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    SSH_ASKPASS: secret.scriptPath,
+    SSH_ASKPASS_REQUIRE: "force",
+    DISPLAY: process.env.DISPLAY || "detaches-agent:0"
+  };
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}

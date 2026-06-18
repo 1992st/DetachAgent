@@ -1,4 +1,6 @@
 import type { MainAgentFileTransferSnapshot, ToolTarget } from "./fileTypes.js";
+import type { SshCredentialSocketEvent } from "./connectionTypes.js";
+import type { InteractionSocketEvent } from "./interactionTypes.js";
 
 export type ToolRequestKind = "terminal" | "file-transfer" | "main-agent-save-file" | "adapter-install" | "skill-install" | "skill-verify";
 export type ToolRequestStatus = "pending" | "running" | "succeeded" | "approved" | "rejected" | "blocked" | "started" | "failed";
@@ -88,6 +90,8 @@ export type ToolBrokerSocketEvent =
   | { type: "ready"; filters: { sessionKey?: string; agentId?: string } }
   | { type: "request"; action: "created" | "updated" | "ingested" | "duplicate"; request: ToolRequestRecord }
   | { type: "transfer"; transfer: MainAgentFileTransferSnapshot }
+  | SshCredentialSocketEvent
+  | InteractionSocketEvent
   | { type: "error"; message: string };
 
 export interface ToolRequestDecisionResponse {

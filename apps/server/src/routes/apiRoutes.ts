@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import express from "express";
 import multer from "multer";
-import type { AppHealth, DetachesContextExportResponse, DiagnosticItem, DiagnosticsResponse, NetworkTestResponse, NetworkTestStep, ToolDecisionActor, ToolRequestKind, ToolTarget, UploadedFileRef } from "@detaches/shared";
+import type { AppHealth, DetachesContextExportResponse, DiagnosticItem, DiagnosticsResponse, InteractionKind, InteractionStatus, NetworkTestResponse, NetworkTestStep, ToolDecisionActor, ToolRequestKind, ToolTarget, UploadedFileRef } from "@detaches/shared";
 import { appConfig, reverseBridgeBaseUrl } from "../config/appConfig.js";
 import { settingsStore, runtimeConfig } from "../config/settingsStore.js";
 import { sshTunnelService } from "../services/tunnel/sshTunnelService.js";
@@ -20,10 +20,12 @@ import { brokerTokenService } from "../services/tools/brokerTokenService.js";
 import { openclawDetachesAdapterService } from "../services/adapters/openclawDetachesAdapterService.js";
 import { contextExportService } from "../services/context/contextExportService.js";
 import { bootstrapSshIdentity } from "../services/ssh/sshBootstrapService.js";
+import { sshCredentialSessionService } from "../services/ssh/sshCredentialSessionService.js";
 import { localTerminalAppService } from "../services/terminal/localTerminalAppService.js";
 import { resolveDirectGatewayUrl } from "../services/gateway/gatewayClient.js";
 import { platformService } from "../services/platform/platformService.js";
 import { cloudPromptLogService } from "../services/gateway/cloudPromptLogService.js";
+import { interactionBrokerService } from "../services/interactions/interactionBrokerService.js";
 
 const upload = multer({
   dest: path.join(appConfig.storageDir, "cache"),
@@ -204,45 +206,48 @@ async function runNetworkTest(): Promise<NetworkTestResponse> {
     }
   });
 
+  if (/^(100\.|[a-z0-9.-]+\.ts\.net$)/i.test(config.remoteHost)) {
+    const tailscale = await tailscalePingProbe(config.remoteHost);
+    steps.push({
+      id: "tailscale-peer",
+      label: "Tailscale peer",
+      state: tailscale.ok ? "ok" : "error",
+      message: tailscale.message,
+      details: tailscale
+    });
+  }
+  const ssh = await tcpProbe(config.remoteHost, config.remoteSshPort);
+  steps.push({
+    id: "ssh-tcp",
+    label: "SSH 端口",
+    state: ssh.ok ? "ok" : "error",
+    message: ssh.message,
+    details: ssh
+  });
+  const reverseTunnel = config.gatewayTransport === "ssh"
+    ? await sshTunnelService.ensure()
+    : await sshTunnelService.ensureReverseBridge();
+  steps.push({
+    id: "ssh-reverse-bridge",
+    label: "SSH 反向桥",
+    state: reverseTunnel.ok ? "ok" : "error",
+    message: reverseTunnel.ok && reverseTunnel.pid
+      ? `SSH reverse bridge is active at ${reverseTunnel.reverseBrokerUrl}.`
+      : reverseTunnel.message,
+    details: reverseTunnel
+  });
+  if (reverseTunnel.ok) {
+    const reverseBridge = await reverseBridgeProbe();
+    steps.push({
+      id: "reverse-bridge",
+      label: "远端反向控制入口",
+      state: reverseBridge.ok ? "ok" : "error",
+      message: reverseBridge.message,
+      details: reverseBridge
+    });
+  }
+
   if (config.gatewayTransport === "ssh") {
-    if (/^(100\.|[a-z0-9.-]+\.ts\.net$)/i.test(config.remoteHost)) {
-      const tailscale = await tailscalePingProbe(config.remoteHost);
-      steps.push({
-        id: "tailscale-peer",
-        label: "Tailscale peer",
-        state: tailscale.ok ? "ok" : "error",
-        message: tailscale.message,
-        details: tailscale
-      });
-    }
-    const ssh = await tcpProbe(config.remoteHost, config.remoteSshPort);
-    steps.push({
-      id: "ssh-tcp",
-      label: "SSH 端口",
-      state: ssh.ok ? "ok" : "error",
-      message: ssh.message,
-      details: ssh
-    });
-    const tunnel = await sshTunnelService.ensure();
-    steps.push({
-      id: "ssh-tunnel",
-      label: "SSH 隧道",
-      state: tunnel.ok ? "ok" : "error",
-      message: tunnel.ok && tunnel.pid
-        ? `SSH tunnel is listening on 127.0.0.1:${tunnel.localPort}; remote bridge is ${tunnel.reverseBrokerUrl}.`
-        : tunnel.message,
-      details: tunnel
-    });
-    if (tunnel.ok) {
-      const reverseBridge = await reverseBridgeProbe();
-      steps.push({
-        id: "reverse-bridge",
-        label: "远端反向控制入口",
-        state: reverseBridge.ok ? "ok" : "error",
-        message: reverseBridge.message,
-        details: reverseBridge
-      });
-    }
     const owner = await sshTunnelService.localPortOwner(config.gatewayLocalPort);
     const localGateway = owner
       ? { ok: true, message: `127.0.0.1:${config.gatewayLocalPort} is listening (${owner.command} ${owner.pid}).`, owner }
@@ -294,11 +299,7 @@ async function checkHealth(): Promise<AppHealth> {
   const config = await runtimeConfig();
   const tunnel = config.gatewayTransport === "ssh"
     ? await sshTunnelService.ensure()
-    : {
-      ok: true,
-      message: `Direct Gateway transport enabled: ${config.gatewayDirectHost}:${config.gatewayRemotePort}.`,
-      localPort: config.gatewayLocalPort
-    };
+    : await sshTunnelService.status();
   let gatewayOk = false;
   let gatewayMessage = "Gateway not checked.";
   try {
@@ -311,7 +312,7 @@ async function checkHealth(): Promise<AppHealth> {
   const body: AppHealth = {
     server: { state: "ok", message: "Local server is running." },
     ssh: {
-      state: config.gatewayTransport === "direct" ? "disabled" : tunnel.ok ? "ok" : "error",
+      state: tunnel.ok ? "ok" : "error",
       message: tunnel.message,
       details: tunnel
     },
@@ -476,6 +477,27 @@ apiRoutes.post("/network/test", async (_req, res) => {
   res.json(await runNetworkTest());
 });
 
+apiRoutes.get("/ssh/session-password", (_req, res) => {
+  res.json({ credential: sshCredentialSessionService.status() });
+});
+
+apiRoutes.post("/ssh/session-password", async (req, res) => {
+  try {
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    if (!password) {
+      res.status(400).json({ error: "Password is required." });
+      return;
+    }
+    res.json({ credential: sshCredentialSessionService.providePassword(password) });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/ssh/session-password/dismiss", (_req, res) => {
+  res.json({ credential: sshCredentialSessionService.dismiss() });
+});
+
 apiRoutes.get("/settings", async (_req, res) => {
   res.json(await settingsStore.publicSettings());
 });
@@ -546,6 +568,7 @@ apiRoutes.put("/settings", async (req, res) => {
   await settingsStore.update(req.body ?? {});
   gatewayClient.disconnect();
   sshTunnelService.stop();
+  sshCredentialSessionService.clear();
   res.json(await settingsStore.publicSettings());
 });
 
@@ -553,6 +576,7 @@ apiRoutes.post("/settings/profiles", async (req, res) => {
   await settingsStore.createProfile(req.body ?? {});
   gatewayClient.disconnect();
   sshTunnelService.stop();
+  sshCredentialSessionService.clear();
   res.json(await settingsStore.publicSettings());
 });
 
@@ -562,6 +586,7 @@ apiRoutes.put("/settings/profiles/:id", async (req, res) => {
     if ((await settingsStore.publicSettings()).activeProfileId === req.params.id) {
       gatewayClient.disconnect();
       sshTunnelService.stop();
+      sshCredentialSessionService.clear();
     }
     res.json(await settingsStore.publicSettings());
   } catch (error) {
@@ -574,6 +599,7 @@ apiRoutes.post("/settings/profiles/:id/activate", async (req, res) => {
     await settingsStore.activateProfile(String(req.params.id));
     gatewayClient.disconnect();
     sshTunnelService.stop();
+    sshCredentialSessionService.clear();
     res.json(await settingsStore.publicSettings());
   } catch (error) {
     res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
@@ -612,6 +638,7 @@ apiRoutes.post("/settings/profiles/:id/bootstrap-ssh", async (req, res) => {
     if (settings.activeProfileId === profile.id) {
       gatewayClient.disconnect();
       sshTunnelService.stop();
+      sshCredentialSessionService.clear();
     }
     res.json({ ...result, settings: await settingsStore.publicSettings() });
   } catch (error) {
@@ -749,6 +776,14 @@ function isToolRequestStatus(value: string): value is "pending" | "running" | "s
     || value === "failed";
 }
 
+function parseInteractionKind(value: unknown): InteractionKind | null {
+  return value === "credential.request" || value === "ui.confirm" ? value : null;
+}
+
+function isInteractionStatus(value: string): value is InteractionStatus {
+  return value === "pending" || value === "resolved" || value === "rejected" || value === "expired";
+}
+
 function parseToolDecisionActor(value: unknown): ToolDecisionActor | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
@@ -763,9 +798,12 @@ function parseToolDecisionActor(value: unknown): ToolDecisionActor | undefined {
 function extractBrokerSubmitToken(req: express.Request): string {
   const auth = req.header("authorization") || "";
   if (/^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, "").trim();
-  if (typeof req.body.submitToken === "string") return req.body.submitToken.trim();
-  if (req.body.payload && typeof req.body.payload === "object" && !Array.isArray(req.body.payload)) {
-    const payload = req.body.payload as Record<string, unknown>;
+  const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
+  if (typeof body.submitToken === "string") return body.submitToken.trim();
+  const queryToken = req.query.submitToken;
+  if (typeof queryToken === "string") return queryToken.trim();
+  if (body.payload && typeof body.payload === "object" && !Array.isArray(body.payload)) {
+    const payload = body.payload as Record<string, unknown>;
     if (typeof payload.submitToken === "string") return payload.submitToken.trim();
   }
   return "";
@@ -842,6 +880,38 @@ apiRoutes.post("/tools/events/gateway", async (req, res) => {
   }
 });
 
+apiRoutes.post("/interactions/events/gateway", async (req, res) => {
+  try {
+    const kind = parseInteractionKind(req.body.kind);
+    const sessionKey = typeof req.body.sessionKey === "string" ? req.body.sessionKey.trim() : "";
+    const sourceEventId = typeof req.body.sourceEventId === "string" ? req.body.sourceEventId.trim() : "";
+    const agentId = typeof req.body.agentId === "string" ? req.body.agentId.trim() : undefined;
+    const reason = typeof req.body.reason === "string" ? req.body.reason.trim() : undefined;
+    const payload = req.body.payload && typeof req.body.payload === "object" && !Array.isArray(req.body.payload)
+      ? req.body.payload
+      : {};
+    if (!kind || !sessionKey || !sourceEventId) {
+      res.status(400).json({ error: "Missing kind, sessionKey, or sourceEventId." });
+      return;
+    }
+    if (!brokerTokenService.verify(sessionKey, extractBrokerSubmitToken(req))) {
+      res.status(401).json({ error: "Invalid or missing broker submit token." });
+      return;
+    }
+    res.json(interactionBrokerService.create({
+      kind,
+      sessionKey,
+      agentId,
+      reason,
+      source: "gateway-event",
+      sourceEventId,
+      payload
+    }));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
   const config = await runtimeConfig();
   const bridgeBaseUrl = reverseBridgeBaseUrl(config);
@@ -850,12 +920,14 @@ apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
     app: "detaches_agent",
     protocolVersion: 1,
     gatewayEventEndpoint: `${bridgeBaseUrl}/api/tools/events/gateway`,
+    interactionEventEndpoint: `${bridgeBaseUrl}/api/interactions/events/gateway`,
     eventSource: "gateway-event",
     idempotencyField: "sourceEventId",
     submitTokenRequired: true,
     submitTokenHeader: "Authorization",
     requestFormats: ["broker-event", "fence"],
     requestKinds: ["terminal", "file-transfer", "main-agent-save-file", "adapter-install", "skill-install", "skill-verify"],
+    interactionKinds: ["credential.request", "ui.confirm"],
     contextExport: {
       createEndpoint: `${bridgeBaseUrl}/api/context/exports`,
       consumeEndpointPattern: `${bridgeBaseUrl}/api/context/exports/{token}`,
@@ -870,6 +942,71 @@ apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
     approvalRequired: true,
     adapterId: "detaches_agent.openclaw.adapter"
   });
+});
+
+apiRoutes.get("/interactions", async (req, res) => {
+  try {
+    const sessionKey = typeof req.query.sessionKey === "string" ? req.query.sessionKey.trim() : undefined;
+    const agentId = typeof req.query.agentId === "string" ? req.query.agentId.trim() : undefined;
+    const status = typeof req.query.status === "string" && isInteractionStatus(req.query.status) ? req.query.status : undefined;
+    const limit = typeof req.query.limit === "string" ? Number(req.query.limit) : undefined;
+    res.json(interactionBrokerService.list({ sessionKey, agentId, status, limit }));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.get("/interactions/:interactionId", async (req, res) => {
+  try {
+    const preview = interactionBrokerService.get(req.params.interactionId);
+    if (!brokerTokenService.verify(preview.interaction.sessionKey, extractBrokerSubmitToken(req))) {
+      res.status(401).json({ error: "Invalid or missing broker submit token.", errorCode: "DETACHES_AUTH_REQUIRED" });
+      return;
+    }
+    res.json(interactionBrokerService.get(req.params.interactionId, { consumeRevealSecret: true }));
+  } catch (error) {
+    res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/interactions/:interactionId/resolve", async (req, res) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Resolving local interactions is only allowed from the local machine." });
+    return;
+  }
+  try {
+    const mode = req.body?.mode === "local-handle" || req.body?.mode === "reveal-once" || req.body?.mode === "confirmed"
+      ? req.body.mode
+      : undefined;
+    const secret = typeof req.body?.secret === "string" ? req.body.secret : undefined;
+    const actor = parseToolDecisionActor(req.body?.actor);
+    const response = interactionBrokerService.resolve(req.params.interactionId, {
+      mode,
+      secret,
+      value: req.body?.value,
+      actor
+    });
+    const result = response.result && response.result.secret
+      ? { ...response.result, secret: undefined }
+      : response.result;
+    res.json({ ...response, result });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/interactions/:interactionId/reject", async (req, res) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Rejecting local interactions is only allowed from the local machine." });
+    return;
+  }
+  try {
+    const actor = parseToolDecisionActor(req.body?.actor);
+    const error = typeof req.body?.error === "string" ? req.body.error.trim() : undefined;
+    res.json(interactionBrokerService.reject(req.params.interactionId, { actor, error }));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 apiRoutes.get("/file-transfers/:transferId", async (req, res) => {

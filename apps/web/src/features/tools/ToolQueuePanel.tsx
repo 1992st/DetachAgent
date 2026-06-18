@@ -84,14 +84,14 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
       if (data.type === "transfer") {
         setTransfers((current) => ({ ...current, [data.transfer.requestId]: data.transfer }));
         setPasswordTransfer((current) => {
-          if (current?.transferId !== data.transfer.transferId) return current;
+          if (current && current.transferId !== data.transfer.transferId) return current;
           return shouldOpenPasswordDialog(data.transfer, dismissedPasswordTransfers) ? data.transfer : null;
         });
         if (data.transfer.status === "succeeded" || data.transfer.status === "failed") {
           setPassword("");
         }
         if (shouldOpenPasswordDialog(data.transfer, dismissedPasswordTransfers)) {
-          setPasswordTransfer(data.transfer);
+          setPasswordTransfer((current) => current ?? data.transfer);
         }
       }
     };
@@ -133,8 +133,11 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
     try {
       const response = await submitMainAgentTransferPassword(passwordTransfer.transferId, password);
       setPassword("");
-      setPasswordTransfer(null);
-      setTransfers((current) => ({ ...current, [response.transfer.requestId]: response.transfer }));
+      setTransfers((current) => {
+        const nextTransfers = { ...current, [response.transfer.requestId]: response.transfer };
+        setPasswordTransfer(nextPasswordTransfer(nextTransfers, dismissedPasswordTransfers, response.transfer.transferId));
+        return nextTransfers;
+      });
     } catch (passwordError) {
       setError(passwordError instanceof Error ? passwordError.message : String(passwordError));
     } finally {
@@ -143,8 +146,12 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
   }
 
   function dismissPasswordDialog(transfer: MainAgentFileTransferSnapshot) {
-    setDismissedPasswordTransfers((current) => new Set(current).add(transfer.transferId));
-    setPasswordTransfer(null);
+    let nextDismissed = dismissedPasswordTransfers;
+    setDismissedPasswordTransfers((current) => {
+      nextDismissed = new Set(current).add(transfer.transferId);
+      return nextDismissed;
+    });
+    setPasswordTransfer(nextPasswordTransfer(transfers, nextDismissed, transfer.transferId));
     setPassword("");
   }
 
@@ -468,6 +475,16 @@ function shouldOpenPasswordDialog(transfer: MainAgentFileTransferSnapshot, dismi
   if (dismissed.has(transfer.transferId)) return false;
   if (transfer.status === "succeeded" || transfer.status === "failed") return false;
   return transfer.status === "waiting-password" || transfer.needsPassword;
+}
+
+function nextPasswordTransfer(
+  transfers: Record<string, MainAgentFileTransferSnapshot>,
+  dismissed: Set<string>,
+  excludeTransferId?: string
+): MainAgentFileTransferSnapshot | null {
+  return Object.values(transfers)
+    .filter((transfer) => transfer.transferId !== excludeTransferId)
+    .find((transfer) => shouldOpenPasswordDialog(transfer, dismissed)) ?? null;
 }
 
 function passwordCountdown(transfer: MainAgentFileTransferSnapshot): string {

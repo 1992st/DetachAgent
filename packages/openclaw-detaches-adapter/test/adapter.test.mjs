@@ -30,12 +30,17 @@ assert.equal(parsedManifest.targets["remote-agent-host"].status, "reserved");
 assert.equal(parsedManifest.cliCommands["inspect-context"].includes("routing warnings"), true);
 assert.equal(parsedManifest.cliCommands["doctor"].includes("runbook"), true);
 assert.equal(parsedManifest.cliCommands["context-fetch"].includes("one-time"), true);
+assert.match(parsedManifest.cliCommands["credential-request"], /credential\.request/);
+assert.equal(parsedManifest.optionalContextFields.includes("broker.interactionEventEndpoint"), true);
+assert.equal(parsedManifest.optionalContextFields.includes("localControl.interactionEventEndpoint"), true);
 assert.equal(parsedManifest.skill.manifest, "skill.manifest.json");
 
 const parsedSkillManifest = JSON.parse(await fs.readFile(path.join(adapterDir, "skill.manifest.json"), "utf8"));
 assert.equal(parsedSkillManifest.adapterId, "detaches_agent.openclaw.adapter");
 assert.equal(parsedSkillManifest.entrypoints.instructions, "AGENT.md");
 assert.equal(parsedSkillManifest.entrypoints.skill, "SKILL.md");
+assert.match(parsedSkillManifest.commands.credentialRequest, /credential-request/);
+assert.match(parsedSkillManifest.commands.credentialRequest, /--timeout-ms 300000/);
 assert.equal(parsedSkillManifest.safety.executesToolsDirectly, false);
 
 const readme = await fs.readFile(path.join(adapterDir, "README.md"), "utf8");
@@ -70,6 +75,7 @@ assert.equal(parsedInspection.files.staged.length, 1);
 assert.equal(parsedInspection.files.staged[0].fileId, "file-123");
 assert.equal(parsedInspection.files.staged[0].transfer.requestFence, "detaches-file-transfer");
 assert.equal(parsedInspection.broker.gatewayEventEndpoint, "http://127.0.0.1:38888/api/tools/events/gateway");
+assert.equal(parsedInspection.broker.interactionEventEndpoint, "http://127.0.0.1:38888/api/interactions/events/gateway");
 assert.equal(parsedInspection.broker.idempotencyField, "sourceEventId");
 assert.equal(parsedInspection.broker.submitToken, "test-submit-token");
 assert.equal(parsedInspection.broker.submitTokenHeader, "Authorization");
@@ -101,6 +107,7 @@ assert.equal(parsedDoctor.mode, "detaches-agent-doctor");
 assert.equal(parsedDoctor.session.sessionKey, "agent:audio-process:main");
 assert.equal(parsedDoctor.preferredRequestFormat, "broker-event");
 assert.equal(parsedDoctor.broker.endpoint, "http://127.0.0.1:38888/api/tools/events/gateway");
+assert.equal(parsedDoctor.broker.interactionEndpoint, "http://127.0.0.1:38888/api/interactions/events/gateway");
 assert.equal(parsedDoctor.broker.submitTokenAvailable, true);
 assert.equal(parsedDoctor.contextSource.type, "file");
 assert.equal(parsedDoctor.contextSource.path, "test/valid-context.json");
@@ -110,6 +117,8 @@ assert.equal(parsedDoctor.stagedFiles[0].fileId, "file-123");
 assert.match(parsedDoctor.commands.terminalBrokerEvent, /terminal-request/);
 assert.match(parsedDoctor.commands.terminalBrokerEvent, /--submit/);
 assert.match(parsedDoctor.commands.fileTransferBrokerEvent, /file-transfer-request/);
+assert.match(parsedDoctor.commands.credentialRequest, /credential-request/);
+assert.match(parsedDoctor.commands.credentialRequest, /--timeout-ms 300000/);
 assert.equal(parsedDoctor.nextActions.some((action) => /detaches_agent mediated/.test(action)), true);
 
 const contextFetchServer = http.createServer((_req, res) => {
@@ -355,6 +364,69 @@ assert.equal(submittedBody.sourceEventId, "adapter-test-submit-1");
 assert.equal(submittedBody.submitToken, "test-submit-token");
 assert.equal(submittedBody.payload.command, "pwd");
 assert.equal(JSON.parse(submittedBrokerEvent.stdout).request.id, "submitted-request");
+
+let credentialSubmitBody = null;
+let credentialSubmitAuth = null;
+let credentialPollCount = 0;
+const credentialServer = http.createServer((req, res) => {
+  if (req.method === "POST" && req.url === "/api/interactions/events/gateway") {
+    let body = "";
+    credentialSubmitAuth = req.headers.authorization;
+    req.on("data", (chunk) => { body += chunk.toString("utf8"); });
+    req.on("end", () => {
+      credentialSubmitBody = JSON.parse(body);
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ interaction: { id: "interaction-test-1", status: "pending", ...credentialSubmitBody } }));
+    });
+    return;
+  }
+  if (req.method === "GET" && req.url.startsWith("/api/interactions/interaction-test-1")) {
+    credentialPollCount += 1;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({
+      interaction: { id: "interaction-test-1", status: "resolved", sessionKey: "agent:audio-process:main" },
+      result: { mode: "reveal-once", secret: "ssh-password", decidedAt: new Date().toISOString() }
+    }));
+    return;
+  }
+  res.statusCode = 404;
+  res.end("{}");
+});
+credentialServer.listen(0, "127.0.0.1");
+await once(credentialServer, "listening");
+const credentialPort = credentialServer.address().port;
+const credentialRequest = await run([
+  "credential-request",
+  "--context",
+  "test/valid-context.json",
+  "--reason",
+  "SSH login requires a password",
+  "--prompt",
+  "Enter SSH password",
+  "--target-user",
+  "aispeech",
+  "--target-host",
+  "main-agent-host",
+  "--target-port",
+  "22",
+  "--source-event-id",
+  "adapter-test-credential-1",
+  "--submit-url",
+  `http://127.0.0.1:${credentialPort}/api/interactions/events/gateway`,
+  "--wait",
+  "--timeout-ms",
+  "300000"
+]);
+credentialServer.close();
+assert.equal(credentialRequest.code, 0);
+assert.equal(credentialSubmitAuth, "Bearer test-submit-token");
+assert.equal(credentialSubmitBody.kind, "credential.request");
+assert.equal(credentialSubmitBody.payload.target.user, "aispeech");
+assert.equal(credentialPollCount, 1);
+const parsedCredentialRequest = JSON.parse(credentialRequest.stdout);
+assert.equal(parsedCredentialRequest.ok, true);
+assert.equal(parsedCredentialRequest.result.mode, "reveal-once");
+assert.equal(parsedCredentialRequest.result.secret, "ssh-password");
 
 const probeServer = http.createServer((_req, res) => {
   res.setHeader("Content-Type", "application/json");

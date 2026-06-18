@@ -104,6 +104,7 @@ Main Agent must choose `destination.user` and `destination.path`. `destination.h
 - Prefer `rsync`; fallback to `scp` when rsync is unavailable or incompatible.
 - Detect password prompts and pause with `waiting-password`.
 - Fail password waits after 3 minutes and clean up pending resolvers and temporary askpass files.
+- This 3-minute wait is only for the `main-agent-save-file` transfer password prompt. It is separate from the generic `credential-request` interaction API, whose adapter script waits at most 5 minutes.
 - Use askpass only for the current transfer and delete temporary secrets in `finally`.
 - Determine success from the transfer process exit code.
 - Return bounded, ANSI-stripped output tail for diagnosis.
@@ -120,7 +121,7 @@ The Save request card presents:
 - Main Agent reason.
 - Current status, progress, speed, message, and error.
 
-If password is required, UI displays a dedicated password dialog with connection details, file paths, command preview, and a 3-minute countdown. The password is used once and is not saved. The terminal is not automatically opened for save-file requests.
+If password is required, UI displays a dedicated password dialog with connection details, file paths, command preview, and a 3-minute countdown. The password is used once and is not saved. The terminal is not automatically opened for save-file requests. This dialog is distinct from the generic Main Agent `credential-request` popup, which has a 5-minute script/API timeout.
 
 ## Reliability and Security
 

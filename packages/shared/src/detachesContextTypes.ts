@@ -56,11 +56,21 @@ export interface DetachesSessionContext {
   };
   broker?: {
     gatewayEventEndpoint: string;
+    interactionEventEndpoint?: string;
     eventSource: "gateway-event";
     idempotencyField: "sourceEventId";
     submitToken: string;
     submitTokenHeader: "Authorization";
     requestFormats: Array<"broker-event" | "fence">;
+  };
+  localControl?: {
+    baseUrl: string;
+    toolEventEndpoint: string;
+    interactionEventEndpoint: string;
+    fixedPort: number;
+    submitTokenHeader: "Authorization";
+    addressSource: "remote-reachable-context";
+    note: string;
   };
   contextExport?: {
     createEndpoint: string;
@@ -94,4 +104,10 @@ export interface DetachesContextExportCreateResponse {
   sessionMode: ChatSessionMode;
   expiresAt: string;
   consumeUrl: string;
+  reverseBridge?: {
+    ok: boolean;
+    message: string;
+    reverseBrokerUrl?: string;
+    pid?: number;
+  };
 }
