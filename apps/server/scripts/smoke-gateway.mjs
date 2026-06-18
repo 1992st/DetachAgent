@@ -3,6 +3,7 @@ import { spawn, execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { once } from "node:events";
 import { promisify } from "node:util";
 import WebSocket, { WebSocketServer } from "ws";
@@ -15,8 +16,14 @@ const serverPort = Number(process.env.SMOKE_SERVER_PORT ?? 39888);
 const host = "127.0.0.1";
 const publicBaseUrl = `http://${host}:${serverPort}`;
 const reverseBridgeBaseUrl = `http://${host}:${serverPort}`;
-const repoRoot = path.resolve(new URL("../../..", import.meta.url).pathname);
+const repoRoot = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const smokeStorageDir = path.join(repoRoot, "storage-smoke");
+const isWindows = process.platform === "win32";
+const localTransferPath = isWindows ? path.join(smokeStorageDir, "downloads", "detaches-note.txt") : "/tmp/detaches-note.txt";
+const brokerTransferPath = isWindows ? path.join(smokeStorageDir, "downloads", "detaches-note-via-broker.txt") : "/tmp/detaches-note-via-broker.txt";
+const failingTransferPath = isWindows ? smokeStorageDir : "/tmp";
+const retryTransferPath = isWindows ? path.join(smokeStorageDir, "downloads", "detaches-retry-after-failure.txt") : "/tmp/detaches-retry-after-failure.txt";
+const terminalSmokeCommand = isWindows ? "Write-Output smoke-complete" : "printf 'smoke-complete\\n'";
 
 const observed = {
   connect: null,
@@ -28,6 +35,31 @@ const observed = {
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function assertPath(value) {
+  return value.replace(/\\/g, "/");
+}
+
+async function readJsonl(filePath) {
+  try {
+    const text = await fs.readFile(filePath, "utf8");
+    return text.trim() ? text.trim().split("\n").map((line) => JSON.parse(line)) : [];
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function waitForJsonl(filePath, predicate, timeoutMs = 5000) {
+  const started = Date.now();
+  let events = [];
+  while (Date.now() - started < timeoutMs) {
+    events = await readJsonl(filePath);
+    if (predicate(events)) return events;
+    await wait(100);
+  }
+  return events;
 }
 
 async function waitForHttp(url, timeoutMs = 10000) {
@@ -347,7 +379,7 @@ async function main() {
     assert.equal(brokerCapabilities.contextExport.adapterCommand, "context-fetch");
     assert.equal(brokerCapabilities.contextExport.doctorCommand, "doctor");
     assert.equal(brokerCapabilities.contextExport.createEndpoint, `${reverseBridgeBaseUrl}/api/context/exports`);
-    const adapterCli = path.resolve(new URL("../../../packages/openclaw-detaches-adapter/bin/detaches-agent-adapter.mjs", import.meta.url).pathname);
+    const adapterCli = path.resolve(fileURLToPath(new URL("../../../packages/openclaw-detaches-adapter/bin/detaches-agent-adapter.mjs", import.meta.url)));
     const adapterProbe = await execFileAsync(process.execPath, [adapterCli, "broker-probe", publicBaseUrl]);
     assert.equal(JSON.parse(adapterProbe.stdout).ok, true);
 
@@ -370,7 +402,7 @@ async function main() {
     assert.equal(upload.file.mimeType, "text/plain");
     assert.equal(upload.file.contentBase64, undefined);
     assert.equal(upload.file.remotePath, undefined);
-    assert.match(upload.file.localPath, /storage(?:-smoke)?\/uploads\/.+P100协议说明-示例\.txt$/);
+    assert.match(assertPath(upload.file.localPath), /storage(?:-smoke)?\/uploads\/.+P100协议说明-示例\.txt$/);
 
     const rejectedDownload = await fetch(`http://${host}:${serverPort}/api/files/download?remotePath=${encodeURIComponent("/etc/passwd")}`);
     assert.equal(rejectedDownload.status, 400);
@@ -484,13 +516,13 @@ async function main() {
     const userChatSend = observed.chatSend;
     assert.equal(userChatSend.sessionKey, chatSessionKey);
     assert.match(userChatSend.message, /^hello smoke/);
-    assert.match(userChatSend.message, /detaches_agent 文件上下文/);
+    assert.match(userChatSend.message, /\[\[DETACH_AGENT_FILE_STAGED\]\]/);
     assert.match(userChatSend.message, /P100协议说明-示例\.txt/);
     assert.match(userChatSend.message, new RegExp(`fileId: ${upload.file.id}`));
     assert.match(userChatSend.message, /currentLocation: 用户本机 detaches_agent staging 区/);
     assert.match(userChatSend.message, /remotePath: not uploaded/);
-    assert.match(userChatSend.message, /detaches-file-transfer/);
-    assert.match(userChatSend.message, /"target":"remote-agent-host"/);
+    assert.match(userChatSend.message, /```main-agent-save-file/);
+    assert.match(userChatSend.message, /"destination":\{/);
     assert.match(userChatSend.message, /detaches_agent 接入上下文/);
     assert.match(userChatSend.message, /agentId: agent-alpha/);
     assert.match(userChatSend.message, /remoteAdapter: state=error/);
@@ -509,8 +541,9 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.displayName, "P100协议说明-示例.txt");
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.currentLocation, "user-local-staging");
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.requestFence, "detaches-file-transfer");
-    assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.defaultTarget, "remote-agent-host");
+    assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.defaultTarget, "main-agent-machine");
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.supportedTargets?.includes("remote-agent-host"), true);
+    assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.supportedTargets?.includes("main-agent-machine"), true);
     assert.equal(userChatSend.clientContext?.detaches?.broker?.gatewayEventEndpoint, `${reverseBridgeBaseUrl}/api/tools/events/gateway`);
     assert.equal(typeof userChatSend.clientContext?.detaches?.broker?.submitToken, "string");
     assert.equal(userChatSend.clientContext?.detaches?.broker?.submitToken, exportedContextWithToken.detaches.broker.submitToken);
@@ -561,13 +594,13 @@ async function main() {
     const preparedTransfer = await requestJson("/api/files/transfer/prepare", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileId: upload.file.id, target: "local-user-machine", remotePath: "/tmp/detaches-note.txt" })
+      body: JSON.stringify({ fileId: upload.file.id, target: "local-user-machine", remotePath: localTransferPath })
     });
     assert.equal(preparedTransfer.fileId, upload.file.id);
     assert.equal(preparedTransfer.target, "local-user-machine");
-    assert.equal(preparedTransfer.remotePath, "/tmp/detaches-note.txt");
+    assert.equal(preparedTransfer.remotePath, localTransferPath);
     assert.match(preparedTransfer.downloadUrl, new RegExp(`^${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/files/staged/`));
-    assert.match(preparedTransfer.command, /curl -fL/);
+    assert.match(preparedTransfer.command, /curl(?:\.exe)? -fL/);
     assert.match(preparedTransfer.command, /detaches-note\.txt/);
 
     const terminalTool = await requestJson("/api/tools/requests", {
@@ -579,7 +612,7 @@ async function main() {
         sessionKey: chatSessionKey,
         agentId: "agent-alpha",
         reason: "smoke terminal broker",
-        payload: { command: "printf 'smoke-complete\\n'" }
+        payload: { command: terminalSmokeCommand }
       })
     });
     assert.equal(terminalTool.request.status, "pending");
@@ -593,7 +626,7 @@ async function main() {
     });
     assert.equal(approvedTerminalTool.request.status, "approved");
     assert.equal(approvedTerminalTool.request.lastDecision.actor.deviceIdShort, decisionActor.deviceIdShort);
-    assert.equal(approvedTerminalTool.command, "printf 'smoke-complete\\n'");
+    assert.equal(approvedTerminalTool.command, terminalSmokeCommand);
     assert.equal(approvedTerminalTool.execution.target, "local-user-machine");
     assert.equal(approvedTerminalTool.execution.sessionKey, chatSessionKey);
     assert.equal(approvedTerminalTool.execution.wroteToTerminal, true);
@@ -835,13 +868,13 @@ async function main() {
         sessionKey: chatSessionKey,
         agentId: "agent-alpha",
         reason: "smoke file broker",
-        payload: { fileId: brokerUpload.file.id, remotePath: "/tmp/detaches-note-via-broker.txt" }
+        payload: { fileId: brokerUpload.file.id, remotePath: brokerTransferPath }
       })
     });
     assert.equal(brokerTransfer.request.status, "pending");
     const approvedBrokerTransfer = await requestJson(`/api/tools/requests/${brokerTransfer.request.id}/approve`, { method: "POST" });
     assert.equal(approvedBrokerTransfer.request.status, "succeeded");
-    assert.match(approvedBrokerTransfer.command, /curl -fL/);
+    assert.match(approvedBrokerTransfer.command, /curl(?:\.exe)? -fL/);
     assert.match(approvedBrokerTransfer.command, /detaches-note-via-broker\.txt/);
     assert.equal(approvedBrokerTransfer.execution.wroteToTerminal, false);
     assert.ok(approvedBrokerTransfer.execution.terminalId);
@@ -875,7 +908,7 @@ async function main() {
         sessionKey: chatSessionKey,
         agentId: "agent-alpha",
         reason: "smoke file broker failure keeps staged file retryable",
-        payload: { fileId: failingUpload.file.id, remotePath: "/tmp" }
+        payload: { fileId: failingUpload.file.id, remotePath: failingTransferPath }
       })
     });
     const approvedFailingBrokerTransfer = await requestJson(`/api/tools/requests/${failingBrokerTransfer.request.id}/approve`, { method: "POST" });
@@ -889,7 +922,7 @@ async function main() {
       body: JSON.stringify({
         fileId: failingUpload.file.id,
         target: "local-user-machine",
-        remotePath: "/tmp/detaches-retry-after-failure.txt",
+        remotePath: retryTransferPath,
         sessionKey: chatSessionKey,
         agentId: "agent-alpha"
       })
@@ -980,27 +1013,25 @@ async function main() {
     assert.equal(await repeatedDownload.text(), "hello");
 
     const auditPath = path.join(smokeStorageDir, "logs/file-transfer-audit.jsonl");
-    const auditEvents = (await fs.readFile(auditPath, "utf8"))
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
+    const auditEvents = await waitForJsonl(auditPath, (events) => (
+      events.some((event) => event.type === "transfer.download.cleanup" && event.fileId === upload.file.id && event.target === "local-user-machine" && event.deleted === false)
+    ));
     assert.equal(auditEvents.some((event) => event.type === "upload" && event.fileId === upload.file.id), true);
-    assert.equal(auditEvents.some((event) => event.type === "transfer.prepare" && event.fileId === upload.file.id && event.target === "local-user-machine" && event.remotePath === "/tmp/detaches-note.txt"), true);
+    assert.equal(auditEvents.some((event) => event.type === "transfer.prepare" && event.fileId === upload.file.id && event.target === "local-user-machine" && event.remotePath === localTransferPath), true);
     assert.equal(auditEvents.some((event) => event.type === "transfer.download.start" && event.fileId === upload.file.id && event.target === "local-user-machine"), true);
     assert.equal(auditEvents.some((event) => event.type === "transfer.download.cleanup" && event.fileId === upload.file.id && event.target === "local-user-machine" && event.deleted === false), true);
     assert.equal(auditEvents.some((event) => event.type === "transfer.error" && event.fileId === upload.file.id && event.target === "remote-agent-host" && event.agentId === "agent-alpha" && event.workspace === "/tmp/openclaw/workspace/agent-alpha"), true);
 
     const toolAuditPath = path.join(smokeStorageDir, "logs/tool-broker-audit.jsonl");
-    const toolAuditEvents = (await fs.readFile(toolAuditPath, "utf8"))
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
+    const toolAuditEvents = await waitForJsonl(toolAuditPath, (events) => (
+      events.some((event) => event.type === "tool.result.forward" && event.status === "sent")
+    ));
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "terminal" && event.request.target === "local-user-machine"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "terminal" && event.request.target === "remote-agent-host" && event.request.status === "blocked"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.payload?.command === "echo broker-parse"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.ingest" && event.sourceEventId === "gateway-tool-event-smoke-1" && event.duplicate === false), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.ingest" && event.sourceEventId === "gateway-tool-event-smoke-1" && event.duplicate === true), true);
-    assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.command === "printf 'smoke-complete\\n'" && typeof event.terminalId === "string"), true);
+    assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.command === terminalSmokeCommand && typeof event.terminalId === "string"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.actor?.deviceIdShort === decisionActor.deviceIdShort), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.create" && event.request.kind === "adapter-install" && event.request.target === "remote-agent-host" && event.request.risk?.level === "elevated"), true);
     assert.equal(toolAuditEvents.some((event) => event.type === "tool.approve" && event.requestId === adapterInstallTool.request.id && event.status === "failed"), true);

@@ -10,6 +10,7 @@ import type {
   GatewayResponseFrame
 } from "@detaches/shared";
 import { runtimeConfig } from "../../config/settingsStore.js";
+import { platformService } from "../platform/platformService.js";
 import { sshTunnelService } from "../tunnel/sshTunnelService.js";
 import {
   buildDeviceAuthPayloadV3,
@@ -318,7 +319,7 @@ export class GatewayClient extends EventEmitter {
     const scopes = ["operator.admin", "operator.read", "operator.write", "operator.approvals", "operator.pairing"];
     const clientId = "openclaw-macos";
     const clientMode = "ui";
-    const platform = process.platform;
+    const platform = platformService.currentNodePlatform();
     const identity = loadOrCreateDeviceIdentity();
     const signedAtMs = Date.now();
     const signatureToken =

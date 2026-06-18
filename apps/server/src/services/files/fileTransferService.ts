@@ -165,7 +165,7 @@ export class FileTransferService {
       fileName: file.displayName || file.name,
       remotePath: cleanedRemotePath,
       downloadUrl,
-      command: buildCurlCommand(downloadUrl, cleanedRemotePath),
+      command: platformService.buildLocalCurlDownloadCommand(downloadUrl, cleanedRemotePath),
       expiresAt: new Date(expiresAtMs).toISOString(),
       timeoutMs: transferTimeoutMs(file.size)
     };

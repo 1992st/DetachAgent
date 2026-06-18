@@ -29,13 +29,15 @@ import { mainAgentFileTransferService } from "../files/mainAgentFileTransferServ
 import { gatewayClient } from "../gateway/gatewayClient.js";
 import { terminalService } from "../terminal/terminalService.js";
 import { openclawDetachesAdapterService } from "../adapters/openclawDetachesAdapterService.js";
+import { platformService } from "../platform/platformService.js";
 
 const DETACH_AGENT_SKILL_NAME = "detach-agent-relationship";
 const DETACH_AGENT_SKILL_VERSION = "1.0.1";
-const DETACH_AGENT_SKILL_ZIP_PATH = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../../../web/public/skills/detach-agent-relationship.skill.zip"
-);
+const DETACH_AGENT_SKILL_ZIP_PATH = platformService.resolvePackagedResourcePath("web", "public", "skills", "detach-agent-relationship.skill.zip")
+  ?? path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../../web/public/skills/detach-agent-relationship.skill.zip"
+  );
 const OPENCLAW_GLOBAL_SKILLS_DIR = "~/.openclaw/skills";
 const DETACH_AGENT_LOCAL_SKILL_CACHE_DIR = "~/.detach_agent/skills";
 
@@ -1144,9 +1146,10 @@ function delay(ms: number): Promise<void> {
 
 function runShellCommand(command: string, timeoutMs: number): Promise<{ exitCode: number; output: string }> {
   return new Promise((resolve) => {
-    const child = spawn("/bin/sh", ["-lc", command], {
-      cwd: appConfig.storageDir,
-      env: process.env,
+    const launch = platformService.buildNonInteractiveShellLaunch(command, { cwd: appConfig.storageDir });
+    const child = spawn(launch.shell, launch.args, {
+      cwd: launch.cwd,
+      env: launch.env,
       stdio: ["ignore", "pipe", "pipe"]
     });
     let output = "";
@@ -1185,14 +1188,7 @@ function runShellCommand(command: string, timeoutMs: number): Promise<{ exitCode
 }
 
 function wrapCommandForCompletion(command: string, executionId: string): string {
-  return [
-    `printf '%s\\n' ${shellQuote(`__DETACHES_TOOL_START__:${executionId}`)}`,
-    "{",
-    command,
-    "\n}",
-    "__detaches_status=$?",
-    `printf '%s\\n' \"__DETACHES_TOOL_END__:${executionId}:$__detaches_status\"`
-  ].join("\n");
+  return platformService.wrapCommandForCompletion(command, executionId);
 }
 
 function parseExecutionOutput(replay: string, execution: ToolExecutionRecord): { output: string; completed: boolean; exitCode?: number } {

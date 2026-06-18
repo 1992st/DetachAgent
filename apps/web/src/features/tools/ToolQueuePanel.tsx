@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Eye, RefreshCw, Send, TerminalSquare, X, BellRing } from "lucide-react";
 import type { ClientIdentity, MainAgentFileTransferSnapshot, ToolBrokerSocketEvent, ToolDecisionActor, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget } from "@detaches/shared";
-import { approveToolRequest, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward, submitMainAgentTransferPassword } from "../../lib/api.js";
+import { approveToolRequest, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward, submitMainAgentTransferPassword, wsUrl } from "../../lib/api.js";
 import { isQueueToolRequestVisible, shouldSurfaceApproval, targetLabels, toolRequestSupported } from "./toolQueuePresentation.js";
 
 interface Props {
@@ -58,10 +58,9 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
 
   useEffect(() => {
     if (!sessionKey) return;
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const params = new URLSearchParams({ sessionKey });
     if (agentId) params.set("agentId", agentId);
-    const ws = new WebSocket(`${protocol}://${window.location.host}/api/tools/stream?${params}`);
+    const ws = new WebSocket(wsUrl(`/api/tools/stream?${params}`));
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data) as ToolBrokerSocketEvent;
       if (data.type === "request") {

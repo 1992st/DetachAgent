@@ -1,6 +1,7 @@
 import { FormEvent, forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Copy, Eraser, Minimize2, TerminalSquare, X } from "lucide-react";
 import type { TerminalInfo, TerminalSocketServerEvent } from "@detaches/shared";
+import { wsUrl } from "../../lib/api.js";
 
 interface Props {
   sessionKey: string | null;
@@ -49,9 +50,8 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
       return;
     }
 
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const params = new URLSearchParams({ cols: "120", rows: "32" });
-    const ws = new WebSocket(`${protocol}://${window.location.host}/api/terminal/${encodeURIComponent(sessionKey)}?${params}`);
+    const ws = new WebSocket(wsUrl(`/api/terminal/${encodeURIComponent(sessionKey)}?${params}`));
     socketRef.current = ws;
     setSocketState("connecting");
     ws.onopen = () => setSocketState("connected");
