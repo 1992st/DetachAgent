@@ -20,6 +20,8 @@ export function SettingsPanel({ onSaved }: Props) {
   const [testResult, setTestResult] = useState<NetworkTestResponse | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantApplying, setAssistantApplying] = useState(false);
+  const [guideStage, setGuideStage] = useState<"idle" | "import-agent" | "gateway-health" | "test-network">("idle");
+  const [copiedPairingCommand, setCopiedPairingCommand] = useState(false);
 
   useEffect(() => {
     fetchSettings()
@@ -31,6 +33,9 @@ export function SettingsPanel({ onSaved }: Props) {
   }, []);
 
   const selectedProfile = settings?.profiles.find((profile) => profile.id === selectedProfileId) ?? settings ?? null;
+  const gatewayHealthStep = testResult?.steps.find((step) => step.id === "gateway-health") ?? null;
+  const gatewayConnected = gatewayHealthStep?.state === "ok";
+  const gatewayNeedsPairing = Boolean(gatewayHealthStep && networkStepApproveCommand(gatewayHealthStep.details));
   const selectedIdentityPath = selectedProfile?.remoteIdentityPath ?? "";
   const identityLooksInvalid = Boolean(selectedIdentityPath)
     && !selectedIdentityPath.startsWith("/")
@@ -126,7 +131,17 @@ export function SettingsPanel({ onSaved }: Props) {
     setTesting(true);
     setStatus(null);
     try {
-      setTestResult(await testNetwork());
+      const result = await testNetwork();
+      setTestResult(result);
+      const gatewayStep = result.steps.find((step) => step.id === "gateway-health");
+      if (gatewayStep?.state === "ok") {
+        setGuideStage("idle");
+        setCopiedPairingCommand(false);
+      } else if (gatewayStep && networkStepApproveCommand(gatewayStep.details)) {
+        setGuideStage("gateway-health");
+        setCopiedPairingCommand(false);
+      }
+      onSaved();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
@@ -144,6 +159,9 @@ export function SettingsPanel({ onSaved }: Props) {
       });
       setSettings(saved);
       setSelectedProfileId(saved.activeProfileId);
+      setTestResult(null);
+      setCopiedPairingCommand(false);
+      setGuideStage("import-agent");
       setStatus("Created profile.");
       onSaved();
     } catch (error) {
@@ -259,6 +277,12 @@ export function SettingsPanel({ onSaved }: Props) {
     }
   }
 
+  function handleCopyPairingCommand(command: string) {
+    void copyText(command);
+    setCopiedPairingCommand(true);
+    setGuideStage("test-network");
+  }
+
   if (!settings || !selectedProfile) {
     return <div className="settings-page muted">{status ?? "Loading settings..."}</div>;
   }
@@ -309,7 +333,7 @@ export function SettingsPanel({ onSaved }: Props) {
             <h2>网络与连接</h2>
             <p>连接 Main Agent 的 OpenClaw Gateway，并提供本机可被 Main Agent 回连的地址。</p>
           </div>
-          <button type="button" className="secondary-button" onClick={runTest} disabled={testing}>
+          <button type="button" className={`secondary-button ${guideStage === "test-network" && !gatewayConnected ? "guide-breathe" : ""}`} onClick={runTest} disabled={testing}>
             <Play size={16} />
             {testing ? "测试中" : "测试网络"}
           </button>
@@ -318,7 +342,14 @@ export function SettingsPanel({ onSaved }: Props) {
         <section className="settings-section">
           <div className="settings-section-heading">
             <h3>Main Agent Gateway</h3>
-            <button type="button" className="secondary-button compact agent-config-import-button" onClick={() => setAssistantOpen(true)}>
+            <button
+              type="button"
+              className={`secondary-button compact agent-config-import-button ${guideStage === "import-agent" ? "guide-breathe" : ""}`}
+              onClick={() => {
+                setAssistantOpen(true);
+                if (guideStage === "import-agent") setGuideStage("idle");
+              }}
+            >
               <FileInput size={16} />
               导入 Agent 配置
             </button>
@@ -479,14 +510,21 @@ export function SettingsPanel({ onSaved }: Props) {
         {testResult ? (
           <div className="network-test-list">
             {testResult.steps.map((step) => (
-              <article className={`network-test-step ${step.state}`} key={step.id}>
+              <article
+                className={`network-test-step ${step.state} ${step.id === "gateway-health" && guideStage === "gateway-health" && gatewayNeedsPairing && !copiedPairingCommand ? "guide-breathe" : ""}`}
+                key={step.id}
+              >
                 <strong>{step.label}</strong>
                 <p>{step.message}</p>
                 {networkStepApproveCommand(step.details) ? (
                   <div className="network-test-command">
                     <span>在 Main Agent 主机执行</span>
                     <code>{networkStepApproveCommand(step.details)}</code>
-                    <button type="button" className="secondary-button compact" onClick={() => copyText(networkStepApproveCommand(step.details) ?? "")}>
+                    <button
+                      type="button"
+                      className={`secondary-button compact ${guideStage === "gateway-health" && !copiedPairingCommand ? "guide-breathe" : ""}`}
+                      onClick={() => handleCopyPairingCommand(networkStepApproveCommand(step.details) ?? "")}
+                    >
                       <Copy size={14} />
                       复制命令
                     </button>

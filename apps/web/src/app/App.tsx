@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { KeyRound, X } from "lucide-react";
+import { KeyRound, Wifi, X } from "lucide-react";
 import type { AgentSummary, AppHealth, ChatSessionMode, ClientIdentity, DiagnosticItem, InteractionRecord, LocalTerminalApp, SshCredentialSessionSnapshot, ToolBrokerSocketEvent, UploadedFileRef } from "@detaches/shared";
-import { dismissSshSessionPassword, fetchAgents, fetchClientIdentity, fetchDiagnostics, fetchHealth, fetchLocalTerminalApps, openLocalTerminalApp, rejectInteraction, resolveInteraction, submitSshSessionPassword, uploadFile, wsUrl } from "../lib/api.js";
+import { dismissSshSessionPassword, fetchAgents, fetchClientIdentity, fetchDiagnostics, fetchHealth, fetchLocalTerminalApps, fetchSettings, openLocalTerminalApp, rejectInteraction, resolveInteraction, submitSshSessionPassword, uploadFile, wsUrl } from "../lib/api.js";
 import { ConnectionBar } from "../features/connection/ConnectionBar.js";
 import { AgentList } from "../features/agents/AgentList.js";
 import { ChatPanel, type ChatPanelHandle } from "../features/chat/ChatPanel.js";
@@ -15,6 +15,7 @@ export function App() {
   const [health, setHealth] = useState<AppHealth | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
+  const [networkConfigured, setNetworkConfigured] = useState(false);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [agentsLoading, setAgentsLoading] = useState(false);
@@ -52,6 +53,16 @@ export function App() {
       setHealthError(error instanceof Error ? error.message : String(error));
     } finally {
       setHealthLoading(false);
+    }
+  }, []);
+
+  const refreshNetworkGuide = useCallback(async () => {
+    try {
+      const settings = await fetchSettings();
+      const activeProfile = settings.profiles.find((profile) => profile.id === settings.activeProfileId) ?? settings;
+      setNetworkConfigured(activeProfile.lastStatus === "ok");
+    } catch {
+      setNetworkConfigured(false);
     }
   }, []);
 
@@ -97,7 +108,8 @@ export function App() {
     void refreshClientIdentity();
     void refreshAgents();
     void refreshDiagnostics();
-  }, [refreshHealth, refreshClientIdentity, refreshAgents, refreshDiagnostics]);
+    void refreshNetworkGuide();
+  }, [refreshHealth, refreshClientIdentity, refreshAgents, refreshDiagnostics, refreshNetworkGuide]);
 
   useEffect(() => {
     const ws = new WebSocket(wsUrl("/api/tools/stream"));
@@ -289,7 +301,13 @@ export function App() {
       <nav className="view-tabs" aria-label="Main views">
         <div className="view-tab-buttons">
           <button className={view === "chat" ? "active" : ""} onClick={() => setView("chat")}>聊天</button>
-          <button className={view === "network" ? "active" : ""} onClick={() => setView("network")}>网络与 SSH</button>
+          <button
+            className={`${view === "network" ? "active" : ""} ${!networkConfigured && view !== "network" ? "guide-breathe" : ""}`}
+            onClick={() => setView("network")}
+          >
+            <Wifi size={15} />
+            网络与 SSH
+          </button>
         </div>
         <div className="top-debug-terminal-slot" />
       </nav>
@@ -341,6 +359,7 @@ export function App() {
               void refreshHealth();
               void refreshAgents();
               void refreshDiagnostics();
+              void refreshNetworkGuide();
             }}
           />
         </div>

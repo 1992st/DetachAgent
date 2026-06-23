@@ -474,7 +474,15 @@ apiRoutes.get("/diagnostics", async (_req, res) => {
 });
 
 apiRoutes.post("/network/test", async (_req, res) => {
-  res.json(await runNetworkTest());
+  const result = await runNetworkTest();
+  const gatewayOk = result.steps.some((step) => step.id === "gateway-health" && step.state === "ok");
+  try {
+    const settings = await settingsStore.publicSettings();
+    await settingsStore.markProfileTested(settings.activeProfileId, gatewayOk ? "ok" : "error");
+  } catch {
+    // Network test results are still useful even if persisting the profile status fails.
+  }
+  res.json(result);
 });
 
 apiRoutes.get("/ssh/session-password", (_req, res) => {
