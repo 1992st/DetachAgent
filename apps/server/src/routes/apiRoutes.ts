@@ -24,6 +24,7 @@ import { sshCredentialSessionService } from "../services/ssh/sshCredentialSessio
 import { localTerminalAppService } from "../services/terminal/localTerminalAppService.js";
 import { resolveDirectGatewayUrl } from "../services/gateway/gatewayClient.js";
 import { platformService } from "../services/platform/platformService.js";
+import { buildLocalMachineContext } from "../services/platform/localMachineContext.js";
 import { cloudPromptLogService } from "../services/gateway/cloudPromptLogService.js";
 import { interactionBrokerService } from "../services/interactions/interactionBrokerService.js";
 
@@ -923,10 +924,12 @@ apiRoutes.post("/interactions/events/gateway", async (req, res) => {
 apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
   const config = await runtimeConfig();
   const bridgeBaseUrl = reverseBridgeBaseUrl(config);
+  const localMachine = buildLocalMachineContext();
   res.json({
     ok: true,
     app: "detaches_agent",
     protocolVersion: 1,
+    localMachine,
     gatewayEventEndpoint: `${bridgeBaseUrl}/api/tools/events/gateway`,
     interactionEventEndpoint: `${bridgeBaseUrl}/api/interactions/events/gateway`,
     eventSource: "gateway-event",

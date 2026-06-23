@@ -11,6 +11,17 @@ export interface DetachesToolCapability {
   executionHost: "user-local-machine" | "remote-agent-host" | "gateway";
 }
 
+export interface DetachesLocalMachineContext {
+  os: "darwin" | "linux" | "win32" | "ios" | "unknown";
+  nodePlatform: string;
+  arch: string;
+  shell: string;
+  pathStyle: "windows" | "posix" | "unknown";
+  pathSeparator: string;
+  commandDialect: "powershell" | "posix-shell" | "unknown";
+  appDataDir: string;
+}
+
 export interface DetachesStagedFileContext {
   fileId: string;
   name: string;
@@ -41,6 +52,7 @@ export interface DetachesSessionContext {
     displayName: string;
     sessionNamespace: string;
   };
+  localMachine?: DetachesLocalMachineContext;
   adapterStatus?: {
     remoteAgentHost: {
       state: OpenClawAdapterReadinessState | "unknown";
@@ -70,6 +82,12 @@ export interface DetachesSessionContext {
     fixedPort: number;
     submitTokenHeader: "Authorization";
     addressSource: "remote-reachable-context";
+    reverseBridge: {
+      ok: boolean;
+      message: string;
+      reverseBrokerUrl?: string;
+      pid?: number;
+    };
     note: string;
   };
   contextExport?: {

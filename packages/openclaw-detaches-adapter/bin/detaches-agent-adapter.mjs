@@ -153,8 +153,10 @@ function inspectContext(context) {
     sessionKey: context?.sessionKey,
     agentId: context?.agentId ?? null,
     userDevice: context?.userDevice ?? null,
+    localMachine: context?.localMachine ?? null,
     adapterStatus: adapterStatus ?? null,
     broker: context?.broker ?? null,
+    localControl: context?.localControl ?? null,
     contextExport: context?.contextExport ?? null,
     files: {
       staged: stagedFiles
@@ -197,10 +199,19 @@ function doctorContext(context) {
     && !fileCapability?.unavailableTargets?.includes("local-user-machine");
   const mainAgentSaveRequestable = mainAgentSaveCapability?.supportedTargets?.includes("main-agent-machine")
     && !mainAgentSaveCapability?.unavailableTargets?.includes("main-agent-machine");
+  const localMachine = inspection.localMachine;
+  const reverseBridgeOk = inspection.localControl?.reverseBridge?.ok !== false;
+  const commandDialect = localMachine?.commandDialect || "the user's local OS shell";
+  const pathStyle = localMachine?.pathStyle || "the user's local OS";
   const cli = adapterCliPathHint();
   const nextActions = [
     "Treat this as a detaches_agent mediated session, not plain webchat.",
     "Use the supported target list from this context; do not invent or fallback targets.",
+    `The user's local machine is ${localMachine?.os || "unknown"}; local-user-machine commands must use ${commandDialect} syntax and ${pathStyle} paths.`,
+    localMachineCommandRule(localMachine),
+    reverseBridgeOk
+      ? "Use broker/localControl URLs only when they are reachable from this Host/Main Agent machine."
+      : "The context says the SSH reverse bridge is not ready. Do not POST to broker/localControl URLs and do not run local-user-machine commands in this Host/Main Agent shell; emit exactly one fenced detaches-terminal request block instead.",
     "If the context export URL or broker endpoint is unreachable, report that detaches_agent must bring up its SSH reverse bridge; do not ask the user to run ssh -R manually.",
     "To control the user's local machine, submit a detaches-terminal request for target local-user-machine; do not SSH into the user's machine and do not ask for local SSH credentials.",
     "local-user-machine terminal requests are executed by detaches_agent's local terminal after user approval; this path does not need an SSH password.",
@@ -291,6 +302,7 @@ function doctorContext(context) {
       agentId: inspection.agentId,
       userDevice: inspection.userDevice
     },
+    localMachine: inspection.localMachine,
     preferredRequestFormat: preferredFormat,
     broker: {
       endpoint: brokerEndpoint ?? null,
@@ -309,6 +321,19 @@ function doctorContext(context) {
     nextActions,
     commands
   };
+}
+
+function localMachineCommandRule(localMachine) {
+  switch (localMachine?.os) {
+    case "win32":
+      return "For target local-user-machine, use Windows commands for the user's local machine: PowerShell/cmd-compatible syntax and Windows paths. Do not use macOS/Linux local commands such as open, defaults, plutil, /Applications, /Library, ~/Library, or /tmp.";
+    case "darwin":
+      return "For target local-user-machine, use macOS commands for the user's local machine: POSIX shell syntax and POSIX paths. Do not use Windows-only commands or paths unless the target is explicitly Windows.";
+    case "linux":
+      return "For target local-user-machine, use Linux commands for the user's local machine: POSIX shell syntax and POSIX paths. Do not use macOS-only or Windows-only commands unless the target is explicitly that system.";
+    default:
+      return "For target local-user-machine, use the local OS shown by localMachine, not assumptions from the Host/Main Agent OS. If the OS is unknown, ask before using OS-specific commands.";
+  }
 }
 
 function requireOption(args, name) {

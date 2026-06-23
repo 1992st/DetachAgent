@@ -83,6 +83,8 @@ assert.equal(parsedInspection.broker.requestFormats.includes("broker-event"), tr
 assert.equal(parsedInspection.contextExport.oneTime, true);
 assert.equal(parsedInspection.contextExport.adapterCommand, "context-fetch");
 assert.equal(parsedInspection.contextExport.doctorCommand, "doctor");
+assert.equal(parsedInspection.localMachine.os, "win32");
+assert.equal(parsedInspection.localMachine.commandDialect, "powershell");
 assert.deepEqual(parsedInspection.targetSupport["local-user-machine"].supportedBy, ["terminal", "file-transfer"]);
 assert.equal(parsedInspection.targetSupport["local-user-machine"].requestable, true);
 assert.deepEqual(parsedInspection.targetSupport["remote-agent-host"].unavailableBy, ["terminal", "file-transfer"]);
@@ -105,6 +107,7 @@ const parsedDoctor = JSON.parse(doctor.stdout);
 assert.equal(parsedDoctor.ok, true);
 assert.equal(parsedDoctor.mode, "detaches-agent-doctor");
 assert.equal(parsedDoctor.session.sessionKey, "agent:audio-process:main");
+assert.equal(parsedDoctor.localMachine.os, "win32");
 assert.equal(parsedDoctor.preferredRequestFormat, "broker-event");
 assert.equal(parsedDoctor.broker.endpoint, "http://127.0.0.1:38888/api/tools/events/gateway");
 assert.equal(parsedDoctor.broker.interactionEndpoint, "http://127.0.0.1:38888/api/interactions/events/gateway");
@@ -120,6 +123,7 @@ assert.match(parsedDoctor.commands.fileTransferBrokerEvent, /file-transfer-reque
 assert.match(parsedDoctor.commands.credentialRequest, /credential-request/);
 assert.match(parsedDoctor.commands.credentialRequest, /--timeout-ms 300000/);
 assert.equal(parsedDoctor.nextActions.some((action) => /detaches_agent mediated/.test(action)), true);
+assert.equal(parsedDoctor.nextActions.some((action) => /PowerShell/.test(action)), true);
 
 const contextFetchServer = http.createServer((_req, res) => {
   res.setHeader("Content-Type", "application/json");

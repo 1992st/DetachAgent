@@ -119,10 +119,51 @@ async function buildOutboundMessage(
   attachmentContextOverride?: string
 ): Promise<string> {
   const blocks = [message];
-  const attachmentContext = await buildAttachmentContext(attachments, attachmentContextOverride);
+  const attachmentContext = await buildCleanAttachmentContext(attachments, attachmentContextOverride);
   if (attachmentContext) blocks.push("", attachmentContext);
   blocks.push("", renderDetachesSessionContext(detachesContext));
   return blocks.join("\n");
+}
+
+async function buildCleanAttachmentContext(attachments?: UploadedFileRef[], override?: string): Promise<string | null> {
+  const cleanedOverride = override?.trim();
+  if (cleanedOverride) return cleanedOverride;
+  if (!attachments?.length) return null;
+  return [
+    "[[DETACH_AGENT_FILE_STAGED]]",
+    "The user added file(s) in detaches_agent. These files currently exist only in detaches_agent local staging, not on the Host/Main Agent machine.",
+    "",
+    `fileCount: ${attachments.length}`,
+    "",
+    ...attachments.flatMap((file, index) => [
+      `${index + 1}. ${file.displayName || file.name}`,
+      `   fileId: ${file.id}`,
+      `   displayName: ${file.displayName || file.name}`,
+      `   size: ${file.size}`,
+      `   mimeType: ${file.mimeType || "application/octet-stream"}`,
+      `   sourceLocalPath: ${file.localPath || "not exposed"}`,
+      "   currentLocation: user-local-machine detaches_agent staging",
+      "   remotePath: not uploaded",
+      "   role: primary user input; confirm intended use before choosing a destination",
+      ""
+    ]),
+    "If the user explicitly asks to save a staged file to the Main Agent machine, create exactly one main-agent-save-file request.",
+    "destination.path must be chosen by the Main Agent according to its own rules and must be a complete absolute POSIX target file path: directory plus final filename and extension.",
+    "destination.path cannot be a directory and cannot stop at generic folders such as screenshots/, docs/, or _staging/. If you only know a directory, derive a concrete filename from displayName first.",
+    "destination.user and destination.path are the core required fields. destination.user is the remote SSH/Linux user, for example aispeech.",
+    "destination.host/port may be omitted; detaches_agent fills them from the current Main Agent SSH/Gateway settings.",
+    "Do not put placeholders or example values in destination.user/host/port. If destination.user is unknown, say the save request cannot be created yet.",
+    "Do not assume the Main Agent can read sourceLocalPath directly. That path exists only on the detaches_agent local machine and can only be used as the transfer source by detaches_agent.",
+    "Do not start an HTTP upload server or invent a curl/http-upload method. main-agent-save-file supports only rsync or scp.",
+    "Do not generate ssh/rsync/scp/curl commands and do not ask the user to run transfer commands in a terminal. Generate only the structured main-agent-save-file JSON request.",
+    "detaches_agent only transfers the staged file to destination.path. It does not create remote directories, validate the remote file afterward, or organize the Main Agent filesystem.",
+    "The request must be exactly one fenced code block:",
+    "```main-agent-save-file",
+    "{\"fileId\":\"file id listed above\",\"sourceLocalPath\":\"sourceLocalPath listed above\",\"displayName\":\"original filename\",\"size\":12345,\"destination\":{\"user\":\"aispeech\",\"path\":\"/absolute/path/to/final-filename.ext\"},\"methodPreference\":\"rsync\",\"reason\":\"why this file should be saved to the Main Agent machine and why this destination path is correct\"}",
+    "```",
+    "After user approval, detaches_agent broker performs the structured rsync/scp transfer. If SSH needs a password, detaches_agent UI shows a one-time password input.",
+    "Before approval, do not pretend to have read the file. If transfer fails, report only the approved detaches_agent tool result and do not invent alternative transfer methods."
+  ].join("\n").trimEnd();
 }
 
 async function buildAttachmentContext(attachments?: UploadedFileRef[], override?: string): Promise<string | null> {

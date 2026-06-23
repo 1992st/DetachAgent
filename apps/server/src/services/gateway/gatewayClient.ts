@@ -329,6 +329,8 @@ export class GatewayClient extends EventEmitter {
     if (config.authMode === "password" && config.authPassword) auth.password = config.authPassword;
     const role = "operator";
     const scopes = ["operator.admin", "operator.read", "operator.write", "operator.approvals", "operator.pairing"];
+    // Gateway allow-lists this legacy client id. The real local OS is exposed
+    // through platform plus detaches localMachine context, not inferred here.
     const clientId = "openclaw-macos";
     const clientMode = "ui";
     const platform = platformService.currentNodePlatform();

@@ -6,6 +6,8 @@ import { loadOrCreateDeviceIdentity } from "./gateway/deviceIdentityService.js";
 import { openclawDetachesAdapterService } from "./adapters/openclawDetachesAdapterService.js";
 import { brokerTokenService } from "./tools/brokerTokenService.js";
 import { contextExportService } from "./context/contextExportService.js";
+import { buildLocalMachineContext } from "./platform/localMachineContext.js";
+import { sshTunnelService } from "./tunnel/sshTunnelService.js";
 
 function deviceShortId(deviceId: string): string {
   return deviceId.replace(/[^a-z0-9]/gi, "").slice(0, 12).toLowerCase() || "local";
@@ -38,15 +40,12 @@ export async function buildDetachesSessionContext(
   const remoteAdapter = openclawDetachesAdapterService.lastRemoteReadiness();
   const config = await runtimeConfig();
   const baseUrl = reverseBridgeBaseUrl(config);
-  const remoteUser = config.remoteUser || "remote-user";
-  const remoteHome = remoteUser === "root" ? "/root" : `/home/${remoteUser}`;
-  const remoteWorkspace = config.remoteWorkspaceRoot.startsWith("/")
-    ? config.remoteWorkspaceRoot
-    : `${remoteHome}/${config.remoteWorkspaceRoot.replace(/^~\/?/, "").replace(/^\/+/, "")}`;
+  const localMachine = buildLocalMachineContext();
+  const reverseBridgeStatus = await sshTunnelService.status();
   const contextExportRecord = options.createContextExport
     ? contextExportService.create({ sessionKey, sessionMode, attachments })
     : null;
-    const stagedFiles: DetachesStagedFileContext[] = attachments.map((file) => ({
+  const stagedFiles: DetachesStagedFileContext[] = attachments.map((file) => ({
     fileId: file.id,
     name: file.name,
     displayName: file.displayName || file.name,
@@ -60,9 +59,10 @@ export async function buildDetachesSessionContext(
       supportedTargets: ["remote-agent-host", "local-user-machine", "main-agent-machine"],
       defaultTarget: "main-agent-machine" as const,
       requiresApproval: true,
-      remotePathRule: `For target=main-agent-machine, use a main-agent-save-file request. sourceLocalPath must be this staged localPath. destination.user must be the Host/Main Agent SSH/Linux user chosen by the Main Agent, and destination.path must be a complete absolute file path chosen by the Main Agent according to Host/Main Agent rules. destination.host/port may be omitted; detaches_agent broker fills them from its current Main Agent SSH/Gateway settings. After user approval, detaches_agent broker executes one structured rsync/scp transfer; any SSH password is entered in the detaches_agent UI and is not saved. Do not generate terminal commands or alternative upload methods.`
+      remotePathRule: "For target=main-agent-machine, use one main-agent-save-file request. sourceLocalPath is an absolute path on the detaches_agent local machine, not on the Host/Main Agent machine. destination.user must be the Host/Main Agent SSH/Linux user chosen by the Main Agent, and destination.path must be a complete absolute POSIX file path including the final filename. destination.host/port may be omitted; detaches_agent fills them from the current Main Agent SSH/Gateway settings. After user approval, detaches_agent executes one structured rsync/scp transfer; any SSH password is entered in the detaches_agent UI and is not saved. Do not generate terminal commands or alternative upload methods."
     }
   }));
+
   return {
     app: "detaches_agent",
     version: 1,
@@ -70,6 +70,7 @@ export async function buildDetachesSessionContext(
     sessionKey,
     agentId: agentId || undefined,
     userDevice: identity,
+    localMachine,
     adapterStatus: {
       remoteAgentHost: {
         state: remoteAdapter?.state ?? "unknown",
@@ -101,7 +102,15 @@ export async function buildDetachesSessionContext(
       fixedPort: config.reverseBridgeRemotePort,
       submitTokenHeader: "Authorization",
       addressSource: "remote-reachable-context",
-      note: "This URL is the detaches_agent server address reachable from the Host/Main Agent machine. The adapter script runs on the Host/Main Agent machine and must use this context-provided URL, not 127.0.0.1."
+      reverseBridge: {
+        ok: reverseBridgeStatus.ok,
+        message: reverseBridgeStatus.message,
+        reverseBrokerUrl: reverseBridgeStatus.reverseBrokerUrl,
+        pid: reverseBridgeStatus.pid
+      },
+      note: reverseBridgeStatus.ok
+        ? "This URL is the detaches_agent server address reachable from the Host/Main Agent machine through the active SSH reverse bridge. The adapter script runs on the Host/Main Agent machine and must use this context-provided URL, not 127.0.0.1."
+        : "The SSH reverse bridge is not ready, so this URL is not currently reachable from the Host/Main Agent machine. Use fenced detaches-terminal fallback for local-user-machine requests until the user fixes Network Test / SSH reverse bridge."
     },
     contextExport: {
       createEndpoint: `${baseUrl}/api/context/exports`,
@@ -117,7 +126,9 @@ export async function buildDetachesSessionContext(
       doctorCommand: "doctor",
       generatedForMessage: Boolean(contextExportRecord),
       note: contextExportRecord
-        ? "A one-time context URL was generated for this message. It is reachable from the remote agent host through the SSH reverse bridge when that bridge is ready and must be treated as sensitive."
+        ? reverseBridgeStatus.ok
+          ? "A one-time context URL was generated for this message. It is reachable from the remote agent host through the active SSH reverse bridge and must be treated as sensitive."
+          : "A one-time context URL was generated for this message, but the SSH reverse bridge is not ready, so it is not currently reachable from the remote agent host. Use fenced detaches-terminal fallback for local-user-machine requests."
         : "Ask the user to generate a one-time context URL in the detaches_agent Adapter panel when the remote agent host needs a fresh full clientContext. Do not invent or request broker tokens in chat."
     },
     capabilities: [
@@ -148,6 +159,7 @@ export async function buildDetachesSessionContext(
     ],
     invariants: [
       "This conversation is mediated by detaches_agent, not plain webchat.",
+      `The user's local machine is ${localMachine.os}; local-user-machine terminal commands must use ${localMachine.commandDialect} syntax and ${localMachine.pathStyle} paths.`,
       "The bound terminal runs on the user's local machine and is hidden unless the user opens it.",
       "Tools are never executed by assistant text alone; every tool request must use an approved fenced request block.",
       "Do not claim a file was read, transferred, downloaded, archived, or modified until the approved tool execution output proves it.",
@@ -200,47 +212,91 @@ export async function buildChatClientContext(
 export function renderDetachesSessionContext(context: DetachesSessionContext): string {
   const remoteAdapter = context.adapterStatus?.remoteAgentHost;
   const consumeUrl = context.contextExport?.consumeUrl;
+  const localMachine = context.localMachine;
   return [
-    "[detaches_agent 接入上下文]",
-    "你正在通过 detaches_agent 本地 UI 与用户对话，不是普通 webchat。",
+    "[detaches_agent context]",
+    "You are talking to the user through the detaches_agent local UI, not plain webchat.",
     `sessionKey: ${context.sessionKey}`,
     context.agentId ? `agentId: ${context.agentId}` : "agentId: unknown",
     `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
+    `localMachine.os: ${localMachine?.os || "unknown"}`,
+    `localMachine.nodePlatform: ${localMachine?.nodePlatform || "unknown"}`,
+    `localMachine.shell: ${localMachine?.shell || "unknown"}`,
+    `localMachine.commandDialect: ${localMachine?.commandDialect || "unknown"}`,
+    `localMachine.pathStyle: ${localMachine?.pathStyle || "unknown"}`,
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}`,
     consumeUrl ? `contextExport.consumeUrl: ${consumeUrl}` : "contextExport.consumeUrl: unavailable",
     `localControl.baseUrl: ${context.localControl?.baseUrl || "unavailable"}`,
     `localControl.interactionEventEndpoint: ${context.localControl?.interactionEventEndpoint || "unavailable"}`,
-    "通道选择：1) 普通用户本机命令使用 detaches-terminal 或 broker terminal 请求；2) 需要密码/secret 时才使用 credential-request interaction；3) context/broker 直连使用 localControl/broker 提供的 URL。",
-    "main agent 侧脚本运行在 main agent 的 PC/主机上；连接 detaches_agent server 时必须使用 localControl/broker 里提供的远端可达 URL，不要猜测或替换为 main agent 自己的 127.0.0.1。",
-    "本机 terminal 控制不走 SSH，不询问用户本机 SSH 用户名/密码/端口；用户只审批 tool request，普通 terminal 操作不得触发密码弹窗。",
-    "SSH 只用于 reverse bridge 可达性、保存 staged 文件到 Main Agent 机器、或用户明确批准的 SSH 登录/凭据请求。",
-    "若远端已安装 detaches-agent skill，并且 contextExport.consumeUrl 可用，请在真实 Host/Main Agent machine 上运行 `node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --url \"$CONSUME_URL\" --output-context /tmp/detaches-client-context.json`；如果已经保存 context，则运行 `doctor --context <context-json>`。",
-    "工具请求必须经过 detaches_agent 审批；不要声称命令、文件读取、传输或归档已完成，除非已收到 approved tool output。",
-    "不要把 remote-agent-host/gateway-managed 请求退化成本机 local-user-machine。"
+    `localControl.reverseBridge.ok: ${context.localControl?.reverseBridge.ok ?? false}`,
+    `localControl.reverseBridge.message: ${context.localControl?.reverseBridge.message || "unknown"}`,
+    channelChoiceRule(context),
+    localMachineCommandRule(localMachine),
+    reverseBridgeRule(context),
+    "Local terminal control does not use SSH. Do not ask for the user's local SSH username/password/port. The user only approves the tool request; ordinary local terminal commands must not trigger an SSH password dialog.",
+    "SSH is used only for reverse bridge reachability, saving staged files to the Main Agent machine, or a user-approved SSH credential/login request.",
+    "If the remote side has the detaches-agent skill and contextExport.consumeUrl is available, run this only on the real Host/Main Agent machine: `node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --url \"$CONSUME_URL\" --output-context /tmp/detaches-client-context.json`; if context is already saved, run `doctor --context <context-json>`.",
+    "Every tool request must be approved through detaches_agent. Do not claim that a command, file read, transfer, download, archive, or modification is complete until approved tool output proves it.",
+    "Do not degrade remote-agent-host, gateway-managed, or main-agent-machine requests into local-user-machine."
   ].join("\n");
 }
 
 export function renderDetachesClientContextFallback(context: DetachesSessionContext): string {
   const consumeUrl = context.contextExport?.consumeUrl;
   const remoteAdapter = context.adapterStatus?.remoteAgentHost;
+  const localMachine = context.localMachine;
   return [
-    "[detaches_agent 兼容上下文]",
-    "本条消息的结构化 clientContext.detaches 无法被当前宿主/Gateway 接收或已被判定不支持；detaches_agent 已把可恢复入口降级为这段可见文本。",
-    "如果上方 [detaches_agent 接入上下文] 提到 clientContext.detaches，请以本兼容上下文为准：当前 agent 侧不应假设能直接读取 chat.send.clientContext.detaches。",
+    "[detaches_agent compatibility context]",
+    "Structured clientContext.detaches was not accepted by the current host/Gateway, so detaches_agent included this readable fallback context. Treat it as authoritative for detaches_agent routing.",
     `sessionKey: ${context.sessionKey}`,
     context.agentId ? `agentId: ${context.agentId}` : "agentId: unknown",
     `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
+    `localMachine.os: ${localMachine?.os || "unknown"}`,
+    `localMachine.nodePlatform: ${localMachine?.nodePlatform || "unknown"}`,
+    `localMachine.shell: ${localMachine?.shell || "unknown"}`,
+    `localMachine.commandDialect: ${localMachine?.commandDialect || "unknown"}`,
+    `localMachine.pathStyle: ${localMachine?.pathStyle || "unknown"}`,
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}`,
     consumeUrl ? `contextExport.consumeUrl: ${consumeUrl}` : "contextExport.consumeUrl: unavailable",
     `localControl.baseUrl: ${context.localControl?.baseUrl || "unavailable"}`,
-    "本机普通命令输出 detaches-terminal 请求即可；需要密码/secret 时才使用 credential-request；脚本/API 必须连接 localControl/broker 提供的 detaches_agent 可达地址，不要把 main agent 自己的 127.0.0.1 当作用户本机 server。",
-    "本机 terminal 不走 SSH；不要询问用户本机 SSH 用户名/密码/端口，也不要要求用户手动运行 ssh -R、scp、复制 broker token 或寻找本机 IP。",
-    "如果 consumeUrl 暂时不可访问，应说明 broker/context 直连暂不可用；fenced detaches-terminal fallback 仍可用。",
-    "如果需要 broker-event 或完整机器可读上下文，请只在真实 Host/Main Agent machine 上运行：",
+    `localControl.reverseBridge.ok: ${context.localControl?.reverseBridge.ok ?? false}`,
+    `localControl.reverseBridge.message: ${context.localControl?.reverseBridge.message || "unknown"}`,
+    channelChoiceRule(context),
+    localMachineCommandRule(localMachine),
+    "The local terminal path does not use SSH. Do not ask for the user's local SSH username/password/port, and do not ask the user to manually run ssh -R, scp, copy broker tokens, or find a local IP.",
+    "If consumeUrl or localControl/broker URLs are unreachable, say broker/context direct access is unavailable; fenced detaches-terminal fallback is still available.",
+    "If broker-event or full machine-readable context is needed, run this only on the real Host/Main Agent machine:",
     "node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --url \"$CONSUME_URL\" --output-context /tmp/detaches-client-context.json",
-    "如果 contextExport.consumeUrl 是 unavailable，请向用户说明当前消息没有可消费的完整上下文入口，而不是编造 broker token 或要求读取 chat.send.clientContext.detaches。",
-    "工具请求仍必须经过 detaches_agent UI 审批；不要声称命令、文件读取、传输或归档已完成，除非已收到 approved tool output。"
+    "If contextExport.consumeUrl is unavailable, tell the user this message has no consumable full-context entry; do not invent broker tokens or ask to read chat.send.clientContext.detaches.",
+    "Tool requests still require detaches_agent UI approval. Do not claim that a command, file read, transfer, download, archive, or modification is complete until approved tool output proves it."
   ].join("\n");
+}
+
+function localMachineCommandRule(localMachine: DetachesSessionContext["localMachine"]): string {
+  switch (localMachine?.os) {
+    case "win32":
+      return "For target=local-user-machine, write Windows commands for the user's local machine: use PowerShell/cmd-compatible syntax and Windows paths such as C:\\Users\\name\\file.txt. Do not use macOS/Linux local commands like open, defaults, plutil, /Applications, /Library, ~/Library, or /tmp unless the user explicitly asks for a remote POSIX target.";
+    case "darwin":
+      return "For target=local-user-machine, write macOS commands for the user's local machine: use POSIX shell syntax and POSIX paths. Do not use Windows-only commands or paths such as powershell.exe, cmd.exe, C:\\Users\\name, or backslash-separated paths unless the target is explicitly Windows.";
+    case "linux":
+      return "For target=local-user-machine, write Linux commands for the user's local machine: use POSIX shell syntax and POSIX paths. Do not use macOS-only commands such as open/defaults/plutil or Windows-only commands/paths unless the user explicitly targets those systems.";
+    default:
+      return `For target=local-user-machine, write commands for the user's detected local OS, command dialect, and path style shown above (${localMachine?.commandDialect || "unknown"} / ${localMachine?.pathStyle || "unknown"}). If the OS is unknown, prefer portable checks or ask for clarification before using OS-specific commands.`;
+  }
+}
+
+function channelChoiceRule(context: DetachesSessionContext): string {
+  if (context.localControl?.reverseBridge.ok) {
+    return "Channel choice: (1) ordinary commands on the user's local machine use detaches-terminal or a broker terminal request; (2) use credential-request only when a real secret is needed; (3) scripts/API calls may use the reachable localControl/broker URL supplied by this context.";
+  }
+  return "Channel choice: localControl/broker URLs are not reachable from the Host/Main Agent because the SSH reverse bridge is not ready. For ordinary local-user-machine commands, output exactly one fenced detaches-terminal request block in chat and wait for detaches_agent approval/output; do not run the command in the Host/Main Agent shell, do not use host=node, and do not POST to broker URLs.";
+}
+
+function reverseBridgeRule(context: DetachesSessionContext): string {
+  if (context.localControl?.reverseBridge.ok) {
+    return "The Host/Main Agent script runs on the Host/Main Agent machine. When it connects back to detaches_agent, it must use the context-provided localControl/broker URL; do not guess or replace it with the Host/Main Agent's own 127.0.0.1.";
+  }
+  return "The Host/Main Agent script runs on the Host/Main Agent machine, but the SSH reverse bridge is not ready. Do not treat localControl.baseUrl or contextExport.consumeUrl as reachable from that machine, and do not try to execute local-user-machine commands in the Host/Main Agent shell. Use fenced detaches-terminal fallback.";
 }
 
 function agentIdFromSessionKey(sessionKey: string): string {

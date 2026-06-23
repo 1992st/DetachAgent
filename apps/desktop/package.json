@@ -6,7 +6,7 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
-    "dev": "DETACHES_DESKTOP_DEV=1 electron .",
+    "dev": "node scripts/dev.mjs",
     "stage:runtime": "node scripts/stage-runtime.mjs",
     "package:win": "pnpm --dir ../.. build && pnpm build && pnpm stage:runtime && electron-builder --win nsis --x64"
   },

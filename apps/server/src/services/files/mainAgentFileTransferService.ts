@@ -310,6 +310,7 @@ class MainAgentFileTransferService {
       }
       transfer.pty = pty;
       let settled = false;
+      let passwordPromptHandled = false;
       const finish = (code: number) => {
         if (settled) return;
         settled = true;
@@ -325,6 +326,8 @@ class MainAgentFileTransferService {
         }
         if (/password:\s*$/i.test(stripAnsi(transfer.outputTail)) || /password:/i.test(data)) {
           if (!options.allowPasswordPrompt) return;
+          if (passwordPromptHandled || transfer.passwordResolver) return;
+          passwordPromptHandled = true;
           this.requestPassword(transfer, pty);
         }
       });
@@ -546,7 +549,10 @@ function outputTailMessage(transfer: TransferRecord): string {
 }
 
 function remoteFileSpec(transfer: TransferRecord): string {
-  return `${transfer.destination.user}@${transfer.destination.host}:${shellQuote(transfer.destination.path)}`;
+  const remotePath = platformService.currentNodePlatform() === "win32"
+    ? transfer.destination.path
+    : shellQuote(transfer.destination.path);
+  return `${transfer.destination.user}@${transfer.destination.host}:${remotePath}`;
 }
 
 function isPtyUnavailable(outputTail: string): boolean {

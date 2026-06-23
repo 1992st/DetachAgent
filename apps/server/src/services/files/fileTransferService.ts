@@ -4,9 +4,10 @@ import { nanoid } from "nanoid";
 import SftpClient from "ssh2-sftp-client";
 import type { FileTransferPrepareResponse, ToolTarget, UploadedFileRef } from "@detaches/shared";
 import { appConfig, publicServerBaseUrl, reverseBridgeBaseUrl } from "../../config/appConfig.js";
-import { runtimeConfig } from "../../config/settingsStore.js";
+import { runtimeConfig, type RuntimeSettings } from "../../config/settingsStore.js";
 import { gatewayClient } from "../gateway/gatewayClient.js";
 import { platformService } from "../platform/platformService.js";
+import { sshCredentialSessionService } from "../ssh/sshCredentialSessionService.js";
 
 function normalizeRemotePath(remotePath: string, remoteHome: string): string {
   return platformService.normalizeRemotePosixPath(remotePath, remoteHome);
@@ -343,13 +344,7 @@ export class FileTransferService {
     }
     const name = sanitizeFileName(path.posix.basename(normalizedRemotePath));
     const localPath = path.join(appConfig.storageDir, "downloads", `${nanoid()}-${name}`);
-    const sftp = new SftpClient();
-    await sftp.connect({
-      host: config.remoteHost,
-      port: config.remoteSshPort,
-      username: config.remoteUser,
-      privateKey: config.remoteIdentityPath ? await fs.readFile(config.remoteIdentityPath) : undefined
-    });
+    const sftp = await connectSftpWithCredentials(config, "SSH password required to download the remote file.");
     try {
       await sftp.fastGet(normalizedRemotePath, localPath);
       return { localPath, name };
@@ -373,13 +368,7 @@ export class FileTransferService {
   private async remoteHome(): Promise<string> {
     const config = await runtimeConfig();
     if (!config.remoteUser) return `/home/${config.remoteUser || ""}`;
-    const sftp = new SftpClient();
-    await sftp.connect({
-      host: config.remoteHost,
-      port: config.remoteSshPort,
-      username: config.remoteUser,
-      privateKey: config.remoteIdentityPath ? await fs.readFile(config.remoteIdentityPath) : undefined
-    });
+    const sftp = await connectSftpWithCredentials(config, "SSH password required to inspect the remote home directory.");
     try {
       return path.posix.normalize(await sftp.realPath("."));
     } finally {
@@ -493,6 +482,53 @@ function remoteHomeCandidatesForUser(remoteUser: string): string[] {
   const user = remoteUser.trim();
   if (!user) return [];
   return [`/Users/${user}`, `/home/${user}`].map((item) => path.posix.normalize(item));
+}
+
+async function connectSftpWithCredentials(config: RuntimeSettings, passwordPrompt: string): Promise<SftpClient> {
+  const target = sshCredentialSessionService.targetFromConfig(config);
+  const privateKey = config.remoteIdentityPath ? await fs.readFile(config.remoteIdentityPath) : undefined;
+  let password = target ? sshCredentialSessionService.getPassword(target) : null;
+  if (!privateKey && target && !password) {
+    password = await sshCredentialSessionService.requestPassword(target, { message: passwordPrompt });
+  }
+
+  try {
+    const sftp = await connectSftp(config, { privateKey, password });
+    if (target && password) sshCredentialSessionService.markReady(target, "SSH password is ready for this app session.");
+    return sftp;
+  } catch (error) {
+    if (!target || !isSshAuthFailure(error)) throw error;
+    if (password) sshCredentialSessionService.markFailed(target, error instanceof Error ? error.message : String(error), { clearPassword: true });
+    const nextPassword = await sshCredentialSessionService.requestPassword(target, { force: Boolean(password), message: passwordPrompt });
+    const sftp = await connectSftp(config, { privateKey, password: nextPassword });
+    sshCredentialSessionService.markReady(target, "SSH password is ready for this app session.");
+    return sftp;
+  }
+}
+
+async function connectSftp(
+  config: RuntimeSettings,
+  auth: { privateKey?: Buffer; password?: string | null }
+): Promise<SftpClient> {
+  const sftp = new SftpClient();
+  try {
+    await sftp.connect({
+      host: config.remoteHost,
+      port: config.remoteSshPort,
+      username: config.remoteUser,
+      privateKey: auth.privateKey,
+      password: auth.password || undefined
+    });
+    return sftp;
+  } catch (error) {
+    await sftp.end().catch(() => undefined);
+    throw error;
+  }
+}
+
+function isSshAuthFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /auth|authentication|permission denied|password|privatekey|all configured authentication methods failed/i.test(message);
 }
 
 function isStagedFileRecord(value: unknown): value is StagedFileRecord {
