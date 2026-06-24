@@ -126,6 +126,38 @@ export async function fetchDiagnostics(): Promise<DiagnosticsResponse> {
   return res.json();
 }
 
+export interface CallbackIpCandidate {
+  host: string;
+  interfaceName: string;
+  family: "IPv4";
+  kind: string;
+  recommended: boolean;
+  hidden: boolean;
+  reason: string;
+  baseUrl: string;
+}
+
+export interface CallbackIpSuggestion {
+  recommendedBaseUrl: string;
+  candidates: CallbackIpCandidate[];
+}
+
+export async function fetchCallbackIps(): Promise<CallbackIpSuggestion> {
+  const res = await fetch(apiUrl("/api/callback/ips"));
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function testCallback(publicBaseUrl: string): Promise<{ ok: boolean; publicBaseUrl: string; checkedAt: string }> {
+  const res = await fetch(apiUrl("/api/callback/test"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ publicBaseUrl })
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
 export async function uploadFile(file: File, sessionKey: string): Promise<FileUploadResponse> {
   const form = new FormData();
   form.append("file", file);

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+
+- Add versioned terminal channel guidance for `gateway-terminal`, `ssh-terminal`, and `chat-terminal`.
+- Document that `gateway-terminal` is the preferred HTTP broker callback path through Detach Agent `publicBaseUrl`.
+- Keep `chat-terminal` fenced block requests as the explicit fallback path and require logs/audit to distinguish `source=text-extract`.
+- Clarify that `ssh-terminal` is an advanced, default-off, key-based reverse bridge path that can coexist with `gateway-terminal`.
+- Align prompt/context and adapter CLI expectations for preferred terminal channel selection and fallback behavior.
+
 ## 1.0.1
 
 - Clarify staged file transfer rules for files added from Detach Agent Web.

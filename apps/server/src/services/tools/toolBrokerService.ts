@@ -22,8 +22,10 @@ import type {
   ToolRiskAssessment,
   ToolExecutionResultResponse,
   ToolTarget,
-  MainAgentFileTransferSnapshot
+  MainAgentFileTransferSnapshot,
+  TerminalChannelName
 } from "@detaches/shared";
+import { DETACH_AGENT_RELATIONSHIP_SKILL_NAME, DETACH_AGENT_RELATIONSHIP_SKILL_VERSION } from "@detaches/shared";
 import { appConfig } from "../../config/appConfig.js";
 import { fileTransferService } from "../files/fileTransferService.js";
 import { mainAgentFileTransferService } from "../files/mainAgentFileTransferService.js";
@@ -32,8 +34,8 @@ import { terminalService } from "../terminal/terminalService.js";
 import { openclawDetachesAdapterService } from "../adapters/openclawDetachesAdapterService.js";
 import { platformService } from "../platform/platformService.js";
 
-const DETACH_AGENT_SKILL_NAME = "detach-agent-relationship";
-const DETACH_AGENT_SKILL_VERSION = "1.0.1";
+const DETACH_AGENT_SKILL_NAME = DETACH_AGENT_RELATIONSHIP_SKILL_NAME;
+const DETACH_AGENT_SKILL_VERSION = DETACH_AGENT_RELATIONSHIP_SKILL_VERSION;
 const DETACH_AGENT_SKILL_ZIP_PATH = platformService.resolvePackagedResourcePath("web", "public", "skills", "detach-agent-relationship.skill.zip")
   ?? path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -43,7 +45,7 @@ const OPENCLAW_GLOBAL_SKILLS_DIR = "~/.openclaw/skills";
 const DETACH_AGENT_LOCAL_SKILL_CACHE_DIR = "~/.detach_agent/skills";
 
 type AuditEvent =
-  | { type: "tool.create"; request: ToolRequestRecord }
+  | { type: "tool.create"; request: ToolRequestRecord; terminalChannel?: "gateway-terminal" | "ssh-terminal" | "chat-terminal"; fallbackMode?: "chat-fenced-block"; preferredChannel?: "gateway-terminal" | "ssh-terminal" | "chat-terminal"; callbackBaseUrl?: string }
   | { type: "tool.ingest"; requestId: string; sourceEventId: string; duplicate: boolean }
   | { type: "tool.approve"; requestId: string; status: ToolRequestStatus; command?: string; terminalId?: string; executionId?: string; riskAccepted?: boolean; actor?: ToolDecisionActor; error?: string }
   | { type: "tool.result.forward"; requestId: string; executionId: string; status: ToolResultForwardStatus; ok: boolean; error?: string }
@@ -131,6 +133,7 @@ class ToolBrokerService {
         source: "text-extract",
         sourceMessageId: input.sourceMessageId,
         sourceRunId: input.sourceRunId,
+        metadata: item.metadata,
         payload: item.payload
       }));
     }
@@ -160,7 +163,14 @@ class ToolBrokerService {
     };
     this.requests.set(record.id, record);
     await this.save();
-    await this.audit({ type: "tool.create", request: record });
+    await this.audit({
+      type: "tool.create",
+      request: record,
+      terminalChannel: terminalChannelFor(record),
+      fallbackMode: record.metadata?.fallbackMode ?? (record.kind === "terminal" && record.source === "text-extract" ? "chat-fenced-block" : undefined),
+      preferredChannel: record.metadata?.preferredChannel,
+      callbackBaseUrl: record.metadata?.callbackBaseUrl
+    });
     this.emit("created", record);
     return record;
   }
@@ -856,10 +866,21 @@ class ToolBrokerService {
 
 export const toolBrokerService = new ToolBrokerService();
 
+function terminalChannelFor(request: Pick<ToolRequestRecord, "kind" | "source" | "metadata">): "gateway-terminal" | "ssh-terminal" | "chat-terminal" | undefined {
+  if (request.kind !== "terminal") return undefined;
+  if (request.metadata?.terminalChannel) return request.metadata.terminalChannel;
+  // source=text-extract 表示 chat-terminal：Main Agent 在聊天正文里输出 fenced block，由 Detach Agent 解析出来。
+  if (request.source === "text-extract") return "chat-terminal";
+  // source=gateway-event 表示 HTTP broker 路径；新版本会在 metadata 里说明是 gateway-terminal 还是 ssh-terminal。
+  if (request.source === "gateway-event") return "gateway-terminal";
+  return undefined;
+}
+
 interface ParsedToolRequest {
   kind: ToolRequestKind;
   target: ToolTarget;
   reason?: string;
+  metadata?: ToolRequestCreateInput["metadata"];
   payload: Record<string, unknown>;
 }
 
@@ -1034,22 +1055,41 @@ function keepLastFileTransferPerFile(requests: ParsedToolRequest[]): ParsedToolR
 function parseTerminalCommandBody(body: string): ParsedToolRequest | null {
   if (!body) return null;
   try {
-    const parsed = JSON.parse(body) as { command?: unknown; cmd?: unknown; target?: unknown; reason?: unknown };
-    const command = typeof parsed.command === "string" ? parsed.command : typeof parsed.cmd === "string" ? parsed.cmd : "";
-    if (command.trim()) {
-      return {
-        kind: "terminal",
-        target: parseToolTarget(parsed.target),
-        reason: typeof parsed.reason === "string" ? parsed.reason.trim() : undefined,
-        payload: { command: command.trim() }
-      };
-    }
+      const parsed = JSON.parse(body) as { command?: unknown; cmd?: unknown; target?: unknown; reason?: unknown; metadata?: unknown };
+      const command = typeof parsed.command === "string" ? parsed.command : typeof parsed.cmd === "string" ? parsed.cmd : "";
+      if (command.trim()) {
+        return {
+          kind: "terminal",
+          target: parseToolTarget(parsed.target),
+          reason: typeof parsed.reason === "string" ? parsed.reason.trim() : undefined,
+          metadata: parseTerminalMetadata(parsed.metadata, "chat-terminal"),
+          payload: { command: command.trim() }
+        };
+      }
   } catch {
     // Plain shell command block.
   }
   const lines = body.split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean);
   const command = lines.join("\n").trim();
   return command ? { kind: "terminal", target: "local-user-machine", payload: { command } } : null;
+}
+
+function parseTerminalChannelName(value: unknown): TerminalChannelName | undefined {
+  return value === "gateway-terminal" || value === "ssh-terminal" || value === "chat-terminal" ? value : undefined;
+}
+
+function parseTerminalMetadata(value: unknown, fallbackChannel?: TerminalChannelName): ToolRequestCreateInput["metadata"] | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return fallbackChannel ? { terminalChannel: fallbackChannel, fallbackMode: "chat-fenced-block" } : undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const metadata: ToolRequestCreateInput["metadata"] = {
+    terminalChannel: parseTerminalChannelName(record.terminalChannel) ?? fallbackChannel,
+    fallbackMode: record.fallbackMode === "chat-fenced-block" || fallbackChannel === "chat-terminal" ? "chat-fenced-block" : undefined,
+    preferredChannel: parseTerminalChannelName(record.preferredChannel),
+    callbackBaseUrl: typeof record.callbackBaseUrl === "string" ? record.callbackBaseUrl.trim().slice(0, 500) : undefined
+  };
+  return metadata.terminalChannel || metadata.fallbackMode || metadata.preferredChannel || metadata.callbackBaseUrl ? metadata : undefined;
 }
 
 function parseToolTarget(value: unknown): ToolTarget {

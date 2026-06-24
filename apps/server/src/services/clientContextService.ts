@@ -1,5 +1,5 @@
 import os from "node:os";
-import type { ChatSessionMode, ClientIdentity, DetachesSessionContext, DetachesStagedFileContext, UploadedFileRef } from "@detaches/shared";
+import type { ChatSessionMode, ClientIdentity, DetachesSessionContext, DetachesStagedFileContext, DetachesTerminalChannels, TerminalChannelName, UploadedFileRef } from "@detaches/shared";
 import { reverseBridgeBaseUrl } from "../config/appConfig.js";
 import { runtimeConfig } from "../config/settingsStore.js";
 import { loadOrCreateDeviceIdentity } from "./gateway/deviceIdentityService.js";
@@ -29,6 +29,80 @@ interface DetachesContextBuildOptions {
   detachesContext?: DetachesSessionContext;
 }
 
+type ReverseBridgeStatus = Awaited<ReturnType<typeof sshTunnelService.status>>;
+
+function cleanBaseUrl(value: string): string {
+  return value.trim().replace(/\/+$/, "");
+}
+
+function channelEndpoints(baseUrl: string): { baseUrl: string; toolEventEndpoint: string; interactionEventEndpoint: string } {
+  return {
+    baseUrl,
+    toolEventEndpoint: `${baseUrl}/api/tools/events/gateway`,
+    interactionEventEndpoint: `${baseUrl}/api/interactions/events/gateway`
+  };
+}
+
+function buildTerminalChannels(config: Awaited<ReturnType<typeof runtimeConfig>>, reverseBridgeStatus: ReverseBridgeStatus): DetachesTerminalChannels {
+  const gatewayBaseUrl = cleanBaseUrl(config.publicBaseUrl);
+  const gatewayConfigured = Boolean(gatewayBaseUrl);
+  const gatewayReady = gatewayConfigured && config.gatewayTerminalLastStatus === "ok";
+  const sshBaseUrl = reverseBridgeBaseUrl(config);
+  const sshReady = config.localSshBridgeEnabled && reverseBridgeStatus.ok;
+  // 三类 terminal 是入口差异，不是三套执行器：最终都进入 Tool Queue，用户审批后才由本机 terminalService 执行。
+  // gateway-terminal 优先；ssh-terminal 是默认关闭的高级兼容入口；chat-terminal 永远保留为文本 fallback。
+  const preferred: TerminalChannelName = gatewayReady ? "gateway-terminal" : sshReady ? "ssh-terminal" : "chat-terminal";
+  const gatewayEndpoints = gatewayReady ? channelEndpoints(gatewayBaseUrl) : null;
+  const sshEndpoints = sshReady ? channelEndpoints(sshBaseUrl) : null;
+  return {
+    preferred,
+    gatewayTerminal: {
+      state: gatewayReady ? "ready" : gatewayConfigured ? "error" : "disabled",
+      ...(gatewayConfigured ? channelEndpoints(gatewayBaseUrl) : gatewayEndpoints),
+      message: gatewayReady
+        ? "gateway-terminal is ready through configured publicBaseUrl."
+        : gatewayConfigured
+          ? config.gatewayTerminalLastError || "gateway-terminal is configured but not tested successfully; chat-terminal fallback remains available."
+          : "gateway-terminal is disabled until publicBaseUrl is configured and tested.",
+      requiresApproval: true
+    },
+    sshTerminal: {
+      state: sshReady ? "ready" : config.localSshBridgeEnabled ? "error" : "disabled",
+      ...sshEndpoints,
+      message: sshReady
+        ? "ssh-terminal is ready through the advanced SSH reverse bridge."
+        : config.localSshBridgeEnabled
+          ? reverseBridgeStatus.message
+          : "ssh-terminal is disabled by default.",
+      requiresApproval: true
+    },
+    chatTerminal: {
+      state: "available",
+      requestFence: "detaches-terminal",
+      source: "text-extract",
+      requiresApproval: true,
+      message: "chat-terminal is always available as the fenced-block fallback."
+    }
+  };
+}
+
+function selectedHttpChannel(channels: DetachesTerminalChannels): DetachesTerminalChannels["gatewayTerminal"] | DetachesTerminalChannels["sshTerminal"] | null {
+  if (channels.preferred === "gateway-terminal" && channels.gatewayTerminal.state === "ready") return channels.gatewayTerminal;
+  if (channels.preferred === "ssh-terminal" && channels.sshTerminal.state === "ready") return channels.sshTerminal;
+  return null;
+}
+
+function localControlNote(channels: DetachesTerminalChannels): string {
+  // 这里故意把 OpenClaw Gateway 聊天连接和 Main Agent 回连 Detach Agent 的 terminal broker 分开描述，避免后续维护者混用。
+  if (channels.preferred === "gateway-terminal") {
+    return "gateway-terminal is preferred: Main Agent can reach the Detach Agent HTTP broker through configured publicBaseUrl. This is separate from the OpenClaw Gateway chat connection.";
+  }
+  if (channels.preferred === "ssh-terminal") {
+    return "ssh-terminal is preferred: advanced SSH reverse bridge is ready. Use the context-provided loopback URL only for this channel.";
+  }
+  return "chat-terminal is preferred: HTTP broker access is unavailable. Output exactly one detaches-terminal fenced block for local-user-machine terminal requests.";
+}
+
 export async function buildDetachesSessionContext(
   sessionMode: ChatSessionMode,
   sessionKey: string,
@@ -39,9 +113,11 @@ export async function buildDetachesSessionContext(
   const agentId = agentIdFromSessionKey(sessionKey);
   const remoteAdapter = openclawDetachesAdapterService.lastRemoteReadiness();
   const config = await runtimeConfig();
-  const baseUrl = reverseBridgeBaseUrl(config);
   const localMachine = buildLocalMachineContext();
   const reverseBridgeStatus = await sshTunnelService.status();
+  const terminalChannels = buildTerminalChannels(config, reverseBridgeStatus);
+  const preferredHttp = selectedHttpChannel(terminalChannels);
+  const baseUrl = preferredHttp?.baseUrl || "";
   const contextExportRecord = options.createContextExport
     ? contextExportService.create({ sessionKey, sessionMode, attachments })
     : null;
@@ -86,9 +162,10 @@ export async function buildDetachesSessionContext(
     files: {
       staged: stagedFiles
     },
+    terminalChannels,
     broker: {
-      gatewayEventEndpoint: `${baseUrl}/api/tools/events/gateway`,
-      interactionEventEndpoint: `${baseUrl}/api/interactions/events/gateway`,
+      gatewayEventEndpoint: preferredHttp?.toolEventEndpoint || "",
+      interactionEventEndpoint: preferredHttp?.interactionEventEndpoint,
       eventSource: "gateway-event",
       idempotencyField: "sourceEventId",
       submitToken: brokerTokenService.tokenForSession(sessionKey),
@@ -96,10 +173,11 @@ export async function buildDetachesSessionContext(
       requestFormats: ["broker-event", "fence"]
     },
     localControl: {
+      transport: terminalChannels.preferred,
       baseUrl,
-      toolEventEndpoint: `${baseUrl}/api/tools/events/gateway`,
-      interactionEventEndpoint: `${baseUrl}/api/interactions/events/gateway`,
-      fixedPort: config.reverseBridgeRemotePort,
+      toolEventEndpoint: preferredHttp?.toolEventEndpoint,
+      interactionEventEndpoint: preferredHttp?.interactionEventEndpoint,
+      fixedPort: terminalChannels.preferred === "ssh-terminal" ? config.reverseBridgeRemotePort : config.serverPort,
       submitTokenHeader: "Authorization",
       addressSource: "remote-reachable-context",
       reverseBridge: {
@@ -108,17 +186,19 @@ export async function buildDetachesSessionContext(
         reverseBrokerUrl: reverseBridgeStatus.reverseBrokerUrl,
         pid: reverseBridgeStatus.pid
       },
-      note: reverseBridgeStatus.ok
-        ? "This URL is the detaches_agent server address reachable from the Host/Main Agent machine through the active SSH reverse bridge. The adapter script runs on the Host/Main Agent machine and must use this context-provided URL, not 127.0.0.1."
-        : "The SSH reverse bridge is not ready, so this URL is not currently reachable from the Host/Main Agent machine. Use fenced detaches-terminal fallback for local-user-machine requests until the user fixes Network Test / SSH reverse bridge."
+      note: localControlNote(terminalChannels)
     },
     contextExport: {
-      createEndpoint: `${baseUrl}/api/context/exports`,
-      consumeEndpointPattern: `${baseUrl}/api/context/exports/{token}`,
-      consumeUrl: contextExportRecord
+      createEndpoint: preferredHttp ? `${baseUrl}/api/context/exports` : "",
+      consumeEndpointPattern: preferredHttp ? `${baseUrl}/api/context/exports/{token}` : "",
+      consumeUrl: contextExportRecord && preferredHttp
         ? `${baseUrl}/api/context/exports/${encodeURIComponent(contextExportRecord.token)}`
         : undefined,
-      createdBy: "detaches-ui-reverse-bridge",
+      createdBy: terminalChannels.preferred === "ssh-terminal"
+        ? "detaches-ui-reverse-bridge"
+        : terminalChannels.preferred === "gateway-terminal"
+          ? "detaches-ui-direct-callback"
+          : "detaches-ui-loopback",
       consumedBy: "remote-agent-host",
       oneTime: true,
       ttlSeconds: 300,
@@ -126,10 +206,10 @@ export async function buildDetachesSessionContext(
       doctorCommand: "doctor",
       generatedForMessage: Boolean(contextExportRecord),
       note: contextExportRecord
-        ? reverseBridgeStatus.ok
-          ? "A one-time context URL was generated for this message. It is reachable from the remote agent host through the active SSH reverse bridge and must be treated as sensitive."
-          : "A one-time context URL was generated for this message, but the SSH reverse bridge is not ready, so it is not currently reachable from the remote agent host. Use fenced detaches-terminal fallback for local-user-machine requests."
-        : "Ask the user to generate a one-time context URL in the detaches_agent Adapter panel when the remote agent host needs a fresh full clientContext. Do not invent or request broker tokens in chat."
+        ? preferredHttp
+          ? `A one-time context URL was generated for this message through ${terminalChannels.preferred}. Treat it as sensitive.`
+          : "No reachable HTTP terminal channel is available for this message. Use fenced detaches-terminal chat-terminal fallback for local-user-machine terminal requests."
+        : "Ask the user to send a fresh detaches_agent message with current connection settings when the remote agent host needs a new full clientContext. Do not invent or request broker tokens in chat."
     },
     capabilities: [
       {
@@ -213,6 +293,7 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
   const remoteAdapter = context.adapterStatus?.remoteAgentHost;
   const consumeUrl = context.contextExport?.consumeUrl;
   const localMachine = context.localMachine;
+  const terminalChannelLines = renderTerminalChannelLines(context);
   return [
     "[detaches_agent context]",
     "You are talking to the user through the detaches_agent local UI, not plain webchat.",
@@ -225,14 +306,16 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
     `localMachine.commandDialect: ${localMachine?.commandDialect || "unknown"}`,
     `localMachine.pathStyle: ${localMachine?.pathStyle || "unknown"}`,
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}`,
+    ...terminalChannelLines,
     consumeUrl ? `contextExport.consumeUrl: ${consumeUrl}` : "contextExport.consumeUrl: unavailable",
     `localControl.baseUrl: ${context.localControl?.baseUrl || "unavailable"}`,
     `localControl.interactionEventEndpoint: ${context.localControl?.interactionEventEndpoint || "unavailable"}`,
-    `localControl.reverseBridge.ok: ${context.localControl?.reverseBridge.ok ?? false}`,
-    `localControl.reverseBridge.message: ${context.localControl?.reverseBridge.message || "unknown"}`,
-    channelChoiceRule(context),
+    `localControl.reverseBridge.ok: ${context.localControl?.reverseBridge?.ok ?? false}`,
+    `localControl.reverseBridge.message: ${context.localControl?.reverseBridge?.message || "unknown"}`,
+    terminalRoutingRule(context),
+    "Terminal source mapping: source=text-extract is chat-terminal; source=gateway-event is the HTTP broker path used by gateway-terminal or ssh-terminal.",
     localMachineCommandRule(localMachine),
-    reverseBridgeRule(context),
+    callbackEndpointRule(context),
     "Local terminal control does not use SSH. Do not ask for the user's local SSH username/password/port. The user only approves the tool request; ordinary local terminal commands must not trigger an SSH password dialog.",
     "SSH is used only for reverse bridge reachability, saving staged files to the Main Agent machine, or a user-approved SSH credential/login request.",
     "If the remote side has the detaches-agent skill and contextExport.consumeUrl is available, run this only on the real Host/Main Agent machine: `node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --url \"$CONSUME_URL\" --output-context /tmp/detaches-client-context.json`; if context is already saved, run `doctor --context <context-json>`.",
@@ -245,6 +328,7 @@ export function renderDetachesClientContextFallback(context: DetachesSessionCont
   const consumeUrl = context.contextExport?.consumeUrl;
   const remoteAdapter = context.adapterStatus?.remoteAgentHost;
   const localMachine = context.localMachine;
+  const terminalChannelLines = renderTerminalChannelLines(context);
   return [
     "[detaches_agent compatibility context]",
     "Structured clientContext.detaches was not accepted by the current host/Gateway, so detaches_agent included this readable fallback context. Treat it as authoritative for detaches_agent routing.",
@@ -257,11 +341,13 @@ export function renderDetachesClientContextFallback(context: DetachesSessionCont
     `localMachine.commandDialect: ${localMachine?.commandDialect || "unknown"}`,
     `localMachine.pathStyle: ${localMachine?.pathStyle || "unknown"}`,
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}`,
+    ...terminalChannelLines,
     consumeUrl ? `contextExport.consumeUrl: ${consumeUrl}` : "contextExport.consumeUrl: unavailable",
     `localControl.baseUrl: ${context.localControl?.baseUrl || "unavailable"}`,
-    `localControl.reverseBridge.ok: ${context.localControl?.reverseBridge.ok ?? false}`,
-    `localControl.reverseBridge.message: ${context.localControl?.reverseBridge.message || "unknown"}`,
-    channelChoiceRule(context),
+    `localControl.reverseBridge.ok: ${context.localControl?.reverseBridge?.ok ?? false}`,
+    `localControl.reverseBridge.message: ${context.localControl?.reverseBridge?.message || "unknown"}`,
+    terminalRoutingRule(context),
+    "Terminal source mapping: source=text-extract is chat-terminal; source=gateway-event is the HTTP broker path used by gateway-terminal or ssh-terminal.",
     localMachineCommandRule(localMachine),
     "The local terminal path does not use SSH. Do not ask for the user's local SSH username/password/port, and do not ask the user to manually run ssh -R, scp, copy broker tokens, or find a local IP.",
     "If consumeUrl or localControl/broker URLs are unreachable, say broker/context direct access is unavailable; fenced detaches-terminal fallback is still available.",
@@ -285,18 +371,45 @@ function localMachineCommandRule(localMachine: DetachesSessionContext["localMach
   }
 }
 
-function channelChoiceRule(context: DetachesSessionContext): string {
-  if (context.localControl?.reverseBridge.ok) {
-    return "Channel choice: (1) ordinary commands on the user's local machine use detaches-terminal or a broker terminal request; (2) use credential-request only when a real secret is needed; (3) scripts/API calls may use the reachable localControl/broker URL supplied by this context.";
-  }
-  return "Channel choice: localControl/broker URLs are not reachable from the Host/Main Agent because the SSH reverse bridge is not ready. For ordinary local-user-machine commands, output exactly one fenced detaches-terminal request block in chat and wait for detaches_agent approval/output; do not run the command in the Host/Main Agent shell, do not use host=node, and do not POST to broker URLs.";
+function renderTerminalChannelLines(context: DetachesSessionContext): string[] {
+  const channels = context.terminalChannels;
+  if (!channels) return ["terminalChannels.preferred: chat-terminal"];
+  return [
+    `terminalChannels.preferred: ${channels.preferred}`,
+    `gateway-terminal: ${channels.gatewayTerminal.state}${channels.gatewayTerminal.baseUrl ? ` ${channels.gatewayTerminal.baseUrl}` : ""}`,
+    `ssh-terminal: ${channels.sshTerminal.state}${channels.sshTerminal.baseUrl ? ` ${channels.sshTerminal.baseUrl}` : ""}`,
+    `chat-terminal: ${channels.chatTerminal.state} fence=${channels.chatTerminal.requestFence}`
+  ];
 }
 
-function reverseBridgeRule(context: DetachesSessionContext): string {
-  if (context.localControl?.reverseBridge.ok) {
-    return "The Host/Main Agent script runs on the Host/Main Agent machine. When it connects back to detaches_agent, it must use the context-provided localControl/broker URL; do not guess or replace it with the Host/Main Agent's own 127.0.0.1.";
+function terminalRoutingRule(context: DetachesSessionContext): string {
+  // fallback prompt 必须在 Gateway 不支持结构化 clientContext 时也足够完整，Main Agent 只看文本也能选对 terminal channel。
+  const preferred = context.terminalChannels?.preferred ?? "chat-terminal";
+  if (preferred === "gateway-terminal") {
+    return [
+      "Terminal routing: preferred gateway-terminal. Submit local-user-machine terminal requests to gatewayTerminal.toolEventEndpoint/localControl.toolEventEndpoint with Authorization: Bearer broker.submitToken.",
+      "If HTTP broker access fails, report DETACHES_ENDPOINT_UNREACHABLE and fall back to exactly one detaches-terminal fenced block.",
+      "Never run local-user-machine commands in the Main Agent shell, never ask for Detach Agent PC SSH credentials, and wait for Detach Agent Tool Queue approval."
+    ].join(" ");
   }
-  return "The Host/Main Agent script runs on the Host/Main Agent machine, but the SSH reverse bridge is not ready. Do not treat localControl.baseUrl or contextExport.consumeUrl as reachable from that machine, and do not try to execute local-user-machine commands in the Host/Main Agent shell. Use fenced detaches-terminal fallback.";
+  if (preferred === "ssh-terminal") {
+    return [
+      "Terminal routing: preferred ssh-terminal. Use the context-provided ssh-terminal/localControl URL only because the advanced reverse bridge is ready.",
+      "Do not ask for SSH password and do not replace this URL with any guessed 127.0.0.1 value.",
+      "If HTTP broker access fails, use exactly one detaches-terminal fenced block fallback."
+    ].join(" ");
+  }
+  return "Terminal routing: preferred chat-terminal. HTTP broker/context direct access is unavailable; output exactly one detaches-terminal fenced block for local-user-machine terminal requests and wait for Detach Agent approval.";
+}
+
+function callbackEndpointRule(context: DetachesSessionContext): string {
+  if (context.terminalChannels?.preferred === "gateway-terminal") {
+    return "gateway-terminal uses publicBaseUrl from Detach Agent settings. It is not the OpenClaw Gateway chat connection and not SSH.";
+  }
+  if (context.terminalChannels?.preferred === "ssh-terminal") {
+    return "ssh-terminal uses an advanced key-based SSH reverse bridge and can coexist with gateway-terminal. Use it only when the context selects it.";
+  }
+  return "chat-terminal fallback uses message parsing: source=text-extract means fenced-block fallback; source=gateway-event means an HTTP broker terminal path.";
 }
 
 function agentIdFromSessionKey(sessionKey: string): string {

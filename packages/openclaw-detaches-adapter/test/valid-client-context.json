@@ -60,7 +60,7 @@
       "ttlSeconds": 300,
       "adapterCommand": "context-fetch",
       "doctorCommand": "doctor",
-      "note": "Ask the user to generate a one-time context URL in the Adapter panel."
+      "note": "Ask the user to send a fresh detaches_agent message with current connection settings."
     },
     "capabilities": [
       {

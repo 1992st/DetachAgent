@@ -288,6 +288,82 @@ button, input, textarea {
   box-shadow: 0 24px 64px rgb(15 23 42 / 24%);
 }
 
+.relationship-skill-prompt-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 64px rgb(15 23 42 / 24%);
+}
+
+.relationship-skill-prompt-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px 0;
+}
+
+.relationship-skill-prompt-meta span {
+  padding: 4px 8px;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.relationship-skill-prompt-message {
+  margin: 10px 14px 0;
+  padding: 9px 10px;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.relationship-skill-prompt-box {
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.relationship-skill-prompt-box > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.relationship-skill-prompt-box pre {
+  min-height: 260px;
+  max-height: min(520px, calc(100vh - 250px));
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #d1fae5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.relationship-skill-prompt-box small {
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .save-password-error {
   margin: 0;
   padding: 9px 10px;
@@ -1721,6 +1797,47 @@ h3 { font-size: 14px; }
   margin-top: 12px;
 }
 
+.settings-actions.compact-row {
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.callback-ip-dialog {
+  max-width: 720px;
+}
+
+.callback-ip-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.callback-ip-row {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.callback-ip-row.recommended {
+  border-color: #0f766e;
+  background: #f0fdfa;
+}
+
+.callback-ip-row.muted-row {
+  background: #f8fafc;
+}
+
+.callback-ip-row span,
+.callback-ip-row small {
+  color: var(--muted);
+}
+
 .save-button,
 .secondary-button {
   height: 36px;
@@ -2008,6 +2125,11 @@ h3 { font-size: 14px; }
 .settings-status {
   color: var(--muted);
   font-size: 12px;
+}
+
+.settings-status.warning-inline {
+  color: #b45309;
+  line-height: 1.45;
 }
 
 .network-test-list {

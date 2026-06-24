@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Copy, FileInput, Play, Plus, Save, Settings2, ShieldCheck, Trash2, Wifi, X } from "lucide-react";
 import type { NetworkTestResponse, PublicSettings, RemoteProfile, RemoteProfileUpdate } from "@detaches/shared";
-import { activateRemoteProfile, createRemoteProfile, deleteRemoteProfile, fetchSettings, saveRemoteProfile, testNetwork } from "../../lib/api.js";
+import { activateRemoteProfile, createRemoteProfile, deleteRemoteProfile, fetchCallbackIps, fetchSettings, saveRemoteProfile, testCallback, testNetwork, type CallbackIpCandidate } from "../../lib/api.js";
 import { AgentConfigAssistantDialog } from "./agentConfigAssistant/AgentConfigAssistantDialog.js";
 import { SkillInstallPanel } from "../skills/SkillInstallPanel.js";
 
@@ -22,6 +22,9 @@ export function SettingsPanel({ onSaved }: Props) {
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantApplying, setAssistantApplying] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [callbackPickerOpen, setCallbackPickerOpen] = useState(false);
+  const [callbackCandidates, setCallbackCandidates] = useState<CallbackIpCandidate[]>([]);
+  const [callbackTesting, setCallbackTesting] = useState(false);
   const [guideStage, setGuideStage] = useState<"idle" | "import-agent" | "gateway-health" | "test-network">("idle");
   const [copiedPairingCommand, setCopiedPairingCommand] = useState(false);
 
@@ -77,6 +80,16 @@ export function SettingsPanel({ onSaved }: Props) {
     authMode: mainAgentAuthMode,
     publicBaseUrl: selectedProfile?.publicBaseUrl || "http://<detaches-pc-tailnet-ip>:38888"
   }, null, 2);
+  const selectedCallbackIp = selectedProfile?.gatewayTerminalLocalIp || hostFromBaseUrl(selectedProfile?.publicBaseUrl || "");
+  const serverListenHost = settings?.serverHost || "";
+  const serverListenHosts = settings?.serverListenHosts?.length ? settings.serverListenHosts : serverListenHost ? [serverListenHost] : [];
+  const serverWildcardListening = serverListenHosts.includes("0.0.0.0") || serverListenHosts.includes("::");
+  const callbackRestartRequired = Boolean(
+    selectedCallbackIp
+    && serverListenHosts.length
+    && !serverWildcardListening
+    && !serverListenHosts.includes(selectedCallbackIp)
+  );
 
   function updateSelectedProfile(patch: Partial<RemoteProfileUpdate>) {
     if (!settings || !selectedProfile) return;
@@ -110,7 +123,12 @@ export function SettingsPanel({ onSaved }: Props) {
       gatewayLocalPort: Number(selectedProfile.gatewayLocalPort),
       authMode: selectedProfile.authMode,
       remoteWorkspaceRoot: selectedProfile.remoteWorkspaceRoot,
-      publicBaseUrl: selectedProfile.publicBaseUrl
+      publicBaseUrl: selectedProfile.publicBaseUrl,
+      gatewayTerminalLocalIp: selectedProfile.gatewayTerminalLocalIp,
+      gatewayTerminalLocalIpSource: selectedProfile.gatewayTerminalLocalIpSource,
+      gatewayTerminalLastStatus: selectedProfile.gatewayTerminalLastStatus,
+      gatewayTerminalLastTestedAt: selectedProfile.gatewayTerminalLastTestedAt,
+      gatewayTerminalLastError: selectedProfile.gatewayTerminalLastError
     };
     if (token.trim()) update.authToken = token.trim();
     if (password.trim()) update.authPassword = password.trim();
@@ -284,6 +302,54 @@ export function SettingsPanel({ onSaved }: Props) {
     }
   }
 
+  async function openCallbackIpPicker() {
+    if (!selectedProfile) return;
+    setStatus("正在检测本机回连 IP...");
+    try {
+      const suggestion = await fetchCallbackIps();
+      setCallbackCandidates(suggestion.candidates);
+      if (!selectedProfile.publicBaseUrl && suggestion.recommendedBaseUrl) {
+        const recommended = suggestion.candidates.find((item) => item.baseUrl === suggestion.recommendedBaseUrl);
+        updateSelectedProfile({
+          publicBaseUrl: suggestion.recommendedBaseUrl,
+          gatewayTerminalLocalIp: recommended?.host,
+          gatewayTerminalLocalIpSource: "auto",
+          gatewayTerminalLastStatus: undefined,
+          gatewayTerminalLastError: ""
+        });
+        setStatus("已选择本机回连 IP。请保存配置并重启 Detach Agent 后再测试。");
+      }
+      setCallbackPickerOpen(true);
+      setStatus(null);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function runCallbackTest() {
+    const profile = selectedProfile;
+    if (!profile?.publicBaseUrl) {
+      setStatus("请先填写本机回连地址。");
+      return;
+    }
+    setCallbackTesting(true);
+    setStatus("正在测试 gateway-terminal...");
+    try {
+      await testCallback(profile.publicBaseUrl);
+      const refreshed = await fetchSettings();
+      setSettings(refreshed);
+      setSelectedProfileId(profile.id);
+      setStatus("gateway-terminal 测试通过。");
+      onSaved();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      const refreshed = await fetchSettings().catch(() => null);
+      if (refreshed) setSettings(refreshed);
+    } finally {
+      setCallbackTesting(false);
+    }
+  }
+
   function handleCopyPairingCommand(command: string) {
     void copyText(command);
     setCopiedPairingCommand(true);
@@ -433,15 +499,38 @@ export function SettingsPanel({ onSaved }: Props) {
         </section>
 
         <section className="settings-section">
-          <h3>本机访问地址</h3>
+          <h3>Main Agent 回连本机</h3>
+          <p>gateway-terminal 使用这个地址让 Main Agent 直接向本机提交 Tool Queue 请求；不可用时仍可使用 chat-terminal fallback。</p>
           <label>
-            Public base URL
+            本机回连地址 publicBaseUrl
             <input
               value={selectedProfile.publicBaseUrl}
-              placeholder="http://100.x.x.x:38888"
-              onChange={(e) => updateSelectedProfile({ publicBaseUrl: e.target.value })}
+              placeholder="http://10.12.7.55:38888"
+              onChange={(e) => updateSelectedProfile({ publicBaseUrl: e.target.value, gatewayTerminalLastStatus: undefined, gatewayTerminalLastError: "" })}
             />
+            <small className="field-hint">这是 Main Agent 视角可访问的 Detach Agent 地址，不是本机浏览器地址。公网 IP 可选，但请确认暴露风险。</small>
           </label>
+          <div className="settings-actions compact-row">
+            <button type="button" className="secondary-button compact" onClick={() => void openCallbackIpPicker()}>
+              选择本机回连 IP
+            </button>
+            <button type="button" className="secondary-button compact" onClick={() => void runCallbackTest()} disabled={callbackTesting}>
+              <Play size={14} />
+              {callbackTesting ? "测试中" : "测试 gateway-terminal"}
+            </button>
+          </div>
+          <p className={`settings-status ${selectedProfile.gatewayTerminalLastStatus === "error" ? "error-inline" : ""}`}>
+            gateway-terminal: {selectedProfile.gatewayTerminalLastStatus === "ok"
+              ? `ready · ${selectedProfile.gatewayTerminalLastTestedAt || ""}`
+              : selectedProfile.gatewayTerminalLastStatus === "error"
+                ? `error · ${selectedProfile.gatewayTerminalLastError || "测试失败"}`
+                : "not configured / chat-terminal fallback active"}
+          </p>
+          {callbackRestartRequired ? (
+            <p className="settings-status warning-inline">
+              当前 server 监听 {serverListenHosts.join(", ")}:{settings?.serverPort}，选择的回连 IP 是 {selectedCallbackIp}。保存配置并重启 Detach Agent 后生效。
+            </p>
+          ) : null}
           <label>
             Remote workspace
             <input value={selectedProfile.remoteWorkspaceRoot} onChange={(e) => updateSelectedProfile({ remoteWorkspaceRoot: e.target.value })} />
@@ -553,8 +642,84 @@ export function SettingsPanel({ onSaved }: Props) {
           onUpdate={updateSelectedProfile}
         />
       ) : null}
+      {callbackPickerOpen ? (
+        <CallbackIpDialog
+          candidates={callbackCandidates}
+          onClose={() => setCallbackPickerOpen(false)}
+          onSelect={(candidate) => {
+            updateSelectedProfile({
+              publicBaseUrl: candidate.baseUrl,
+              gatewayTerminalLocalIp: candidate.host,
+              gatewayTerminalLocalIpSource: "manual",
+              gatewayTerminalLastStatus: undefined,
+              gatewayTerminalLastError: ""
+            });
+            setStatus("已选择本机回连 IP。请保存配置并重启 Detach Agent 后再测试。");
+            setCallbackPickerOpen(false);
+          }}
+        />
+      ) : null}
     </div>
   );
+}
+
+function CallbackIpDialog({
+  candidates,
+  onClose,
+  onSelect
+}: {
+  candidates: CallbackIpCandidate[];
+  onClose: () => void;
+  onSelect: (candidate: CallbackIpCandidate) => void;
+}) {
+  const visible = candidates.filter((candidate) => !candidate.hidden);
+  const hidden = candidates.filter((candidate) => candidate.hidden);
+  return (
+    <div className="advanced-config-backdrop" role="presentation">
+      <section className="advanced-config-dialog callback-ip-dialog" role="dialog" aria-modal="true" aria-label="选择本机回连 IP">
+        <header className="advanced-config-header">
+          <div>
+            <strong>选择本机回连 IP</strong>
+            <small>选择 Main Agent 能访问的 Detach Agent 本机地址。公网地址可选，但要确认防火墙和暴露风险。</small>
+          </div>
+          <button type="button" className="icon-button small" title="关闭" onClick={onClose}>
+            <X size={15} />
+          </button>
+        </header>
+        <div className="callback-ip-list">
+          {(visible.length ? visible : candidates).map((candidate) => (
+            <button type="button" className={`callback-ip-row ${candidate.recommended ? "recommended" : ""}`} key={`${candidate.interfaceName}-${candidate.host}`} onClick={() => onSelect(candidate)}>
+              <strong>{candidate.host}</strong>
+              <span>{candidate.interfaceName} · {candidate.kind}</span>
+              <small>{candidate.reason}</small>
+            </button>
+          ))}
+        </div>
+        {hidden.length ? (
+          <details className="main-agent-config-help">
+            <summary>高级/隐藏地址</summary>
+            <div className="callback-ip-list">
+              {hidden.map((candidate) => (
+                <button type="button" className="callback-ip-row muted-row" key={`${candidate.interfaceName}-${candidate.host}`} onClick={() => onSelect(candidate)}>
+                  <strong>{candidate.host}</strong>
+                  <span>{candidate.interfaceName} · {candidate.kind}</span>
+                  <small>{candidate.reason}</small>
+                </button>
+              ))}
+            </div>
+          </details>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function hostFromBaseUrl(value: string): string {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return "";
+  }
 }
 
 function AdvancedSettingsDialog({
@@ -575,7 +740,7 @@ function AdvancedSettingsDialog({
         <header className="advanced-config-header">
           <div>
             <strong>高级配置</strong>
-            <small>SSH 是高级兼容能力，默认不参与 Gateway 直连主流程。</small>
+            <small>ssh-terminal 是高级兼容能力，默认关闭；gateway-terminal 可同时保持启用。</small>
           </div>
           <button type="button" className="icon-button small" title="关闭高级配置" onClick={onClose}>
             <X size={15} />
@@ -650,8 +815,8 @@ function AdvancedSettingsDialog({
 
           <section className="advanced-config-section">
             <div>
-              <h3>本机 SSH 回连</h3>
-              <p>Main Agent 当前不依赖 SSH 控制本机 terminal；只有需要 reverse bridge 时才开启。</p>
+              <h3>SSH Reverse Bridge / ssh-terminal</h3>
+              <p>ssh-terminal 使用 Main Agent SSH key 建立 reverse bridge。它默认关闭，可与 gateway-terminal 同时开启，不收集或保存 SSH 密码。</p>
             </div>
             <label className="check-row advanced-toggle">
               <input
@@ -659,7 +824,7 @@ function AdvancedSettingsDialog({
                 checked={profile.localSshBridgeEnabled}
                 onChange={(e) => onUpdate({ localSshBridgeEnabled: e.target.checked })}
               />
-              连接本机 SSH / reverse bridge
+              启用 ssh-terminal / reverse bridge
             </label>
             {profile.localSshBridgeEnabled ? (
               <>

@@ -11,11 +11,12 @@ interface Props {
   sessionMode: ChatSessionMode;
   clientIdentity: ClientIdentity | null;
   attachments: UploadedFileRef[];
+  relationshipSkillCheckNonce?: number;
   onSessionModeChange: (mode: ChatSessionMode) => void;
   onNewSession: () => void;
   onClearAttachments: () => void;
   onNeedUpload: (files: FileList) => void;
-  onRelationshipSkillStatusChange: (status: RelationshipSkillStatus, message?: string) => void;
+  onRelationshipSkillStatusChange: (status: RelationshipSkillStatus, message?: string, installedVersion?: string, requiredVersion?: string) => void;
 }
 
 export interface ChatPanelHandle {
@@ -28,6 +29,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   sessionMode,
   clientIdentity,
   attachments,
+  relationshipSkillCheckNonce = 0,
   onSessionModeChange,
   onNewSession,
   onClearAttachments,
@@ -55,10 +57,24 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   const logStreamRef = useRef<HTMLDivElement | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const cloudPromptLogIdsRef = useRef<Set<string>>(new Set());
+  const relationshipSkillCheckSeqRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
     revealTerminal: () => terminalRef.current?.reveal()
   }), []);
+
+  function sendRelationshipSkillCheck(reason: "socket-open" | "new-session") {
+    const socket = socketRef.current;
+    if (!sessionKey || socket?.readyState !== WebSocket.OPEN) return;
+    relationshipSkillCheckSeqRef.current += 1;
+    onRelationshipSkillStatusChange("checking", "Checking detach-agent-relationship skill...");
+    const idempotencyKey = `relationship-skill:${sessionKey}:${reason}:${Date.now().toString(36)}:${relationshipSkillCheckSeqRef.current}`;
+    appendLog("info", "system", "relationship-skill-check-requested", { sessionKey, reason, idempotencyKey });
+    socket.send(JSON.stringify({
+      type: "bootstrap-relationship-skill-check",
+      idempotencyKey
+    }));
+  }
 
   useEffect(() => {
     let disposed = false;
@@ -81,11 +97,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     ws.onopen = () => {
       setSocketState("connected");
       appendLog("debug", "socket", "socket-connected", { sessionKey, sessionMode });
-      onRelationshipSkillStatusChange("checking", "Checking detach-agent-relationship skill...");
-      ws.send(JSON.stringify({
-        type: "bootstrap-relationship-skill-check",
-        idempotencyKey: `relationship-skill-${sessionKey}`
-      }));
+      sendRelationshipSkillCheck("socket-open");
     };
     ws.onclose = (event) => {
       setSocketState("closed");
@@ -121,8 +133,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
         appendLog("info", "prompt", "message-sent-ack", data.payload);
         void refreshCloudPromptLogs();
       } else if (data.type === "relationship-skill-status") {
-        onRelationshipSkillStatusChange(data.status, data.message);
-        appendLog("info", "system", "relationship-skill-status", { status: data.status, message: data.message });
+        onRelationshipSkillStatusChange(data.status, data.message, data.installedVersion, data.requiredVersion);
+        appendLog("info", "system", "relationship-skill-status", {
+          status: data.status,
+          message: data.message,
+          installedVersion: data.installedVersion,
+          requiredVersion: data.requiredVersion
+        });
       } else if (data.type === "error") {
         setMessages((current) => [
           ...current,
@@ -141,6 +158,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
       ws.close();
     };
   }, [sessionKey, sessionMode, socketReconnectNonce, onRelationshipSkillStatusChange]);
+
+  useEffect(() => {
+    if (relationshipSkillCheckNonce > 0) sendRelationshipSkillCheck("new-session");
+  }, [relationshipSkillCheckNonce]);
 
   useEffect(() => {
     const el = messagesRef.current;
@@ -523,7 +544,10 @@ function ToolRequests({
             id: request.id,
             kind: request.kind,
             target: request.target,
-            status: request.status
+            status: request.status,
+            source: request.source,
+            channel: request.kind === "terminal" && request.source === "text-extract" ? "chat-terminal" : request.source === "gateway-event" ? "gateway-terminal" : undefined,
+            fallback: request.kind === "terminal" && request.source === "text-extract" ? true : undefined
           })));
         }
         const nextHandled: Record<number, "blocked"> = {};

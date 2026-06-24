@@ -52,7 +52,8 @@ export const appConfig = {
   authPassword: stringEnv("OPENCLAW_AUTH_PASSWORD"),
   remoteWorkspaceRoot: stringEnv("OPENCLAW_REMOTE_WORKSPACE_ROOT", "~/.openclaw/workspace"),
   storageDir: platformService.getAppDataDir(),
-  maxUploadMb: intEnv("DETACHES_MAX_UPLOAD_MB", 1024)
+  maxUploadMb: intEnv("DETACHES_MAX_UPLOAD_MB", 1024),
+  serverListenHosts: [] as string[]
 };
 
 export type AppConfig = typeof appConfig;

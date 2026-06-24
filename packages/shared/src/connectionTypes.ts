@@ -22,6 +22,13 @@ export interface AppHealth {
     reverseBridgeRemoteHost: string;
     reverseBridgeRemotePort: number;
     authMode: "token" | "password" | "none";
+    serverHost: string;
+    serverPort: number;
+    serverListenHosts?: string[];
+    publicBaseUrl?: string;
+    gatewayTerminalLocalIp?: string;
+    gatewayTerminalLastStatus?: "ok" | "error";
+    gatewayTerminalLastError?: string;
   };
   checkedAt: string;
 }

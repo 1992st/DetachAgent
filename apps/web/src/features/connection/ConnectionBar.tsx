@@ -14,6 +14,8 @@ interface Props {
   onOpenTerminalApp?: (appId: string) => void;
   relationshipSkillStatus?: RelationshipSkillStatus;
   relationshipSkillMessage?: string;
+  relationshipSkillInstalledVersion?: string;
+  relationshipSkillRequiredVersion?: string;
   onRelationshipSkillAction?: () => void;
 }
 
@@ -37,6 +39,8 @@ export function ConnectionBar({
   onOpenTerminalApp,
   relationshipSkillStatus = "unknown",
   relationshipSkillMessage,
+  relationshipSkillInstalledVersion,
+  relationshipSkillRequiredVersion,
   onRelationshipSkillAction
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -67,6 +71,7 @@ export function ConnectionBar({
           {health ? (
             <>
               {pill(health.gateway.state, "Gateway", health.gateway.message)}
+              {pill(health.config.gatewayTerminalLastStatus === "ok" ? "ok" : health.config.publicBaseUrl ? "error" : "disabled", "Gateway terminal", health.config.gatewayTerminalLastError || health.config.publicBaseUrl)}
               {pill(health.ssh.state, health.config.localSshBridgeEnabled ? "SSH bridge" : "SSH", health.ssh.message)}
               <span className="remote-host">{health.config.remoteHost}</span>
             </>
@@ -79,11 +84,25 @@ export function ConnectionBar({
               {error}
             </span>
           ) : null}
-          {relationshipSkillStatus === "missing" || relationshipSkillStatus === "checking" || relationshipSkillStatus === "error" ? (
-            <span className={`relationship-skill-alert ${relationshipSkillStatus}`} title={relationshipSkillMessage}>
-              {relationshipSkillStatus === "checking" ? "Relationship skill 检测中" : relationshipSkillStatus === "error" ? "Skill 检测失败" : "Relationship skill 未安装"}
-              {relationshipSkillStatus === "missing" ? (
-                <button type="button" onClick={onRelationshipSkillAction}>安装 relationship skill</button>
+          {relationshipSkillStatus === "missing" || relationshipSkillStatus === "outdated" || relationshipSkillStatus === "checking" || relationshipSkillStatus === "error" ? (
+            <span
+              className={`relationship-skill-alert ${relationshipSkillStatus}`}
+              title={relationshipSkillMessage || [
+                relationshipSkillInstalledVersion ? `installed=${relationshipSkillInstalledVersion}` : "",
+                relationshipSkillRequiredVersion ? `required=${relationshipSkillRequiredVersion}` : ""
+              ].filter(Boolean).join(" · ")}
+            >
+              {relationshipSkillStatus === "checking"
+                ? "Relationship skill 检测中"
+                : relationshipSkillStatus === "error"
+                  ? "Skill 检测失败"
+                  : relationshipSkillStatus === "outdated"
+                    ? "Relationship skill 需更新"
+                    : "Relationship skill 未安装"}
+              {relationshipSkillStatus === "missing" || relationshipSkillStatus === "outdated" ? (
+                <button type="button" onClick={onRelationshipSkillAction}>
+                  {relationshipSkillStatus === "outdated" ? "更新 relationship skill" : "安装 relationship skill"}
+                </button>
               ) : null}
             </span>
           ) : null}

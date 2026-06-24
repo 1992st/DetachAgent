@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { ChatSessionMode, ChatSocketClientEvent, ChatSocketServerEvent, DetachesSessionContext, UploadedFileRef } from "@detaches/shared";
+import type { ChatSessionMode, ChatSocketClientEvent, ChatSocketServerEvent, DetachesSessionContext, RelationshipSkillStatus, UploadedFileRef } from "@detaches/shared";
+import { DETACH_AGENT_RELATIONSHIP_SKILL_VERSION } from "@detaches/shared";
 import { gatewayClient } from "../services/gateway/gatewayClient.js";
 import { mapHistory } from "../services/gateway/chatMapper.js";
 import {
@@ -40,7 +41,7 @@ export function attachChatSocket(server: HttpServer): void {
         send(socket, { type: "chat", payload });
         const skillStatus = parseRelationshipSkillStatus(payload);
         if (skillStatus) {
-          send(socket, { type: "relationship-skill-status", status: skillStatus.status, message: skillStatus.message, raw: payload });
+          send(socket, { type: "relationship-skill-status", ...skillStatus, raw: payload });
         }
       }
     };
@@ -109,7 +110,7 @@ export function attachChatSocket(server: HttpServer): void {
           const runId = typeof (response as any)?.runId === "string" ? (response as any).runId : "";
           if (runId) activeRunIds.add(runId);
           const parsed = parseRelationshipSkillStatus(response);
-          if (parsed) send(socket, { type: "relationship-skill-status", status: parsed.status, message: parsed.message, raw: response });
+          if (parsed) send(socket, { type: "relationship-skill-status", ...parsed, raw: response });
         } else if (event.type === "abort") {
           activeRunIds.delete(event.runId);
           await gatewayClient.abortChat(sessionKey, event.runId);
@@ -130,23 +131,91 @@ export function attachChatSocket(server: HttpServer): void {
 function buildRelationshipSkillCheckPrompt(): string {
   return [
     "[[DETACH_AGENT_RELATIONSHIP_SKILL_CHECK]]",
-    "请用最短方式检查 Main Agent 是否已安装并可见 detach-agent-relationship skill。",
-    "只返回一行固定参数：",
+    `请用最短方式检查 Main Agent 是否已安装并可见 detach-agent-relationship skill，且 VERSION 为 ${DETACH_AGENT_RELATIONSHIP_SKILL_VERSION} 或更高兼容版本。`,
+    "如果能读取 VERSION，请读取后判断；不要执行安装。",
+    "只返回下面两行固定参数，不要解释：",
     "DETACH_AGENT_SKILL_STATUS: ready",
+    `DETACH_AGENT_SKILL_VERSION: ${DETACH_AGENT_RELATIONSHIP_SKILL_VERSION}`,
     "或",
-    "DETACH_AGENT_SKILL_STATUS: missing"
+    "DETACH_AGENT_SKILL_STATUS: missing",
+    "DETACH_AGENT_SKILL_VERSION: none",
+    "或",
+    "DETACH_AGENT_SKILL_STATUS: outdated",
+    "DETACH_AGENT_SKILL_VERSION: <installed-version>"
   ].join("\n");
 }
 
-function parseRelationshipSkillStatus(response: unknown): { status: "ready" | "missing"; message: string } | null {
-  const text = collectText(response).join("\n").toLowerCase();
-  if (/\bdetaches?_agent_skill_status\s*:\s*ready\b/.test(text) || /\bdetach_agent_skill_status\s*:\s*ready\b/.test(text)) {
-    return { status: "ready", message: "detach-agent-relationship skill is ready." };
+function parseRelationshipSkillStatus(response: unknown): {
+  status: RelationshipSkillStatus;
+  message: string;
+  installedVersion?: string;
+  requiredVersion: string;
+} | null {
+  const text = collectText(response).join("\n");
+  const lowerText = text.toLowerCase();
+  const installedVersion = parseReportedSkillVersion(text);
+  const requiredVersion = DETACH_AGENT_RELATIONSHIP_SKILL_VERSION;
+  if (/\bdetaches?_agent_skill_status\s*:\s*ready\b/.test(lowerText) || /\bdetach_agent_skill_status\s*:\s*ready\b/.test(lowerText)) {
+    if (!installedVersion || installedVersion === "unknown") {
+      return {
+        status: "outdated",
+        message: `detach-agent-relationship skill version was not reported; update to ${requiredVersion}.`,
+        installedVersion: installedVersion || "unknown",
+        requiredVersion
+      };
+    }
+    if (compareSemver(installedVersion, requiredVersion) < 0) {
+      return {
+        status: "outdated",
+        message: `detach-agent-relationship skill is ${installedVersion}; update to ${requiredVersion}.`,
+        installedVersion,
+        requiredVersion
+      };
+    }
+    return {
+      status: "ready",
+      message: `detach-agent-relationship skill ${installedVersion} is ready.`,
+      installedVersion,
+      requiredVersion
+    };
   }
-  if (/\bdetaches?_agent_skill_status\s*:\s*missing\b/.test(text) || /\bdetach_agent_skill_status\s*:\s*missing\b/.test(text)) {
-    return { status: "missing", message: "detach-agent-relationship skill is missing." };
+  if (/\bdetaches?_agent_skill_status\s*:\s*missing\b/.test(lowerText) || /\bdetach_agent_skill_status\s*:\s*missing\b/.test(lowerText)) {
+    return {
+      status: "missing",
+      message: `detach-agent-relationship skill is missing; install ${requiredVersion}.`,
+      installedVersion: installedVersion && installedVersion !== "none" ? installedVersion : undefined,
+      requiredVersion
+    };
+  }
+  if (/\bdetaches?_agent_skill_status\s*:\s*outdated\b/.test(lowerText) || /\bdetach_agent_skill_status\s*:\s*outdated\b/.test(lowerText)) {
+    return {
+      status: "outdated",
+      message: `detach-agent-relationship skill is ${installedVersion || "outdated"}; update to ${requiredVersion}.`,
+      installedVersion: installedVersion || "unknown",
+      requiredVersion
+    };
   }
   return null;
+}
+
+function parseReportedSkillVersion(text: string): string | undefined {
+  const match = text.match(/\bDETACHES?_AGENT_SKILL_VERSION\s*:\s*([^\s,;]+)/i)
+    ?? text.match(/\bDETACH_AGENT_SKILL_VERSION\s*:\s*([^\s,;]+)/i);
+  const value = match?.[1]?.trim();
+  if (!value) return undefined;
+  if (/^(none|null|missing)$/i.test(value)) return "none";
+  return value.replace(/^v/i, "");
+}
+
+function compareSemver(left: string, right: string): number {
+  const leftParts = left.split(".").map((part) => Number.parseInt(part, 10));
+  const rightParts = right.split(".").map((part) => Number.parseInt(part, 10));
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length, 3); index += 1) {
+    const leftValue = Number.isFinite(leftParts[index]) ? leftParts[index] : 0;
+    const rightValue = Number.isFinite(rightParts[index]) ? rightParts[index] : 0;
+    if (leftValue !== rightValue) return leftValue > rightValue ? 1 : -1;
+  }
+  return 0;
 }
 
 function collectText(value: unknown, output: string[] = [], depth = 0): string[] {

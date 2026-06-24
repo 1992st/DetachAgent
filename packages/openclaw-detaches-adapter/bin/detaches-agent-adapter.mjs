@@ -18,7 +18,8 @@ function usage(exitCode = 0) {
     "  doctor --url <one-time-context-export-url> [--output-context <file>]",
     "  context-fetch <one-time-context-export-url> [--output <file> --print client-context|detaches|export]",
     "  broker-probe <detaches-agent-base-url-or-capabilities-url>",
-    "  terminal-request --target <target> --command <command> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
+    "  terminal-request --command <command> --reason <reason> --source-event-id <id> --context <detaches-context-json> [--target <target> --format fence|broker-event --session-key <key> --agent-id <id> --submit-token <token> --submit-url <url> --submit]",
+    "  ping-channel --context <detaches-context-json>",
     "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
     "  main-agent-save-file-request --file-id <id> --source-local-path <path> --display-name <name> --size <bytes> --user <ssh-user> --path <dest> --reason <reason> [--host <host> --port <port> --method rsync|scp --context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
     "  credential-request --reason <reason> --source-event-id <id> [--context <detaches-context-json> --prompt <text> --target-user <user> --target-host <host> --target-port <port> --submit-token <token> --submit-url <url> --wait --timeout-ms 300000]",
@@ -158,6 +159,7 @@ function inspectContext(context) {
     broker: context?.broker ?? null,
     localControl: context?.localControl ?? null,
     contextExport: context?.contextExport ?? null,
+    terminalChannels: context?.terminalChannels ?? null,
     files: {
       staged: stagedFiles
     },
@@ -176,6 +178,40 @@ function sourceEventIdHint(context, suffix) {
   const agentId = context?.agentId || "agent";
   const sessionKey = String(context?.sessionKey || "session").replace(/[^a-zA-Z0-9_.:-]/g, "-");
   return `${agentId}:${sessionKey}:${suffix}:$(date +%s)`;
+}
+
+function preferredTerminalChannel(context) {
+  const channels = context?.terminalChannels;
+  if (!channels && (context?.localControl?.toolEventEndpoint || context?.broker?.gatewayEventEndpoint)) return "gateway-terminal";
+  const preferred = channels?.preferred || "chat-terminal";
+  if (preferred === "gateway-terminal" || preferred === "ssh-terminal" || preferred === "chat-terminal") return preferred;
+  return "chat-terminal";
+}
+
+function selectedTerminalEndpoint(context) {
+  const channels = context?.terminalChannels;
+  const preferred = preferredTerminalChannel(context);
+  if (preferred === "gateway-terminal" && channels?.gatewayTerminal?.state === "ready") return channels.gatewayTerminal.toolEventEndpoint || context?.broker?.gatewayEventEndpoint || "";
+  if (preferred === "ssh-terminal" && channels?.sshTerminal?.state === "ready") return channels.sshTerminal.toolEventEndpoint || context?.broker?.gatewayEventEndpoint || "";
+  return "";
+}
+
+function selectedTerminalBaseUrl(context) {
+  const channels = context?.terminalChannels;
+  const preferred = preferredTerminalChannel(context);
+  if (preferred === "gateway-terminal") return channels?.gatewayTerminal?.baseUrl || context?.localControl?.baseUrl || "";
+  if (preferred === "ssh-terminal") return channels?.sshTerminal?.baseUrl || context?.localControl?.baseUrl || "";
+  return "";
+}
+
+function terminalMetadata(context, fallbackMode = undefined) {
+  const preferred = preferredTerminalChannel(context);
+  return {
+    terminalChannel: fallbackMode ? "chat-terminal" : preferred,
+    fallbackMode,
+    preferredChannel: preferred,
+    callbackBaseUrl: selectedTerminalBaseUrl(context) || undefined
+  };
 }
 
 function adapterCliPathHint() {
@@ -201,6 +237,7 @@ function doctorContext(context) {
     && !mainAgentSaveCapability?.unavailableTargets?.includes("main-agent-machine");
   const localMachine = inspection.localMachine;
   const reverseBridgeOk = inspection.localControl?.reverseBridge?.ok !== false;
+  const preferredTerminal = inspection.terminalChannels?.preferred || "chat-terminal";
   const commandDialect = localMachine?.commandDialect || "the user's local OS shell";
   const pathStyle = localMachine?.pathStyle || "the user's local OS";
   const cli = adapterCliPathHint();
@@ -209,11 +246,11 @@ function doctorContext(context) {
     "Use the supported target list from this context; do not invent or fallback targets.",
     `The user's local machine is ${localMachine?.os || "unknown"}; local-user-machine commands must use ${commandDialect} syntax and ${pathStyle} paths.`,
     localMachineCommandRule(localMachine),
-    reverseBridgeOk
-      ? "Use broker/localControl URLs only when they are reachable from this Host/Main Agent machine."
-      : "The context says the SSH reverse bridge is not ready. Do not POST to broker/localControl URLs and do not run local-user-machine commands in this Host/Main Agent shell; emit exactly one fenced detaches-terminal request block instead.",
-    "If the context export URL or broker endpoint is unreachable, report that detaches_agent must bring up its SSH reverse bridge; do not ask the user to run ssh -R manually.",
-    "To control the user's local machine, submit a detaches-terminal request for target local-user-machine; do not SSH into the user's machine and do not ask for local SSH credentials.",
+    `Preferred terminal channel is ${preferredTerminal}.`,
+    preferredTerminal === "chat-terminal"
+      ? "HTTP broker is not preferred. Emit exactly one fenced detaches-terminal request block for local-user-machine terminal requests."
+      : "Use the selected terminal HTTP broker endpoint for terminal requests; if it is unreachable, report DETACHES_ENDPOINT_UNREACHABLE and fall back to exactly one detaches-terminal fenced block.",
+    "To control the user's local machine, submit a terminal request for target local-user-machine; do not SSH into the user's machine and do not ask for local SSH credentials.",
     "local-user-machine terminal requests are executed by detaches_agent's local terminal after user approval; this path does not need an SSH password.",
     "If an SSH login or another real credential is required, submit credential.request to the interaction endpoint and wait up to 300000ms; do not ask the user to paste passwords into chat.",
     "This adapter script runs on the Host/Main Agent machine. Use context-provided broker/localControl URLs, not 127.0.0.1, unless that exact URL came from context.",
@@ -224,7 +261,7 @@ function doctorContext(context) {
     nextActions.unshift("Fix or refresh the detaches context before requesting any tool.");
   }
   if (!brokerEndpoint || !submitTokenAvailable) {
-    nextActions.push("Broker endpoint or submit token is missing; ask the user to generate a fresh one-time context export from the Adapter panel.");
+    nextActions.push("Broker endpoint or submit token is missing; ask the user to send a fresh detaches_agent message with current connection settings.");
   }
   const commands = {
     inspect: `node ${cli} inspect-context ${commandQuote("<context-json-file>")}`,
@@ -303,6 +340,7 @@ function doctorContext(context) {
       userDevice: inspection.userDevice
     },
     localMachine: inspection.localMachine,
+    terminalChannels: inspection.terminalChannels ?? null,
     preferredRequestFormat: preferredFormat,
     broker: {
       endpoint: brokerEndpoint ?? null,
@@ -505,6 +543,76 @@ async function emitRequest(args, kind, target, reason, payload, fence) {
   console.log(text || JSON.stringify({ ok: true }));
 }
 
+async function submitTerminalRequest(args) {
+  const context = readContextOption(args);
+  const target = optionalString(args, "target") || "local-user-machine";
+  assertKnownTarget(target);
+  const reason = requireOption(args, "reason");
+  const payload = { command: requireOption(args, "command") };
+  const preferred = preferredTerminalChannel(context);
+  const explicitFormat = optionalString(args, "format");
+  const format = explicitFormat || (preferred === "chat-terminal" ? "fence" : "broker-event");
+  if (format === "fence") {
+    emitFence("detaches-terminal", { target, ...payload, reason, metadata: terminalMetadata(context, preferred === "chat-terminal" ? "chat-fenced-block" : undefined) });
+    return;
+  }
+  const submitUrl = optionalString(args, "submit-url") || (args.submit === true ? selectedTerminalEndpoint(context) : "");
+  const sessionKey = optionalString(args, "session-key") || context?.sessionKey;
+  if (!sessionKey) failWithCode("DETACHES_CONTEXT_INVALID", "Missing --session-key or --context with sessionKey.");
+  const submitToken = optionalString(args, "submit-token") || context?.broker?.submitToken;
+  const event = {
+    kind: "terminal",
+    target,
+    sessionKey,
+    agentId: optionalString(args, "agent-id") || context?.agentId || undefined,
+    reason,
+    source: "gateway-event",
+    sourceEventId: requireOption(args, "source-event-id"),
+    submitToken,
+    metadata: terminalMetadata(context),
+    payload
+  };
+  if (!submitUrl && args.submit !== true) {
+    console.log(JSON.stringify(event, null, 2));
+    return;
+  }
+  if (!submitUrl) {
+    console.error(JSON.stringify({ ok: false, errorCode: "DETACHES_CHANNEL_UNAVAILABLE", error: "Selected terminal HTTP channel is unavailable; emitting chat-terminal fallback." }, null, 2));
+    emitFence("detaches-terminal", { target, ...payload, reason, metadata: terminalMetadata(context, "chat-fenced-block") });
+    return;
+  }
+  const response = await fetch(submitUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(submitToken ? { Authorization: `Bearer ${submitToken}` } : {})
+    },
+    body: JSON.stringify(event)
+  }).catch((error) => ({ ok: false, status: 0, text: async () => error instanceof Error ? error.message : String(error) }));
+  if (!response.ok) {
+    const text = await response.text();
+    console.error(JSON.stringify({ ok: false, errorCode: "DETACHES_ENDPOINT_UNREACHABLE", error: text || `HTTP ${response.status}` }, null, 2));
+    emitFence("detaches-terminal", { target, ...payload, reason, metadata: terminalMetadata(context, "chat-fenced-block") });
+    return;
+  }
+  console.log(await response.text() || JSON.stringify({ ok: true }));
+}
+
+async function pingChannel(args) {
+  const context = readContextOption(args);
+  const preferred = preferredTerminalChannel(context);
+  const endpoint = selectedTerminalEndpoint(context);
+  if (preferred === "chat-terminal") {
+    console.log(JSON.stringify({ ok: true, preferred, httpRequired: false, message: "chat-terminal does not require HTTP broker reachability." }, null, 2));
+    return;
+  }
+  if (!endpoint) failWithCode("DETACHES_CHANNEL_UNAVAILABLE", `Preferred terminal channel ${preferred} has no endpoint.`);
+  const baseUrl = endpoint.replace(/\/api\/tools\/events\/gateway\/?$/, "");
+  const response = await fetch(`${baseUrl}/api/ping`, { headers: { Accept: "application/json" } });
+  const payload = await parseJsonResponse(response);
+  console.log(JSON.stringify({ ok: payload?.app === "detaches_agent", preferred, baseUrl, payload }, null, 2));
+}
+
 function interactionSubmitUrlFromContext(context, args) {
   return optionalString(args, "submit-url")
     || context?.broker?.interactionEventEndpoint
@@ -697,11 +805,12 @@ async function main() {
 
   const args = parseArgs(rest);
   if (command === "terminal-request") {
-    const target = requireOption(args, "target");
-    assertKnownTarget(target);
-    await emitRequest(args, "terminal", target, requireOption(args, "reason"), {
-      command: requireOption(args, "command")
-    }, "detaches-terminal");
+    await submitTerminalRequest(args);
+    return;
+  }
+
+  if (command === "ping-channel") {
+    await pingChannel(args);
     return;
   }
 

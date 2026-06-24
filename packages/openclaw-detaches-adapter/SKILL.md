@@ -12,7 +12,7 @@ detaches_agent is a local UI and approval broker running on the user's computer.
 
 ## Required Flow
 
-1. Inspect the latest `clientContext.detaches` or ask the user to generate a one-time context URL in the detaches_agent OpenClaw Adapter panel.
+1. Inspect the latest `clientContext.detaches`; if it is missing or stale, ask the user to send a fresh detaches_agent message with current connection settings.
 2. On the real OpenClaw agent host, run the agent-side doctor. Prefer the one-step URL flow when a fresh export URL is available:
 
 ```sh

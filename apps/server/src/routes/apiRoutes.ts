@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import express from "express";
 import multer from "multer";
-import type { AppHealth, DetachesContextExportResponse, DiagnosticItem, DiagnosticsResponse, InteractionKind, InteractionStatus, NetworkTestResponse, NetworkTestStep, ToolDecisionActor, ToolRequestKind, ToolTarget, UploadedFileRef } from "@detaches/shared";
+import type { AppHealth, DetachesContextExportResponse, DiagnosticItem, DiagnosticsResponse, InteractionKind, InteractionStatus, NetworkTestResponse, NetworkTestStep, TerminalChannelName, ToolDecisionActor, ToolRequestKind, ToolTarget, UploadedFileRef } from "@detaches/shared";
 import { appConfig, reverseBridgeBaseUrl } from "../config/appConfig.js";
 import { settingsStore, runtimeConfig } from "../config/settingsStore.js";
 import { sshTunnelService } from "../services/tunnel/sshTunnelService.js";
@@ -27,6 +27,7 @@ import { platformService } from "../services/platform/platformService.js";
 import { buildLocalMachineContext } from "../services/platform/localMachineContext.js";
 import { cloudPromptLogService } from "../services/gateway/cloudPromptLogService.js";
 import { interactionBrokerService } from "../services/interactions/interactionBrokerService.js";
+import { callbackAddressService } from "../services/callback/callbackAddressService.js";
 
 const upload = multer({
   dest: path.join(appConfig.storageDir, "cache"),
@@ -354,7 +355,14 @@ async function checkHealth(): Promise<AppHealth> {
       gatewayRemotePort: config.gatewayRemotePort,
       reverseBridgeRemoteHost: config.reverseBridgeRemoteHost,
       reverseBridgeRemotePort: config.reverseBridgeRemotePort,
-      authMode: config.authMode
+      authMode: config.authMode,
+      serverHost: config.serverHost,
+      serverPort: config.serverPort,
+      serverListenHosts: config.serverListenHosts.length ? config.serverListenHosts : [config.serverHost],
+      publicBaseUrl: config.publicBaseUrl,
+      gatewayTerminalLocalIp: config.gatewayTerminalLocalIp,
+      gatewayTerminalLastStatus: config.gatewayTerminalLastStatus,
+      gatewayTerminalLastError: config.gatewayTerminalLastError
     },
     checkedAt: new Date().toISOString()
   };
@@ -481,7 +489,77 @@ function diagnosticsFromHealth(health: AppHealth): DiagnosticItem[] {
 }
 
 apiRoutes.get("/ping", (_req, res) => {
-  res.json({ ok: true, app: "detaches_agent server", checkedAt: new Date().toISOString() });
+  res.json({ ok: true, app: "detaches_agent", checkedAt: new Date().toISOString() });
+});
+
+apiRoutes.get("/callback/ips", async (_req, res) => {
+  const config = await runtimeConfig();
+  res.json(callbackAddressService.listCandidates(config));
+});
+
+apiRoutes.post("/callback/test", async (req, res) => {
+  const inputBaseUrl = typeof req.body?.publicBaseUrl === "string" ? req.body.publicBaseUrl.trim() : "";
+  const settings = await settingsStore.publicSettings();
+  const config = await runtimeConfig();
+  const publicBaseUrl = inputBaseUrl || settings.publicBaseUrl;
+  const validation = callbackAddressService.validatePublicBaseUrl(publicBaseUrl);
+  if (!validation.ok) {
+    const testedAt = new Date().toISOString();
+    await settingsStore.updateProfile(settings.activeProfileId, {
+      gatewayTerminalLastStatus: "error",
+      gatewayTerminalLastTestedAt: testedAt,
+      gatewayTerminalLastError: validation.message
+    });
+    res.status(400).json({ ok: false, publicBaseUrl, error: validation.message, checkedAt: testedAt });
+    return;
+  }
+  const selectedHost = callbackAddressService.hostFromBaseUrl(publicBaseUrl);
+  const listenHosts = config.serverListenHosts.length ? config.serverListenHosts : [config.serverHost];
+  const wildcardListening = listenHosts.includes("0.0.0.0") || listenHosts.includes("::");
+  if (selectedHost && !wildcardListening && !listenHosts.includes(selectedHost)) {
+    const testedAt = new Date().toISOString();
+    const message = `当前 Detach Agent server 监听 ${listenHosts.join(", ")}:${config.serverPort}，但选择的回连 IP 是 ${selectedHost}。请保存配置并重启 Detach Agent 后再测试。`;
+    await settingsStore.updateProfile(settings.activeProfileId, {
+      publicBaseUrl,
+      gatewayTerminalLocalIp: selectedHost,
+      gatewayTerminalLastStatus: "error",
+      gatewayTerminalLastTestedAt: testedAt,
+      gatewayTerminalLastError: message
+    });
+    res.status(409).json({ ok: false, publicBaseUrl, error: message, checkedAt: testedAt, restartRequired: true });
+    return;
+  }
+  const checkedAt = new Date().toISOString();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(`${publicBaseUrl.replace(/\/+$/, "")}/api/ping`, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal
+    });
+    const payload = await response.json() as { app?: string };
+    if (!response.ok || payload.app !== "detaches_agent") throw new Error(`Unexpected ping response from ${publicBaseUrl}.`);
+    await settingsStore.updateProfile(settings.activeProfileId, {
+      publicBaseUrl,
+      gatewayTerminalLastStatus: "ok",
+      gatewayTerminalLastTestedAt: checkedAt,
+      gatewayTerminalLastError: ""
+    });
+    res.json({ ok: true, publicBaseUrl, checkedAt });
+  } catch (error) {
+    const message = error instanceof Error && error.name === "AbortError"
+      ? "gateway-terminal callback test timed out after 5000ms."
+      : error instanceof Error ? error.message : String(error);
+    await settingsStore.updateProfile(settings.activeProfileId, {
+      publicBaseUrl,
+      gatewayTerminalLastStatus: "error",
+      gatewayTerminalLastTestedAt: checkedAt,
+      gatewayTerminalLastError: message
+    });
+    res.status(400).json({ ok: false, publicBaseUrl, error: message, checkedAt });
+  } finally {
+    clearTimeout(timeout);
+  }
 });
 
 apiRoutes.get("/health", async (_req, res) => {
@@ -573,12 +651,14 @@ apiRoutes.post("/context/exports", async (req, res) => {
   }
   try {
     const record = contextExportService.create({ sessionKey, sessionMode });
-    const config = await runtimeConfig();
+    const context = await buildChatClientContext(sessionMode, sessionKey, [], { createContextExport: false });
+    const detaches = context.detaches as DetachesContextExportResponse["detaches"];
+    const baseUrl = detaches.localControl?.baseUrl?.replace(/\/+$/, "") || "";
     res.json({
       sessionKey: record.sessionKey,
       sessionMode: record.sessionMode,
       expiresAt: new Date(record.expiresAtMs).toISOString(),
-      consumeUrl: `${reverseBridgeBaseUrl(config)}/api/context/exports/${encodeURIComponent(record.token)}`
+      consumeUrl: baseUrl ? `${baseUrl}/api/context/exports/${encodeURIComponent(record.token)}` : ""
     });
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
@@ -841,6 +921,29 @@ function parseToolDecisionActor(value: unknown): ToolDecisionActor | undefined {
   };
 }
 
+function parseTerminalChannelName(value: unknown): TerminalChannelName | undefined {
+  return value === "gateway-terminal" || value === "ssh-terminal" || value === "chat-terminal" ? value : undefined;
+}
+
+function parseToolRequestMetadata(value: unknown): {
+  terminalChannel?: TerminalChannelName;
+  fallbackMode?: "chat-fenced-block";
+  preferredChannel?: TerminalChannelName;
+  callbackBaseUrl?: string;
+} | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const metadata = {
+    terminalChannel: parseTerminalChannelName(record.terminalChannel),
+    fallbackMode: record.fallbackMode === "chat-fenced-block" ? "chat-fenced-block" as const : undefined,
+    preferredChannel: parseTerminalChannelName(record.preferredChannel),
+    callbackBaseUrl: typeof record.callbackBaseUrl === "string" ? record.callbackBaseUrl.trim().slice(0, 500) : undefined
+  };
+  return metadata.terminalChannel || metadata.fallbackMode || metadata.preferredChannel || metadata.callbackBaseUrl
+    ? metadata
+    : undefined;
+}
+
 function extractBrokerSubmitToken(req: express.Request): string {
   const auth = req.header("authorization") || "";
   if (/^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, "").trim();
@@ -903,6 +1006,7 @@ apiRoutes.post("/tools/events/gateway", async (req, res) => {
     const payload = req.body.payload && typeof req.body.payload === "object" && !Array.isArray(req.body.payload)
       ? req.body.payload
       : {};
+    const metadata = parseToolRequestMetadata(req.body.metadata);
     if (!kind || !sessionKey || !sourceEventId) {
       res.status(400).json({ error: "Missing kind, sessionKey, or sourceEventId." });
       return;
@@ -919,6 +1023,7 @@ apiRoutes.post("/tools/events/gateway", async (req, res) => {
       reason,
       source: "gateway-event",
       sourceEventId,
+      metadata,
       payload
     }));
   } catch (error) {

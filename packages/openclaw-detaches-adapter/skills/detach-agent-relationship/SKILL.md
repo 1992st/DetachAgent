@@ -23,23 +23,57 @@ Apply these rules only when a conversation was bootstrapped as a Detach Agent co
 - Cross-environment work requires explicit handoff, pasted output, copied files, or user confirmation.
 - If the target environment is unclear, ask before acting.
 
+## Terminal Channels
+
+The current detaches context may expose three terminal channels. Always follow `clientContext.detaches.terminalChannels.preferred` when it is present.
+
+- `gateway-terminal`: preferred long-term path. The Host/Main Agent calls the Detach Agent HTTP broker through `gatewayTerminal.toolEventEndpoint` / `localControl.toolEventEndpoint` derived from Detach Agent `publicBaseUrl`. Requests use `source="gateway-event"` and still require Detach Agent Tool Queue approval.
+- `ssh-terminal`: advanced compatibility path. Use it only when `terminalChannels.sshTerminal.state` is `ready` and the selected/preferred channel is `ssh-terminal`. Its `baseUrl` may be a Main Agent loopback reverse bridge URL. Do not ask for an SSH password.
+- `chat-terminal`: fenced-block fallback. Emit exactly one `detaches-terminal` block when `preferred` is `chat-terminal` or when the selected HTTP broker endpoint is unreachable. Requests are parsed by Detach Agent as `source="text-extract"`.
+
+Channel rules:
+
+- Prefer HTTP broker only when `terminalChannels.preferred` is `gateway-terminal` or `ssh-terminal` and the selected channel is ready.
+- If the selected HTTP endpoint fails, report `DETACHES_ENDPOINT_UNREACHABLE` and use `chat-terminal` fallback.
+- Do not try alternate IPs or invent callback URLs.
+- Do not use `127.0.0.1` unless the selected channel is `ssh-terminal` and the context explicitly provides that URL.
+- Do not run `local-user-machine` commands in the Host/Main Agent shell.
+- Terminal channel selection does not change staged file save rules.
+
 ## User Local Terminal
 
-Selection rule: use this path for ordinary commands on the user's local machine. Use `credential-request` only when a real password or secret is needed.
+Selection rule: use the selected terminal channel for ordinary commands on the user's local machine. Use `credential-request` only when a real password or secret is needed.
 
-When the target is `local-user-machine`, request execution with exactly one `detaches-terminal` block or broker event.
+When the target is `local-user-machine`, request execution with exactly one channel-appropriate broker event or `detaches-terminal` block.
 
 - Do not SSH into the user's local machine.
 - Do not ask for the user's local SSH username, password, port, or key path.
 - Do not wrap local-user-machine commands in `ssh`.
 - detaches_agent runs approved `local-user-machine` terminal requests in a local terminal on the user's machine.
 - The user only approves the detaches_agent tool request; this local terminal path does not require an SSH password.
+- Prefer `gateway-terminal` when it is the preferred ready channel.
+- Use `ssh-terminal` only when the context marks it ready and selected.
+- Use `chat-terminal` fenced block when it is preferred or when HTTP broker access is unreachable.
 
-Example:
+Gateway terminal example:
+
+```bash
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-request \
+  --context /tmp/detaches-client-context.json \
+  --command 'pwd' \
+  --reason 'check current directory on Detach Agent PC' \
+  --source-event-id 'terminal:pwd:<unique-id>'
+```
+
+Chat terminal fallback example:
 
 ```detaches-terminal
 {"target":"local-user-machine","command":"df -h /","reason":"check root disk usage on the user's local machine"}
 ```
+
+SSH terminal note:
+
+Use `ssh-terminal` only when `terminalChannels.sshTerminal.state` is `ready`. Its base URL points to the Main Agent loopback reverse bridge supplied by context.
 
 ## Local Interaction API
 
@@ -82,6 +116,8 @@ Defined error codes:
 - `DETACHES_CONTEXT_INVALID`: context/session data is missing or invalid.
 - `DETACHES_AUTH_REQUIRED`: the broker submit token is missing or rejected.
 - `DETACHES_ENDPOINT_UNREACHABLE`: the Host/Main Agent machine cannot reach the context-provided detaches_agent URL.
+- `DETACHES_CHANNEL_UNAVAILABLE`: the selected terminal channel is not ready.
+- `DETACHES_APPROVAL_REQUIRED`: the request was submitted and is waiting for Detach Agent Tool Queue approval.
 - `DETACHES_PROTOCOL_ERROR`: the server response is malformed or unexpected.
 - `DETACHES_INTERACTION_REJECTED`: the user dismissed/rejected the popup.
 - `DETACHES_INTERACTION_EXPIRED`: detaches_agent expired the pending interaction.
@@ -102,6 +138,7 @@ Then poll `GET <localControl.baseUrl>/api/interactions/<interactionId>?submitTok
 ## Staged Files From Detach Agent
 
 When a message contains `[[DETACH_AGENT_FILE_STAGED]]`, the listed file exists only on the Detach Agent user's machine.
+Terminal channel selection does not change staged file save rules.
 
 - `sourceLocalPath` is an absolute path on the detaches_agent machine, not on the Host/Main Agent machine.
 - Host/Main Agent must not claim it can read `sourceLocalPath` directly.

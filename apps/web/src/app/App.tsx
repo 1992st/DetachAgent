@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { KeyRound, Wifi, X } from "lucide-react";
+import { Copy, FileText, KeyRound, Wifi, X } from "lucide-react";
 import type { AgentSummary, AppHealth, ChatSessionMode, ClientIdentity, InteractionRecord, LocalTerminalApp, RelationshipSkillStatus, SshCredentialSessionSnapshot, ToolBrokerSocketEvent, UploadedFileRef } from "@detaches/shared";
 import { dismissSshSessionPassword, fetchAgents, fetchClientIdentity, fetchDiagnostics, fetchHealth, fetchLocalTerminalApps, fetchSettings, openLocalTerminalApp, rejectInteraction, resolveInteraction, submitSshSessionPassword, uploadFile, wsUrl } from "../lib/api.js";
 import { ConnectionBar } from "../features/connection/ConnectionBar.js";
@@ -7,6 +7,7 @@ import { AgentList } from "../features/agents/AgentList.js";
 import { ChatPanel, type ChatPanelHandle } from "../features/chat/ChatPanel.js";
 import { SettingsPanel } from "../features/settings/SettingsPanel.js";
 import { ToolQueuePanel } from "../features/tools/ToolQueuePanel.js";
+import { relationshipSkillInstallPrompt, relationshipSkillVersion } from "../features/skills/SkillInstallPanel.js";
 
 type ViewMode = "chat" | "network" | "tool-queue";
 
@@ -38,6 +39,10 @@ export function App() {
   const [interactionError, setInteractionError] = useState<string | null>(null);
   const [relationshipSkillStatus, setRelationshipSkillStatus] = useState<RelationshipSkillStatus>("unknown");
   const [relationshipSkillMessage, setRelationshipSkillMessage] = useState<string | undefined>(undefined);
+  const [relationshipSkillInstalledVersion, setRelationshipSkillInstalledVersion] = useState<string | undefined>(undefined);
+  const [relationshipSkillRequiredVersion, setRelationshipSkillRequiredVersion] = useState<string | undefined>(undefined);
+  const [relationshipSkillCheckNonce, setRelationshipSkillCheckNonce] = useState(0);
+  const [relationshipSkillPromptOpen, setRelationshipSkillPromptOpen] = useState(false);
   const chatPanelRef = useRef<ChatPanelHandle | null>(null);
 
   const refreshHealth = useCallback(async () => {
@@ -244,9 +249,11 @@ export function App() {
     }
   }
 
-  const handleRelationshipSkillStatusChange = useCallback((status: RelationshipSkillStatus, message?: string) => {
+  const handleRelationshipSkillStatusChange = useCallback((status: RelationshipSkillStatus, message?: string, installedVersion?: string, requiredVersion?: string) => {
     setRelationshipSkillStatus(status);
     setRelationshipSkillMessage(message);
+    setRelationshipSkillInstalledVersion(installedVersion);
+    setRelationshipSkillRequiredVersion(requiredVersion);
   }, []);
 
   function handleNewSession() {
@@ -256,6 +263,9 @@ export function App() {
     setAttachmentsBySession((current) => ({ ...current, [nextSession]: [] }));
     setRelationshipSkillStatus("checking");
     setRelationshipSkillMessage("Checking detach-agent-relationship skill...");
+    setRelationshipSkillInstalledVersion(undefined);
+    setRelationshipSkillRequiredVersion(undefined);
+    setRelationshipSkillCheckNonce((current) => current + 1);
   }
 
   return (
@@ -282,6 +292,15 @@ export function App() {
           onDismiss={() => void handleRejectCredentialInteraction()}
         />
       ) : null}
+      {relationshipSkillPromptOpen ? (
+        <RelationshipSkillPromptDialog
+          status={relationshipSkillStatus}
+          message={relationshipSkillMessage}
+          installedVersion={relationshipSkillInstalledVersion}
+          requiredVersion={relationshipSkillRequiredVersion}
+          onDismiss={() => setRelationshipSkillPromptOpen(false)}
+        />
+      ) : null}
       <ConnectionBar
         health={health}
         loading={healthLoading}
@@ -294,9 +313,10 @@ export function App() {
         onOpenTerminalApp={(appId) => void openTerminalApp(appId)}
         relationshipSkillStatus={relationshipSkillStatus}
         relationshipSkillMessage={relationshipSkillMessage}
+        relationshipSkillInstalledVersion={relationshipSkillInstalledVersion}
+        relationshipSkillRequiredVersion={relationshipSkillRequiredVersion}
         onRelationshipSkillAction={() => {
-          setView("network");
-          window.setTimeout(() => document.getElementById("relationship-skill-install")?.scrollIntoView({ block: "start", behavior: "smooth" }), 50);
+          setRelationshipSkillPromptOpen(true);
         }}
       />
       <nav className="view-tabs" aria-label="Main views">
@@ -330,6 +350,7 @@ export function App() {
             sessionMode={sessionMode}
             clientIdentity={clientIdentity}
             attachments={attachments}
+            relationshipSkillCheckNonce={relationshipSkillCheckNonce}
             onSessionModeChange={setSessionMode}
             onNewSession={handleNewSession}
             onClearAttachments={() => {
@@ -363,6 +384,62 @@ export function App() {
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function RelationshipSkillPromptDialog({
+  status,
+  message,
+  installedVersion,
+  requiredVersion,
+  onDismiss
+}: {
+  status: RelationshipSkillStatus;
+  message?: string;
+  installedVersion?: string;
+  requiredVersion?: string;
+  onDismiss: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const targetVersion = requiredVersion || relationshipSkillVersion;
+
+  async function copyPrompt() {
+    await navigator.clipboard.writeText(relationshipSkillInstallPrompt);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }
+
+  return (
+    <div className="save-password-backdrop" role="presentation">
+      <section className="relationship-skill-prompt-dialog" role="dialog" aria-modal="true" aria-label="Relationship skill update prompt">
+        <header className="save-password-header">
+          <FileText size={20} />
+          <div>
+            <strong>Relationship skill 安装/更新</strong>
+            <small>复制下面这段话发给 Main Agent，让它更新到 v{targetVersion}</small>
+          </div>
+          <button type="button" className="icon-button small" title="Dismiss" onClick={onDismiss}>
+            <X size={15} />
+          </button>
+        </header>
+        <div className="relationship-skill-prompt-meta">
+          <span>状态：{status}</span>
+          {installedVersion ? <span>当前版本：{installedVersion}</span> : null}
+          <span>目标版本：{targetVersion}</span>
+        </div>
+        {message ? <p className="relationship-skill-prompt-message">{message}</p> : null}
+        <div className="relationship-skill-prompt-box">
+          <div>
+            <strong>发给 Main Agent 的 Prompt</strong>
+            <button type="button" className="copy-button" title="Copy prompt" onClick={() => void copyPrompt()}>
+              <Copy size={14} />
+            </button>
+          </div>
+          <pre>{relationshipSkillInstallPrompt}</pre>
+          {copied ? <small>已复制</small> : null}
+        </div>
+      </section>
     </div>
   );
 }

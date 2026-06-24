@@ -23,6 +23,11 @@ export interface RuntimeSettings {
   authPassword: string;
   remoteWorkspaceRoot: string;
   publicBaseUrl: string;
+  gatewayTerminalLocalIp?: string;
+  gatewayTerminalLocalIpSource?: "auto" | "manual";
+  gatewayTerminalLastStatus?: "ok" | "error";
+  gatewayTerminalLastTestedAt?: string;
+  gatewayTerminalLastError?: string;
 }
 
 type PersistedProfile = RuntimeSettings & {
@@ -138,7 +143,10 @@ export class SettingsStore {
     return {
       ...publicProfile(active),
       activeProfileId: active.id,
-      profiles: this.persisted.profiles.map(publicProfile)
+      profiles: this.persisted.profiles.map(publicProfile),
+      serverHost: appConfig.serverHost,
+      serverPort: appConfig.serverPort,
+      serverListenHosts: appConfig.serverListenHosts.length ? appConfig.serverListenHosts : [appConfig.serverHost]
     };
   }
 
@@ -278,6 +286,14 @@ export class SettingsStore {
     if (remoteWorkspaceRoot !== undefined) output.remoteWorkspaceRoot = remoteWorkspaceRoot;
     const publicBaseUrl = sanitizeString(input.publicBaseUrl);
     if (publicBaseUrl !== undefined) output.publicBaseUrl = publicBaseUrl.replace(/\/+$/, "");
+    const gatewayTerminalLocalIp = sanitizeString(input.gatewayTerminalLocalIp);
+    if (gatewayTerminalLocalIp !== undefined) output.gatewayTerminalLocalIp = gatewayTerminalLocalIp;
+    if (input.gatewayTerminalLocalIpSource === "auto" || input.gatewayTerminalLocalIpSource === "manual") output.gatewayTerminalLocalIpSource = input.gatewayTerminalLocalIpSource;
+    if (input.gatewayTerminalLastStatus === "ok" || input.gatewayTerminalLastStatus === "error") output.gatewayTerminalLastStatus = input.gatewayTerminalLastStatus;
+    const gatewayTerminalLastTestedAt = sanitizeString(input.gatewayTerminalLastTestedAt);
+    if (gatewayTerminalLastTestedAt !== undefined) output.gatewayTerminalLastTestedAt = gatewayTerminalLastTestedAt;
+    const gatewayTerminalLastError = sanitizeString(input.gatewayTerminalLastError);
+    if (gatewayTerminalLastError !== undefined) output.gatewayTerminalLastError = gatewayTerminalLastError;
     const authToken = sanitizeString(input.authToken);
     if (authToken !== undefined) output.authToken = authToken;
     const authPassword = sanitizeString(input.authPassword);

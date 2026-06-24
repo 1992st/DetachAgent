@@ -40,6 +40,35 @@ export interface DetachesStagedFileContext {
   };
 }
 
+export type TerminalChannelName = "gateway-terminal" | "ssh-terminal" | "chat-terminal";
+
+export interface DetachesTerminalChannels {
+  preferred: TerminalChannelName;
+  gatewayTerminal: {
+    state: "ready" | "error" | "disabled";
+    baseUrl?: string;
+    toolEventEndpoint?: string;
+    interactionEventEndpoint?: string;
+    message?: string;
+    requiresApproval: true;
+  };
+  sshTerminal: {
+    state: "ready" | "error" | "disabled";
+    baseUrl?: string;
+    toolEventEndpoint?: string;
+    interactionEventEndpoint?: string;
+    message?: string;
+    requiresApproval: true;
+  };
+  chatTerminal: {
+    state: "available";
+    requestFence: "detaches-terminal";
+    source: "text-extract";
+    requiresApproval: true;
+    message?: string;
+  };
+}
+
 export interface DetachesSessionContext {
   app: "detaches_agent";
   version: 1;
@@ -66,6 +95,7 @@ export interface DetachesSessionContext {
   files?: {
     staged: DetachesStagedFileContext[];
   };
+  terminalChannels?: DetachesTerminalChannels;
   broker?: {
     gatewayEventEndpoint: string;
     interactionEventEndpoint?: string;
@@ -76,13 +106,14 @@ export interface DetachesSessionContext {
     requestFormats: Array<"broker-event" | "fence">;
   };
   localControl?: {
-    baseUrl: string;
-    toolEventEndpoint: string;
-    interactionEventEndpoint: string;
-    fixedPort: number;
+    transport?: TerminalChannelName;
+    baseUrl?: string;
+    toolEventEndpoint?: string;
+    interactionEventEndpoint?: string;
+    fixedPort?: number;
     submitTokenHeader: "Authorization";
     addressSource: "remote-reachable-context";
-    reverseBridge: {
+    reverseBridge?: {
       ok: boolean;
       message: string;
       reverseBrokerUrl?: string;
@@ -94,7 +125,7 @@ export interface DetachesSessionContext {
     createEndpoint: string;
     consumeEndpointPattern: string;
     consumeUrl?: string;
-    createdBy: "detaches-ui-loopback" | "detaches-ui-reverse-bridge";
+    createdBy: "detaches-ui-loopback" | "detaches-ui-direct-callback" | "detaches-ui-reverse-bridge";
     consumedBy: "remote-agent-host";
     oneTime: true;
     ttlSeconds: number;

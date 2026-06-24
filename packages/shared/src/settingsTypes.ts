@@ -17,6 +17,11 @@ export interface RemoteProfile {
   authMode: "token" | "password" | "none";
   remoteWorkspaceRoot: string;
   publicBaseUrl: string;
+  gatewayTerminalLocalIp?: string;
+  gatewayTerminalLocalIpSource?: "auto" | "manual";
+  gatewayTerminalLastStatus?: "ok" | "error";
+  gatewayTerminalLastTestedAt?: string;
+  gatewayTerminalLastError?: string;
   hasAuthToken: boolean;
   hasAuthPassword: boolean;
   lastTestedAt?: string;
@@ -26,6 +31,9 @@ export interface RemoteProfile {
 export interface PublicSettings extends RemoteProfile {
   activeProfileId: string;
   profiles: RemoteProfile[];
+  serverHost: string;
+  serverPort: number;
+  serverListenHosts?: string[];
 }
 
 export interface RemoteProfileUpdate {
@@ -50,6 +58,11 @@ export interface RemoteProfileUpdate {
   clearAuthPassword?: boolean;
   remoteWorkspaceRoot?: string;
   publicBaseUrl?: string;
+  gatewayTerminalLocalIp?: string;
+  gatewayTerminalLocalIpSource?: "auto" | "manual";
+  gatewayTerminalLastStatus?: "ok" | "error";
+  gatewayTerminalLastTestedAt?: string;
+  gatewayTerminalLastError?: string;
 }
 
 export interface SettingsUpdate extends RemoteProfileUpdate {

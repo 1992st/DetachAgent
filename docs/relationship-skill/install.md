@@ -125,7 +125,7 @@ cat ~/.openclaw/skills/detach-agent-relationship/VERSION
 ```
 
 The current package version is recorded in `VERSION`; this release expects
-`1.0.1`.
+`1.1.0`.
 
 ## Troubleshooting
 

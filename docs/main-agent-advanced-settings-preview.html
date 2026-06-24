@@ -131,7 +131,7 @@
   </div>
   <div class="advanced-backdrop">
     <section class="advanced">
-      <header><div><strong>高级配置</strong><small>SSH 是高级兼容能力，默认不参与 Gateway 直连主流程。</small></div><button class="secondary">关闭</button></header>
+      <header><div><strong>高级配置</strong><small>ssh-terminal 是高级兼容能力，默认关闭；gateway-terminal 可同时保持启用。</small></div><button class="secondary">关闭</button></header>
       <div class="advanced-body">
         <section class="advanced-section">
           <div><h3>Main Agent 服务信息</h3><p>当前支持 SSH；后续会扩展 scp 等协议。</p></div>
@@ -146,8 +146,8 @@
           </div>
         </section>
         <section class="advanced-section">
-          <div><h3>本机 SSH 回连</h3><p>Main Agent 当前不依赖 SSH 控制本机 terminal；只有需要 reverse bridge 时才开启。</p></div>
-          <label class="toggle"><input type="checkbox">连接本机 SSH / reverse bridge</label>
+          <div><h3>SSH Reverse Bridge / ssh-terminal</h3><p>ssh-terminal 使用 Main Agent SSH key 建立 reverse bridge。它默认关闭，可与 gateway-terminal 同时开启，不收集或保存 SSH 密码。</p></div>
+          <label class="toggle"><input type="checkbox">启用 ssh-terminal / reverse bridge</label>
           <p class="disabled-note">已关闭。直连 Gateway 聊天、文件暂存和普通工具请求不会使用这条 SSH 链路。</p>
         </section>
       </div>

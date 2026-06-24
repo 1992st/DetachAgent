@@ -138,6 +138,9 @@ class SshTunnelService {
       };
     }
 
+    // ssh-terminal 是高级兼容通道：只用 Main Agent SSH key 建立反向桥，不收集或保存 SSH 密码。
+    // includeLocalForward=true 仍用于旧的 SSH Gateway tunnel 兼容路径，因此密码兜底只保留给旧路径。
+    const passwordFallbackAllowed = options.includeLocalForward;
     const baseArgs = [
       ...ssh.argsPrefix,
       "-N",
@@ -160,7 +163,7 @@ class SshTunnelService {
     }
     baseArgs.push(`${config.remoteUser}@${config.remoteHost}`);
 
-    const cachedPassword = sshCredentialSessionService.getPassword(credentialTarget);
+    const cachedPassword = passwordFallbackAllowed ? sshCredentialSessionService.getPassword(credentialTarget) : null;
     const firstAttempt = cachedPassword
       ? await this.spawnTunnel(ssh.command, [...baseArgs, ...sshPasswordAuthArgs()], includeLocalForward, config.gatewayLocalPort, cachedPassword)
       : await this.spawnTunnel(ssh.command, [...baseArgs, ...sshBatchModeArgs()], includeLocalForward, config.gatewayLocalPort);
@@ -168,7 +171,7 @@ class SshTunnelService {
     if (!firstAttempt.listening && cachedPassword) {
       sshCredentialSessionService.markFailed(credentialTarget, firstAttempt.stderr || "SSH password authentication failed.", { clearPassword: true });
     }
-    if (!firstAttempt.listening && (cachedPassword || isPasswordAuthFailure(firstAttempt.stderr))) {
+    if (!firstAttempt.listening && passwordFallbackAllowed && (cachedPassword || isPasswordAuthFailure(firstAttempt.stderr))) {
       let password: string;
       try {
         password = await sshCredentialSessionService.requestPassword(credentialTarget, {
