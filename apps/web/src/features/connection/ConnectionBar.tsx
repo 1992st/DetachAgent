@@ -66,8 +66,8 @@ export function ConnectionBar({
         <div className="connection-status">
           {health ? (
             <>
-              {pill(health.ssh.state, "SSH", health.ssh.message)}
               {pill(health.gateway.state, "Gateway", health.gateway.message)}
+              {pill(health.ssh.state, health.config.localSshBridgeEnabled ? "SSH bridge" : "SSH", health.ssh.message)}
               <span className="remote-host">{health.config.remoteHost}</span>
             </>
           ) : (
@@ -81,9 +81,9 @@ export function ConnectionBar({
           ) : null}
           {relationshipSkillStatus === "missing" || relationshipSkillStatus === "checking" || relationshipSkillStatus === "error" ? (
             <span className={`relationship-skill-alert ${relationshipSkillStatus}`} title={relationshipSkillMessage}>
-              {relationshipSkillStatus === "checking" ? "检查 relationship skill" : relationshipSkillStatus === "error" ? "Skill 检测失败" : "Relationship skill 未安装"}
+              {relationshipSkillStatus === "checking" ? "Relationship skill 检测中" : relationshipSkillStatus === "error" ? "Skill 检测失败" : "Relationship skill 未安装"}
               {relationshipSkillStatus === "missing" ? (
-                <button type="button" onClick={onRelationshipSkillAction}>查看安装</button>
+                <button type="button" onClick={onRelationshipSkillAction}>安装 relationship skill</button>
               ) : null}
             </span>
           ) : null}

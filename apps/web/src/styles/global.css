@@ -131,7 +131,7 @@ button, input, textarea {
   min-height: 0;
   height: 0;
   display: grid;
-  grid-template-columns: 280px minmax(420px, 1fr) 320px;
+  grid-template-columns: 280px minmax(420px, 1fr);
   overflow: hidden;
 }
 
@@ -147,6 +147,26 @@ button, input, textarea {
 .file-panel {
   border-right: 0;
   border-left: 1px solid var(--line);
+}
+
+.tool-queue-workspace {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: #f8fafc;
+  padding: 16px;
+}
+
+.tool-queue-workspace .tool-queue {
+  max-width: 1120px;
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.tool-queue-workspace .tool-queue-list {
+  max-height: none;
 }
 
 .tool-queue {
@@ -2387,9 +2407,6 @@ h3 { font-size: 14px; }
 @media (max-width: 980px) {
   .workspace {
     grid-template-columns: 220px minmax(0, 1fr);
-  }
-  .file-panel {
-    display: none;
   }
   .connection-bar {
     align-items: flex-start;

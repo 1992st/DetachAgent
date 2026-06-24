@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { KeyRound, Wifi, X } from "lucide-react";
-import type { AgentSummary, AppHealth, ChatSessionMode, ClientIdentity, DiagnosticItem, InteractionRecord, LocalTerminalApp, RelationshipSkillStatus, SshCredentialSessionSnapshot, ToolBrokerSocketEvent, UploadedFileRef } from "@detaches/shared";
+import type { AgentSummary, AppHealth, ChatSessionMode, ClientIdentity, InteractionRecord, LocalTerminalApp, RelationshipSkillStatus, SshCredentialSessionSnapshot, ToolBrokerSocketEvent, UploadedFileRef } from "@detaches/shared";
 import { dismissSshSessionPassword, fetchAgents, fetchClientIdentity, fetchDiagnostics, fetchHealth, fetchLocalTerminalApps, fetchSettings, openLocalTerminalApp, rejectInteraction, resolveInteraction, submitSshSessionPassword, uploadFile, wsUrl } from "../lib/api.js";
 import { ConnectionBar } from "../features/connection/ConnectionBar.js";
 import { AgentList } from "../features/agents/AgentList.js";
 import { ChatPanel, type ChatPanelHandle } from "../features/chat/ChatPanel.js";
-import { FilePanel } from "../features/files/FilePanel.js";
 import { SettingsPanel } from "../features/settings/SettingsPanel.js";
+import { ToolQueuePanel } from "../features/tools/ToolQueuePanel.js";
 
-type ViewMode = "chat" | "network";
+type ViewMode = "chat" | "network" | "tool-queue";
 
 export function App() {
   const [view, setView] = useState<ViewMode>("chat");
@@ -19,18 +19,12 @@ export function App() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [agentsLoading, setAgentsLoading] = useState(false);
-  const [diagnostics, setDiagnostics] = useState<DiagnosticItem[]>([]);
-  const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
-  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [clientIdentity, setClientIdentity] = useState<ClientIdentity | null>(null);
   const [clientError, setClientError] = useState<string | null>(null);
   const [sessionMode, setSessionMode] = useState<ChatSessionMode>("device");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [sessionOverrides, setSessionOverrides] = useState<Record<string, string>>({});
   const [attachmentsBySession, setAttachmentsBySession] = useState<Record<string, UploadedFileRef[]>>({});
-  const [uploading, setUploading] = useState(false);
-  const [fileError, setFileError] = useState<string | null>(null);
-  const [remotePath, setRemotePath] = useState("");
   const [terminalApps, setTerminalApps] = useState<LocalTerminalApp[]>([]);
   const [terminalAppsLoading, setTerminalAppsLoading] = useState(false);
   const [terminalAppsError, setTerminalAppsError] = useState<string | null>(null);
@@ -92,16 +86,11 @@ export function App() {
   }, []);
 
   const refreshDiagnostics = useCallback(async () => {
-    setDiagnosticsLoading(true);
-    setDiagnosticsError(null);
     try {
       const response = await fetchDiagnostics();
-      setDiagnostics(response.items);
       setHealth(response.health);
     } catch (error) {
-      setDiagnosticsError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setDiagnosticsLoading(false);
+      setHealthError(error instanceof Error ? error.message : String(error));
     }
   }, []);
 
@@ -169,8 +158,6 @@ export function App() {
 
   async function handleUpload(files: FileList) {
     if (!selectedSession) return;
-    setUploading(true);
-    setFileError(null);
     const fileNames = Array.from(files).map((file) => file.name).join(", ");
     try {
       const uploaded: UploadedFileRef[] = [];
@@ -184,9 +171,7 @@ export function App() {
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setFileError(`上传失败${fileNames ? ` (${fileNames})` : ""}: ${message}`);
-    } finally {
-      setUploading(false);
+      setHealthError(`上传失败${fileNames ? ` (${fileNames})` : ""}: ${message}`);
     }
   }
 
@@ -310,7 +295,7 @@ export function App() {
         relationshipSkillStatus={relationshipSkillStatus}
         relationshipSkillMessage={relationshipSkillMessage}
         onRelationshipSkillAction={() => {
-          setView("chat");
+          setView("network");
           window.setTimeout(() => document.getElementById("relationship-skill-install")?.scrollIntoView({ block: "start", behavior: "smooth" }), 50);
         }}
       />
@@ -324,6 +309,7 @@ export function App() {
             <Wifi size={15} />
             连接设置
           </button>
+          <button className={view === "tool-queue" ? "active" : ""} onClick={() => setView("tool-queue")}>工具队列</button>
         </div>
         <div className="top-debug-terminal-slot" />
       </nav>
@@ -353,29 +339,26 @@ export function App() {
             onNeedUpload={handleUpload}
             onRelationshipSkillStatusChange={handleRelationshipSkillStatusChange}
           />
-          <FilePanel
-            sessionKey={selectedSession}
-            agentId={selectedAgent?.id ?? null}
-            clientIdentity={clientIdentity}
-            files={attachments}
-            uploading={uploading}
-            error={fileError}
-            remotePath={remotePath}
-            diagnostics={diagnostics}
-            diagnosticsLoading={diagnosticsLoading}
-            diagnosticsError={diagnosticsError}
-            onRemotePathChange={setRemotePath}
-            onDiagnosticsRefresh={refreshDiagnostics}
-            onRevealTerminal={() => chatPanelRef.current?.revealTerminal()}
-          />
         </div>
-      ) : (
+      ) : view === "network" ? (
         <div className="settings-workspace">
           <SettingsPanel
             onSaved={() => {
               void refreshAgents();
               void refreshDiagnostics();
               void refreshNetworkGuide();
+            }}
+          />
+        </div>
+      ) : (
+        <div className="tool-queue-workspace">
+          <ToolQueuePanel
+            sessionKey={selectedSession}
+            agentId={selectedAgent?.id ?? null}
+            clientIdentity={clientIdentity}
+            onRevealTerminal={() => {
+              setView("chat");
+              window.setTimeout(() => chatPanelRef.current?.revealTerminal(), 50);
             }}
           />
         </div>

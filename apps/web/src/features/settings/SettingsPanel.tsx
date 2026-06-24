@@ -3,6 +3,7 @@ import { Copy, FileInput, Play, Plus, Save, Settings2, ShieldCheck, Trash2, Wifi
 import type { NetworkTestResponse, PublicSettings, RemoteProfile, RemoteProfileUpdate } from "@detaches/shared";
 import { activateRemoteProfile, createRemoteProfile, deleteRemoteProfile, fetchSettings, saveRemoteProfile, testNetwork } from "../../lib/api.js";
 import { AgentConfigAssistantDialog } from "./agentConfigAssistant/AgentConfigAssistantDialog.js";
+import { SkillInstallPanel } from "../skills/SkillInstallPanel.js";
 
 interface Props {
   onSaved: () => void;
@@ -502,6 +503,7 @@ export function SettingsPanel({ onSaved }: Props) {
         ) : (
           <div className="empty-state">点击“测试网络”后会显示逐项结果。</div>
         )}
+        <SkillInstallPanel />
         <details className="main-agent-config-help">
           <summary>Main Agent 需要怎么配置</summary>
           <p>detaches_agent 直连的是 Main Agent 的 OpenClaw Gateway，所以 Main Agent 必须让 Gateway 监听可被这台电脑访问的地址。</p>

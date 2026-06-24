@@ -9,7 +9,7 @@ const targetDir = "~/.openclaw/skills";
 const repositoryUrl = "https://github.com/1992st/DetachAgent.git";
 const skillSourcePath = "packages/openclaw-detaches-adapter/skills/detach-agent-relationship";
 
-export function SkillInstallPanel({ sessionKey: _sessionKey, agentId: _agentId }: { sessionKey: string | null; agentId: string | null }) {
+export function SkillInstallPanel({ sessionKey: _sessionKey, agentId: _agentId }: { sessionKey?: string | null; agentId?: string | null }) {
   const [mode, setMode] = useState<"install" | "verify" | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -23,8 +23,8 @@ export function SkillInstallPanel({ sessionKey: _sessionKey, agentId: _agentId }
     <section className="adapter-status-panel skill-install-panel" id="relationship-skill-install">
       <div className="panel-heading compact">
         <div>
-          <h2>Detach Skill</h2>
-          <p>OpenClaw 全局 Main Agent skill</p>
+          <h2>Detach relationship skill 安装</h2>
+          <p>OpenClaw 全局 Main Agent skill，用于让 Main Agent 理解 detaches_agent 上下文与文件转交协议。</p>
         </div>
         <ShieldCheck size={17} />
       </div>

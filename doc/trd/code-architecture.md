@@ -161,18 +161,9 @@ detaches_agent/
 ### Tool Queue
 
 - `apps/web/src/features/tools/ToolQueuePanel.tsx`
-  - 右侧独立工具队列，按当前 sessionKey/agentId 查询 `GET /api/tools/requests`。
+  - 顶层 `工具队列` 页面，按当前 sessionKey/agentId 查询 `GET /api/tools/requests`。
   - 订阅 `/api/tools/stream`，收到 broker request 事件后刷新队列。
   - 承担主要审批、拒绝、结果回写重试和打开 terminal 操作，不依赖某条聊天消息存在。
-
-### Adapter Status
-
-- `apps/web/src/features/adapters/AdapterStatusPanel.tsx`
-  - 右侧栏展示 OpenClaw detaches adapter readiness。
-  - 调用 `/api/adapters/openclaw-detaches/readiness` 和 `/api/adapters/openclaw-detaches/install-plan`。
-  - 展示本地 adapter distribution 的 ready/missing/invalid/error 状态，避免把本地文件系统检查误报成远端已安装状态。
-  - 展示远端安装目录、安装命令和远端验证命令。
-  - 可创建 `adapter-install` Tool Broker 请求；真正安装必须在 Tool Queue 里审批并接受 elevated 风险。
 
 ### Terminal
 
@@ -185,8 +176,9 @@ detaches_agent/
 ### Settings / Diagnostics
 
 - `apps/web/src/features/settings/SettingsPanel.tsx`
-- `apps/web/src/features/connection/DiagnosticsPanel.tsx`
-- 提供连接配置和网络诊断。
+- `apps/web/src/features/connection/ConnectionBar.tsx`
+- 提供连接配置、网络测试、relationship skill 安装说明和顶部紧凑健康摘要。
+- 主聊天页不再挂载右侧 Diagnostics/File/Adapter 面板；聊天视图只保留 Agent 列表和 ChatPanel。
 
 ## 共享类型
 
