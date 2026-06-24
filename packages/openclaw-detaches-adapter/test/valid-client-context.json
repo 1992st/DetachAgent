@@ -17,6 +17,16 @@
       "displayName": "detaches test machine",
       "sessionNamespace": "detaches:detaches"
     },
+    "localMachine": {
+      "os": "win32",
+      "nodePlatform": "win32",
+      "arch": "x64",
+      "shell": "powershell.exe",
+      "pathStyle": "windows",
+      "pathSeparator": "\\",
+      "commandDialect": "powershell",
+      "appDataDir": "C:\\Users\\alice\\.detach_agent"
+    },
     "broker": {
       "gatewayEventEndpoint": "http://127.0.0.1:38888/api/tools/events/gateway",
       "interactionEventEndpoint": "http://127.0.0.1:38888/api/interactions/events/gateway",
@@ -33,6 +43,12 @@
       "fixedPort": 38888,
       "submitTokenHeader": "Authorization",
       "addressSource": "remote-reachable-context",
+      "reverseBridge": {
+        "ok": true,
+        "message": "SSH reverse broker bridge is ready.",
+        "reverseBrokerUrl": "http://127.0.0.1:38888",
+        "pid": 1234
+      },
       "note": "Use this context-provided URL from the Host/Main Agent machine."
     },
     "contextExport": {

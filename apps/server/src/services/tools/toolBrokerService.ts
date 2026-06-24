@@ -198,6 +198,27 @@ class ToolBrokerService {
       await this.audit({ type: "tool.approve", requestId, status: "blocked", actor: input.actor, riskAccepted: input.riskAccepted, error: request.error });
       throw new Error(request.error || "Tool request is blocked.");
     }
+    if (request.kind === "main-agent-save-file" && request.status === "running") {
+      const transfer = mainAgentFileTransferService.findByRequest(request.id);
+      if (transfer) {
+        return {
+          request,
+          execution: {
+            executionId: transfer.transferId,
+            target: request.target,
+            sessionKey: request.sessionKey,
+            wroteToTerminal: false,
+            completed: transfer.status === "succeeded" || transfer.status === "failed",
+            exitCode: transfer.status === "succeeded" ? 0 : transfer.status === "failed" ? 1 : undefined,
+            forwardStatus: "not-started"
+          },
+          message: mainAgentTransferApproveMessage(transfer)
+        };
+      }
+      await this.fail(request, "Main Agent file transfer was running, but its in-memory transfer state is no longer available. Please retry the request.");
+      const failed = this.requireRequest(requestId);
+      return this.approve(failed.id, input);
+    }
     if (request.status !== "pending" && request.status !== "failed") {
       throw new Error(`Tool request is already ${request.status}.`);
     }
@@ -899,6 +920,13 @@ function reusableDuplicateStatus(status: ToolRequestStatus): boolean {
   return status === "pending" || status === "running" || status === "failed" || status === "blocked";
 }
 
+function mainAgentTransferApproveMessage(transfer: MainAgentFileTransferSnapshot): string {
+  if (transfer.status === "waiting-password" || transfer.needsPassword) return "Main Agent file transfer is waiting for SSH password.";
+  if (transfer.status === "succeeded") return "Main Agent file transfer already succeeded.";
+  if (transfer.status === "failed") return transfer.error || "Main Agent file transfer already failed.";
+  return "Main Agent file transfer is already running.";
+}
+
 function parseFileTransferRequests(text: string): ParsedToolRequest[] {
   const requests: ParsedToolRequest[] = [];
   const fencePattern = /```(?:detaches-file-transfer|file-transfer)\s*\n([\s\S]*?)```/gi;
@@ -1203,7 +1231,7 @@ function shellPath(value: string): string {
 function isToolRequestRecord(value: unknown): value is ToolRequestRecord {
   if (!targetObject(value)) return false;
   return typeof value.id === "string"
-    && (value.kind === "terminal" || value.kind === "file-transfer" || value.kind === "adapter-install" || value.kind === "skill-install" || value.kind === "skill-verify")
+    && (value.kind === "terminal" || value.kind === "file-transfer" || value.kind === "main-agent-save-file" || value.kind === "adapter-install" || value.kind === "skill-install" || value.kind === "skill-verify")
     && typeof value.sessionKey === "string"
     && typeof value.createdAt === "string"
     && typeof value.updatedAt === "string"

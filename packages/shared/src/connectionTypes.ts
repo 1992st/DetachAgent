@@ -13,6 +13,8 @@ export interface AppHealth {
   config: {
     remoteHost: string;
     remoteSshPort: number;
+    mainAgentServiceEnabled: boolean;
+    localSshBridgeEnabled: boolean;
     gatewayTransport: "ssh" | "direct";
     gatewayDirectHost: string;
     gatewayLocalPort: number;

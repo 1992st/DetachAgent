@@ -52,6 +52,7 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
       const response = await fetchToolRequests({ sessionKey, agentId, limit: 50 });
       const visibleRequests = dedupeVisibleToolRequests(response.requests.filter(isQueueToolRequestVisible));
       setRequests(visibleRequests);
+      void refreshRequestSnapshots(visibleRequests);
       const latestPending = visibleRequests.find((request) => shouldSurfaceApproval(request, { requireRecent: true }));
       if (latestPending) surfaceApproval(latestPending, { requireRecent: true });
     } catch (refreshError) {
@@ -123,6 +124,29 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
       setError(runError instanceof Error ? runError.message : String(runError));
     } finally {
       setBusy((current) => ({ ...current, [request.id]: false }));
+    }
+  }
+
+  async function refreshRequestSnapshots(nextRequests: ToolRequestRecord[]) {
+    const snapshotRequests = nextRequests.filter((request) => request.status !== "pending" || request.kind === "main-agent-save-file");
+    const results = await Promise.allSettled(snapshotRequests.map(async (request) => ({
+      request,
+      result: await fetchToolRequestResult(request.id)
+    })));
+    const nextSummaries: Record<string, string> = {};
+    const nextTransfers: Record<string, MainAgentFileTransferSnapshot> = {};
+    for (const item of results) {
+      if (item.status !== "fulfilled") continue;
+      nextSummaries[item.value.request.id] = toolResultSummary(item.value.result);
+      const transfer = transferFromResult(item.value.result);
+      if (transfer) nextTransfers[item.value.request.id] = transfer;
+    }
+    if (Object.keys(nextSummaries).length) {
+      setSummaries((current) => ({ ...current, ...nextSummaries }));
+    }
+    if (Object.keys(nextTransfers).length) {
+      setTransfers((current) => ({ ...current, ...nextTransfers }));
+      setPasswordTransfer((current) => current ?? nextPasswordTransfer(nextTransfers, dismissedPasswordTransfers));
     }
   }
 
@@ -233,6 +257,7 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
           transfer={passwordTransfer}
           password={password}
           busy={Boolean(busy[passwordTransfer.requestId])}
+          error={error}
           onPasswordChange={setPassword}
           onSubmit={() => void submitPassword()}
           onDismiss={() => dismissPasswordDialog(passwordTransfer)}
@@ -254,6 +279,7 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
         {requests.map((request) => {
           const unsupported = !toolRequestSupported(request);
           const disabled = busy[request.id] || (request.status !== "pending" && request.status !== "failed") || unsupported;
+          const transfer = transfers[request.id];
           return (
             <div className={`terminal-request-card ${request.kind === "file-transfer" ? "file-transfer-card" : ""}`} key={request.id}>
               <div>
@@ -263,13 +289,15 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
                 <small>{request.status} · {request.source || "unknown"}{request.sourceEventId ? ` · ${request.sourceEventId}` : ""}</small>
                 {request.reason ? <p>{request.reason}</p> : null}
                 <code>{toolRequestCode(request)}</code>
+                {request.error ? <p className="request-error">{request.error}</p> : null}
                 {unsupported ? <p className="request-error">{unsupportedTargetMessage(request)}</p> : null}
                 {summaries[request.id] ? <small>{summaries[request.id]}</small> : null}
-                {transfers[request.id] ? <TransferProgress transfer={transfers[request.id]} onEnterPassword={reopenPasswordDialog} /> : null}
+                {transfer ? <TransferProgress transfer={transfer} onEnterPassword={reopenPasswordDialog} /> : null}
               </div>
               <div className="terminal-request-actions">
-                <button type="button" className="icon-button" title={request.risk?.level === "elevated" ? "Confirm run" : "Run"} disabled={disabled || request.status === "approved"} onClick={() => void runRequest(request)}>
+                <button type="button" className="secondary-button compact" title={toolRequestActionTitle(request, transfer)} disabled={disabled || request.status === "approved"} onClick={() => void runRequest(request)}>
                   <Check size={15} />
+                  {toolRequestActionLabel(request, transfer, Boolean(busy[request.id]))}
                 </button>
                 <button type="button" className="icon-button" title="Reject" disabled={busy[request.id] || request.status !== "pending"} onClick={() => void rejectRequest(request)}>
                   <X size={15} />
@@ -318,6 +346,26 @@ function toolRequestTitle(request: ToolRequestRecord): string {
   if (request.kind === "skill-install") return "Skill install";
   if (request.kind === "skill-verify") return "Skill verify";
   return "Terminal command";
+}
+
+function toolRequestActionLabel(request: ToolRequestRecord, transfer: MainAgentFileTransferSnapshot | undefined, busy: boolean): string {
+  if (busy) return "Running";
+  if (request.status === "running") {
+    if (transfer?.status === "waiting-password" || transfer?.needsPassword) return "Waiting password";
+    if (transfer?.status === "transferring") return "Transferring";
+    return "Running";
+  }
+  if (request.status === "succeeded") return "Succeeded";
+  if (request.status === "approved") return "Approved";
+  if (request.status === "failed") return "Retry";
+  if (request.risk?.level === "elevated") return "Confirm";
+  return request.kind === "main-agent-save-file" ? "Save" : "Run";
+}
+
+function toolRequestActionTitle(request: ToolRequestRecord, transfer: MainAgentFileTransferSnapshot | undefined): string {
+  if (request.status === "running") return transfer?.message || "Tool request is already running.";
+  if (request.status === "failed") return "Retry failed request";
+  return request.risk?.level === "elevated" ? "Confirm run" : "Run";
 }
 
 function confirmElevatedRisk(request: ToolRequestRecord): boolean {
@@ -393,6 +441,7 @@ function SaveFilePasswordDialog({
   transfer,
   password,
   busy,
+  error,
   onPasswordChange,
   onSubmit,
   onDismiss
@@ -400,6 +449,7 @@ function SaveFilePasswordDialog({
   transfer: MainAgentFileTransferSnapshot;
   password: string;
   busy: boolean;
+  error: string | null;
   onPasswordChange: (value: string) => void;
   onSubmit: () => void;
   onDismiss: () => void;
@@ -411,6 +461,7 @@ function SaveFilePasswordDialog({
   }, []);
   const remainingMs = transfer.passwordExpiresAt ? Math.max(0, Date.parse(transfer.passwordExpiresAt) - now) : undefined;
   const remaining = typeof remainingMs === "number" ? formatRemaining(remainingMs) : "";
+  const canSubmit = Boolean(password) && !busy && remainingMs !== 0;
   return (
     <div className="save-password-backdrop" role="presentation">
       <div className="save-password-dialog" role="dialog" aria-modal="true" aria-label="SSH password required">
@@ -457,14 +508,15 @@ function SaveFilePasswordDialog({
               placeholder="SSH password"
               onChange={(event) => onPasswordChange(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter") onSubmit();
+                if (event.key === "Enter" && canSubmit) onSubmit();
               }}
             />
           </section>
+          {error ? <p className="save-password-error">{error}</p> : null}
         </div>
         <footer className="save-password-actions">
           <button type="button" className="secondary-button" onClick={onDismiss}>Later</button>
-          <button type="button" className="primary-button" disabled={!password || busy || remainingMs === 0} onClick={onSubmit}>Continue</button>
+          <button type="button" className="primary-button" disabled={!canSubmit} onClick={onSubmit}>{busy ? "Continuing..." : "Continue"}</button>
         </footer>
       </div>
     </div>

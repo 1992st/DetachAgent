@@ -9,6 +9,8 @@ export interface RuntimeSettings {
   remoteSshPort: number;
   remoteUser: string;
   remoteIdentityPath: string;
+  mainAgentServiceEnabled: boolean;
+  localSshBridgeEnabled: boolean;
   reverseBridgeRemoteHost: string;
   reverseBridgeRemotePort: number;
   gatewayTransport: "ssh" | "direct";
@@ -57,6 +59,15 @@ function sanitizeGatewayTransport(value: unknown): RuntimeSettings["gatewayTrans
   return value === "ssh" || value === "direct" ? value : undefined;
 }
 
+function sanitizeBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return undefined;
+}
+
 function defaultProfile(): PersistedProfile {
   return {
     id: "default",
@@ -65,6 +76,8 @@ function defaultProfile(): PersistedProfile {
     remoteSshPort: appConfig.remoteSshPort,
     remoteUser: appConfig.remoteUser,
     remoteIdentityPath: appConfig.remoteIdentityPath,
+    mainAgentServiceEnabled: appConfig.mainAgentServiceEnabled,
+    localSshBridgeEnabled: appConfig.localSshBridgeEnabled,
     reverseBridgeRemoteHost: appConfig.reverseBridgeRemoteHost,
     reverseBridgeRemotePort: appConfig.reverseBridgeRemotePort,
     gatewayTransport: appConfig.gatewayTransport,
@@ -251,6 +264,10 @@ export class SettingsStore {
     if (remoteUser !== undefined) output.remoteUser = remoteUser;
     const remoteIdentityPath = sanitizeString(input.remoteIdentityPath);
     if (remoteIdentityPath !== undefined) output.remoteIdentityPath = remoteIdentityPath;
+    const mainAgentServiceEnabled = sanitizeBoolean(input.mainAgentServiceEnabled);
+    if (mainAgentServiceEnabled !== undefined) output.mainAgentServiceEnabled = mainAgentServiceEnabled;
+    const localSshBridgeEnabled = sanitizeBoolean(input.localSshBridgeEnabled);
+    if (localSshBridgeEnabled !== undefined) output.localSshBridgeEnabled = localSshBridgeEnabled;
     const reverseBridgeRemoteHost = sanitizeString(input.reverseBridgeRemoteHost);
     if (reverseBridgeRemoteHost !== undefined) output.reverseBridgeRemoteHost = reverseBridgeRemoteHost || "127.0.0.1";
     const gatewayDirectHost = sanitizeString(input.gatewayDirectHost);

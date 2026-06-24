@@ -46,6 +46,8 @@ class MainAgentFileTransferService {
     if (looksLikeDirectoryPath(destination.path)) {
       throw new Error("main-agent-save-file destination.path must be a complete absolute file path, including the final filename and extension; directory paths are not supported.");
     }
+    const homeUserMismatch = destinationHomeUserMismatch(destination);
+    if (homeUserMismatch) throw new Error(homeUserMismatch);
     const file = await fileTransferService.stagedFile(fileId);
     if (!file?.localPath) throw new Error("Staged file not found.");
     if (path.resolve(sourceLocalPath) !== path.resolve(file.localPath)) {
@@ -310,6 +312,7 @@ class MainAgentFileTransferService {
       }
       transfer.pty = pty;
       let settled = false;
+      let passwordPromptHandled = false;
       const finish = (code: number) => {
         if (settled) return;
         settled = true;
@@ -325,6 +328,8 @@ class MainAgentFileTransferService {
         }
         if (/password:\s*$/i.test(stripAnsi(transfer.outputTail)) || /password:/i.test(data)) {
           if (!options.allowPasswordPrompt) return;
+          if (passwordPromptHandled || transfer.passwordResolver) return;
+          passwordPromptHandled = true;
           this.requestPassword(transfer, pty);
         }
       });
@@ -438,11 +443,15 @@ function looksLikeDirectoryPath(remotePath: string): boolean {
 }
 
 function destinationWarnings(destination: MainAgentFileDestination): string[] {
+  return destinationHomeUserMismatch(destination) ? [destinationHomeUserMismatch(destination)!] : [];
+}
+
+function destinationHomeUserMismatch(destination: MainAgentFileDestination): string | null {
   const match = destination.path.match(/^\/home\/([^/]+)\//);
   if (match?.[1] && match[1] !== destination.user) {
-    return [`SSH user "${destination.user}" differs from destination home user "${match[1]}".`];
+    return `main-agent-save-file destination.user "${destination.user}" does not match destination.path home user "${match[1]}". Use destination.user "${match[1]}" for paths under /home/${match[1]}, or choose a path writable by ${destination.user}.`;
   }
-  return [];
+  return null;
 }
 
 function rsyncArgs(transfer: TransferRecord, rsync: TransferCommand, ssh: TransferCommand, sshArgs: string[]): string[] {
@@ -546,7 +555,10 @@ function outputTailMessage(transfer: TransferRecord): string {
 }
 
 function remoteFileSpec(transfer: TransferRecord): string {
-  return `${transfer.destination.user}@${transfer.destination.host}:${shellQuote(transfer.destination.path)}`;
+  const remotePath = platformService.currentNodePlatform() === "win32"
+    ? transfer.destination.path
+    : shellQuote(transfer.destination.path);
+  return `${transfer.destination.user}@${transfer.destination.host}:${remotePath}`;
 }
 
 function isPtyUnavailable(outputTail: string): boolean {

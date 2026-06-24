@@ -20,7 +20,7 @@ export function SkillInstallPanel({ sessionKey: _sessionKey, agentId: _agentId }
   }
 
   return (
-    <section className="adapter-status-panel skill-install-panel">
+    <section className="adapter-status-panel skill-install-panel" id="relationship-skill-install">
       <div className="panel-heading compact">
         <div>
           <h2>Detach Skill</h2>

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n server,web -c cyan,green \"pnpm --filter @detaches/server dev\" \"pnpm --filter @detaches/web dev\"",
+    "dev:restart": "bash scripts/restart-dev.sh",
     "build": "pnpm --filter @detaches/shared build && pnpm --filter @detaches/server build && pnpm --filter @detaches/web build",
     "typecheck": "pnpm --filter @detaches/shared build && pnpm --filter @detaches/server typecheck && pnpm --filter @detaches/web typecheck && pnpm --filter @detaches/desktop build",
     "desktop:dev": "pnpm --filter @detaches/desktop dev",

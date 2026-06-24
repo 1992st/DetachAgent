@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { KeyRound, X } from "lucide-react";
-import type { AgentSummary, AppHealth, ChatSessionMode, ClientIdentity, DiagnosticItem, InteractionRecord, LocalTerminalApp, SshCredentialSessionSnapshot, ToolBrokerSocketEvent, UploadedFileRef } from "@detaches/shared";
-import { dismissSshSessionPassword, fetchAgents, fetchClientIdentity, fetchDiagnostics, fetchHealth, fetchLocalTerminalApps, openLocalTerminalApp, rejectInteraction, resolveInteraction, submitSshSessionPassword, uploadFile, wsUrl } from "../lib/api.js";
+import { KeyRound, Wifi, X } from "lucide-react";
+import type { AgentSummary, AppHealth, ChatSessionMode, ClientIdentity, DiagnosticItem, InteractionRecord, LocalTerminalApp, RelationshipSkillStatus, SshCredentialSessionSnapshot, ToolBrokerSocketEvent, UploadedFileRef } from "@detaches/shared";
+import { dismissSshSessionPassword, fetchAgents, fetchClientIdentity, fetchDiagnostics, fetchHealth, fetchLocalTerminalApps, fetchSettings, openLocalTerminalApp, rejectInteraction, resolveInteraction, submitSshSessionPassword, uploadFile, wsUrl } from "../lib/api.js";
 import { ConnectionBar } from "../features/connection/ConnectionBar.js";
 import { AgentList } from "../features/agents/AgentList.js";
 import { ChatPanel, type ChatPanelHandle } from "../features/chat/ChatPanel.js";
@@ -15,6 +15,7 @@ export function App() {
   const [health, setHealth] = useState<AppHealth | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
+  const [networkConfigured, setNetworkConfigured] = useState(false);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [agentsLoading, setAgentsLoading] = useState(false);
@@ -41,6 +42,8 @@ export function App() {
   const [interactionSecret, setInteractionSecret] = useState("");
   const [interactionBusy, setInteractionBusy] = useState(false);
   const [interactionError, setInteractionError] = useState<string | null>(null);
+  const [relationshipSkillStatus, setRelationshipSkillStatus] = useState<RelationshipSkillStatus>("unknown");
+  const [relationshipSkillMessage, setRelationshipSkillMessage] = useState<string | undefined>(undefined);
   const chatPanelRef = useRef<ChatPanelHandle | null>(null);
 
   const refreshHealth = useCallback(async () => {
@@ -92,12 +95,22 @@ export function App() {
     }
   }, []);
 
+  const refreshNetworkGuide = useCallback(async () => {
+    try {
+      const settings = await fetchSettings();
+      const activeProfile = settings.profiles.find((profile) => profile.id === settings.activeProfileId) ?? settings;
+      setNetworkConfigured(activeProfile.lastStatus === "ok");
+    } catch {
+      setNetworkConfigured(false);
+    }
+  }, []);
+
   useEffect(() => {
-    void refreshHealth();
     void refreshClientIdentity();
     void refreshAgents();
     void refreshDiagnostics();
-  }, [refreshHealth, refreshClientIdentity, refreshAgents, refreshDiagnostics]);
+    void refreshNetworkGuide();
+  }, [refreshClientIdentity, refreshAgents, refreshDiagnostics, refreshNetworkGuide]);
 
   useEffect(() => {
     const ws = new WebSocket(wsUrl("/api/tools/stream"));
@@ -158,6 +171,7 @@ export function App() {
     if (!selectedSession) return;
     setUploading(true);
     setFileError(null);
+    const fileNames = Array.from(files).map((file) => file.name).join(", ");
     try {
       const uploaded: UploadedFileRef[] = [];
       for (const file of Array.from(files)) {
@@ -169,7 +183,8 @@ export function App() {
         [selectedSession]: [...(current[selectedSession] ?? []), ...uploaded]
       }));
     } catch (error) {
-      setFileError(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      setFileError(`上传失败${fileNames ? ` (${fileNames})` : ""}: ${message}`);
     } finally {
       setUploading(false);
     }
@@ -244,11 +259,18 @@ export function App() {
     }
   }
 
+  const handleRelationshipSkillStatusChange = useCallback((status: RelationshipSkillStatus, message?: string) => {
+    setRelationshipSkillStatus(status);
+    setRelationshipSkillMessage(message);
+  }, []);
+
   function handleNewSession() {
     if (!selectedAgent || !selectedSessionScope) return;
     const nextSession = newSessionKeyForAgent(selectedAgent, sessionMode, clientIdentity);
     setSessionOverrides((current) => ({ ...current, [selectedSessionScope]: nextSession }));
     setAttachmentsBySession((current) => ({ ...current, [nextSession]: [] }));
+    setRelationshipSkillStatus("checking");
+    setRelationshipSkillMessage("Checking detach-agent-relationship skill...");
   }
 
   return (
@@ -285,11 +307,23 @@ export function App() {
         terminalAppsError={terminalAppsError}
         onLoadTerminalApps={loadTerminalApps}
         onOpenTerminalApp={(appId) => void openTerminalApp(appId)}
+        relationshipSkillStatus={relationshipSkillStatus}
+        relationshipSkillMessage={relationshipSkillMessage}
+        onRelationshipSkillAction={() => {
+          setView("chat");
+          window.setTimeout(() => document.getElementById("relationship-skill-install")?.scrollIntoView({ block: "start", behavior: "smooth" }), 50);
+        }}
       />
       <nav className="view-tabs" aria-label="Main views">
         <div className="view-tab-buttons">
           <button className={view === "chat" ? "active" : ""} onClick={() => setView("chat")}>聊天</button>
-          <button className={view === "network" ? "active" : ""} onClick={() => setView("network")}>网络与 SSH</button>
+          <button
+            className={`${view === "network" ? "active" : ""} ${!networkConfigured && view !== "network" ? "guide-breathe" : ""}`}
+            onClick={() => setView("network")}
+          >
+            <Wifi size={15} />
+            连接设置
+          </button>
         </div>
         <div className="top-debug-terminal-slot" />
       </nav>
@@ -317,6 +351,7 @@ export function App() {
               setAttachmentsBySession((current) => ({ ...current, [selectedSession]: [] }));
             }}
             onNeedUpload={handleUpload}
+            onRelationshipSkillStatusChange={handleRelationshipSkillStatusChange}
           />
           <FilePanel
             sessionKey={selectedSession}
@@ -338,9 +373,9 @@ export function App() {
         <div className="settings-workspace">
           <SettingsPanel
             onSaved={() => {
-              void refreshHealth();
               void refreshAgents();
               void refreshDiagnostics();
+              void refreshNetworkGuide();
             }}
           />
         </div>

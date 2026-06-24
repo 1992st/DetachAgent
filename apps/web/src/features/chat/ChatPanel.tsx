@@ -1,7 +1,8 @@
 import { type CSSProperties, FormEvent, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, FileText, List, Minus, Paperclip, Plus, Send, Square, X } from "lucide-react";
-import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, MainAgentFileTransferSnapshot, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
+import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, MainAgentFileTransferSnapshot, RelationshipSkillStatus, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
 import { approveToolRequest, extractToolRequests, fetchCloudPromptLogs, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward, submitMainAgentTransferPassword, wsUrl } from "../../lib/api.js";
+import { DEFAULT_LOG_FILTER, LOG_FILTER_LEVELS, appendRealtimeLog, createLogInput, filterRealtimeLogs, formatLogDetail, type LogEntry, type LogFilterLevel, type LogWriter } from "../logs/realtimeLog.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
 
 interface Props {
@@ -14,16 +15,7 @@ interface Props {
   onNewSession: () => void;
   onClearAttachments: () => void;
   onNeedUpload: (files: FileList) => void;
-}
-
-type LogLevel = "debug" | "info" | "warn" | "error";
-
-interface LogEntry {
-  id: string;
-  at: string;
-  level: LogLevel;
-  event: string;
-  detail?: unknown;
+  onRelationshipSkillStatusChange: (status: RelationshipSkillStatus, message?: string) => void;
 }
 
 export interface ChatPanelHandle {
@@ -39,7 +31,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   onSessionModeChange,
   onNewSession,
   onClearAttachments,
-  onNeedUpload
+  onNeedUpload,
+  onRelationshipSkillStatusChange
 }: Props, ref) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -50,6 +43,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   const [attachmentContextOpen, setAttachmentContextOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logFilter, setLogFilter] = useState<LogFilterLevel>(DEFAULT_LOG_FILTER);
   const [chatFontSize, setChatFontSize] = useState(() => {
     const saved = Number(window.localStorage.getItem("detaches.chatFontSize"));
     return Number.isFinite(saved) && saved >= 12 && saved <= 20 ? saved : 14;
@@ -77,21 +71,25 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     socketRef.current?.close();
     if (!sessionKey) {
       setSocketState("idle");
-      appendLog("info", "session-idle", { sessionKey });
       return;
     }
     const params = new URLSearchParams({ sessionMode });
     const ws = new WebSocket(wsUrl(`/api/chat/${encodeURIComponent(sessionKey)}?${params}`));
     socketRef.current = ws;
     setSocketState("connecting");
-    appendLog("info", "socket-connecting", { sessionKey, sessionMode });
+    appendLog("debug", "socket", "socket-connecting", { sessionKey, sessionMode });
     ws.onopen = () => {
       setSocketState("connected");
-      appendLog("info", "socket-connected", { sessionKey, sessionMode });
+      appendLog("debug", "socket", "socket-connected", { sessionKey, sessionMode });
+      onRelationshipSkillStatusChange("checking", "Checking detach-agent-relationship skill...");
+      ws.send(JSON.stringify({
+        type: "bootstrap-relationship-skill-check",
+        idempotencyKey: `relationship-skill-${sessionKey}`
+      }));
     };
     ws.onclose = (event) => {
       setSocketState("closed");
-      appendLog("warn", "socket-closed", { code: event.code, reason: event.reason, wasClean: event.wasClean });
+      appendLog("debug", "socket", "socket-closed", { code: event.code, reason: event.reason, wasClean: event.wasClean });
       if (!disposed && sessionKey) {
         reconnectTimerRef.current = window.setTimeout(() => {
           reconnectTimerRef.current = null;
@@ -101,30 +99,36 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     };
     ws.onerror = () => {
       setSocketState("error");
-      appendLog("error", "socket-error", { sessionKey, sessionMode });
+      appendLog("error", "socket", "socket-error", { sessionKey, sessionMode });
       ws.close();
     };
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data) as ChatSocketServerEvent;
-      appendLog("debug", "socket-message", { type: data.type });
+      appendLog("debug", "socket", "socket-message", { type: data.type });
       if (data.type === "history") {
-        setMessages(data.payload.messages);
-        appendLog("info", "history-loaded", { count: data.payload.messages.length });
+        const visibleMessages = data.payload.messages.filter((message) => !isRelationshipSkillCheckMessage(messageText(message)));
+        setMessages(visibleMessages);
+        appendLog("debug", "chat", "history-loaded", { count: visibleMessages.length, hiddenRelationshipSkillChecks: data.payload.messages.length - visibleMessages.length });
       } else if (data.type === "chat") {
         if (isPayloadForSession(data.payload, sessionKey)) {
-          setMessages((current) => upsertGatewayChat(current, data.payload));
-          appendLog("debug", "chat-upserted", { sessionKey });
+          if (!isRelationshipSkillCheckMessage(textFromUnknown(data.payload))) {
+            setMessages((current) => upsertGatewayChat(current, data.payload));
+          }
+          appendLog("debug", "chat", "chat-upserted", { sessionKey });
         }
       } else if (data.type === "sent") {
         setLastRunId(data.payload.runId ?? null);
-        appendLog("info", "message-sent-ack", data.payload);
+        appendLog("info", "prompt", "message-sent-ack", data.payload);
         void refreshCloudPromptLogs();
+      } else if (data.type === "relationship-skill-status") {
+        onRelationshipSkillStatusChange(data.status, data.message);
+        appendLog("info", "system", "relationship-skill-status", { status: data.status, message: data.message });
       } else if (data.type === "error") {
         setMessages((current) => [
           ...current,
           { id: crypto.randomUUID(), role: "system", text: data.message, timestamp: new Date().toISOString() }
         ]);
-        appendLog("error", "server-error", { message: data.message });
+        appendLog("error", "system", "server-error", { message: data.message });
       }
     };
     return () => {
@@ -133,10 +137,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
         window.clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
-      appendLog("debug", "socket-cleanup", { sessionKey, sessionMode });
+      appendLog("debug", "socket", "socket-cleanup", { sessionKey, sessionMode });
       ws.close();
     };
-  }, [sessionKey, sessionMode, socketReconnectNonce]);
+  }, [sessionKey, sessionMode, socketReconnectNonce, onRelationshipSkillStatusChange]);
 
   useEffect(() => {
     const el = messagesRef.current;
@@ -148,14 +152,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     const nextContext = buildDefaultAttachmentContext(attachments);
     setAttachmentContext(nextContext);
     if (!nextContext) setAttachmentContextOpen(false);
-    if (attachments.length) appendLog("info", "attachments-ready", attachments.map((file) => ({ id: file.id, name: file.name, size: file.size })));
+    if (attachments.length) appendLog("info", "file", "attachments-ready", attachments.map((file) => ({ id: file.id, name: file.name, size: file.size })));
   }, [attachments]);
 
   useEffect(() => {
     const el = logStreamRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [logs, logOpen]);
+  }, [logs, logFilter, logOpen]);
 
   useEffect(() => {
     if (!logOpen) return;
@@ -168,28 +172,17 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   const messagesStyle = useMemo(() => ({
     "--chat-message-font-size": `${chatFontSize}px`
   }) as CSSProperties, [chatFontSize]);
+  const visibleLogs = useMemo(() => filterRealtimeLogs(logs, logFilter), [logs, logFilter]);
 
   function updateChatFontSize(next: number) {
     const clamped = Math.max(12, Math.min(20, next));
     setChatFontSize(clamped);
     window.localStorage.setItem("detaches.chatFontSize", String(clamped));
-    appendLog("debug", "chat-font-size", { size: clamped });
+    appendLog("debug", "chat", "chat-font-size", { size: clamped });
   }
 
-  function appendLog(level: LogLevel, event: string, detail?: unknown) {
-    setLogs((current) => {
-      const next = [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          at: new Date().toISOString(),
-          level,
-          event,
-          detail
-        }
-      ];
-      return next.length > 500 ? next.slice(next.length - 500) : next;
-    });
+  function appendLog(...args: Parameters<LogWriter>) {
+    setLogs((current) => appendRealtimeLog(current, createLogInput(...args)));
   }
 
   async function refreshCloudPromptLogs() {
@@ -199,7 +192,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
         const key = `${entry.ts}:${entry.phase}:${entry.idempotencyKey || ""}:${entry.sessionKey}`;
         if (cloudPromptLogIdsRef.current.has(key)) return;
         cloudPromptLogIdsRef.current.add(key);
-        appendLog("info", "cloud-prompt", {
+        appendLog("info", "prompt", "cloud-prompt", {
           logPath: response.path,
           phase: entry.phase,
           sessionKey: entry.sessionKey,
@@ -209,7 +202,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
         });
       });
     } catch (error) {
-      appendLog("error", "cloud-prompt-log-load-failed", error);
+      appendLog("error", "prompt", "cloud-prompt-log-load-failed", error);
     }
   }
 
@@ -218,7 +211,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     if (!canSend) return;
     const text = draft.trim();
     const idempotencyKey = crypto.randomUUID();
-    appendLog("info", "chat-send", {
+    appendLog("info", "prompt", "chat-send", {
       sessionKey,
       sessionMode,
       idempotencyKey,
@@ -248,13 +241,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
 
   function abort() {
     if (!lastRunId) return;
-    appendLog("warn", "abort-run", { runId: lastRunId });
+    appendLog("info", "prompt", "abort-run", { runId: lastRunId });
     socketRef.current?.send(JSON.stringify({ type: "abort", runId: lastRunId }));
   }
 
   async function copyMessage(message: ChatMessage) {
     await navigator.clipboard.writeText(messageText(message));
-    appendLog("debug", "message-copied", { id: message.id, role: message.role });
+    appendLog("debug", "chat", "message-copied", { id: message.id, role: message.role });
   }
 
   return (
@@ -308,9 +301,21 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
       {logOpen ? (
         <section className="log-console" aria-label="实时 Log 控制台">
           <div className="log-console-header">
-            <div>
+            <div className="log-console-title">
               <strong>实时 Log</strong>
-              <small>{logs.length} 条记录</small>
+              <small>{visibleLogs.length} / {logs.length} 条记录</small>
+              <div className="log-level-toggle" aria-label="Log level">
+                {LOG_FILTER_LEVELS.map((level) => (
+                  <button
+                    type="button"
+                    className={logFilter === level ? "active" : ""}
+                    onClick={() => setLogFilter(level)}
+                    key={level}
+                  >
+                    {level.toUpperCase()}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="log-console-actions">
               <button type="button" className="secondary-button compact" onClick={() => setLogs([])}>清空</button>
@@ -320,13 +325,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
             </div>
           </div>
           <div className="log-console-stream" ref={logStreamRef}>
-            {logs.length ? logs.map((entry) => (
+            {visibleLogs.length ? visibleLogs.map((entry) => (
               <div className={`log-console-row ${entry.level}`} key={entry.id}>
                 <span>{new Date(entry.at).toLocaleTimeString("zh-CN", { hour12: false })}</span>
+                <b>{entry.level}</b>
+                <em>{entry.module}</em>
                 <strong>{entry.event}</strong>
                 {entry.detail === undefined ? null : <code>{formatLogDetail(entry.detail)}</code>}
               </div>
-            )) : <p>暂无日志。发送消息、接收响应、上传附件或处理工具请求后会实时出现。</p>}
+            )) : <p>{logs.length ? "当前等级下暂无日志。" : "暂无日志。发送消息、接收响应、上传附件或处理工具请求后会实时出现。"}</p>}
           </div>
         </section>
       ) : null}
@@ -409,7 +416,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
           type="file"
           multiple
           hidden
-          onChange={(event) => event.target.files && onNeedUpload(event.target.files)}
+          onChange={(event) => {
+            if (event.target.files) onNeedUpload(event.target.files);
+            event.currentTarget.value = "";
+          }}
         />
         <button type="button" className="icon-button" title="Attach files" onClick={() => fileRef.current?.click()} disabled={!sessionKey}>
           <Paperclip size={18} />
@@ -463,7 +473,7 @@ function ToolRequests({
   sourceRunId?: string;
   clientIdentity: ClientIdentity | null;
   onReveal: () => void;
-  onLog: (level: LogLevel, event: string, detail?: unknown) => void;
+  onLog: LogWriter;
 }) {
   const [requests, setRequests] = useState<ToolRequestRecord[]>([]);
   const [handled, setHandled] = useState<Record<number, "approved" | "rejected" | "running" | "error" | "blocked">>({});
@@ -472,6 +482,7 @@ function ToolRequests({
   const [transfers, setTransfers] = useState<Record<number, MainAgentFileTransferSnapshot>>({});
   const [passwords, setPasswords] = useState<Record<number, string>>({});
   const pollTimersRef = useRef<Record<number, number>>({});
+  const loggedRequestSignatureRef = useRef<{ scope: string; signature: string }>({ scope: "", signature: "" });
 
   useEffect(() => () => {
     Object.values(pollTimersRef.current).forEach((timer) => window.clearTimeout(timer));
@@ -482,6 +493,10 @@ function ToolRequests({
     if (!sessionKey || !text) {
       setRequests([]);
       return;
+    }
+    const logScope = `${sessionKey}:${sourceMessageId}:${sourceRunId || ""}`;
+    if (loggedRequestSignatureRef.current.scope !== logScope) {
+      loggedRequestSignatureRef.current = { scope: logScope, signature: "" };
     }
     setHandled({});
     setErrors({});
@@ -501,12 +516,16 @@ function ToolRequests({
       })
       .then((mergedRequests) => {
         setRequests(mergedRequests);
-        if (mergedRequests.length) onLog("info", "tool-requests-detected", mergedRequests.map((request) => ({
-          id: request.id,
-          kind: request.kind,
-          target: request.target,
-          status: request.status
-        })));
+        const requestSignature = mergedRequests.map((request) => `${request.id}:${request.status}`).sort().join("|");
+        if (mergedRequests.length && loggedRequestSignatureRef.current.signature !== requestSignature) {
+          loggedRequestSignatureRef.current = { scope: logScope, signature: requestSignature };
+          onLog("info", "tool", "tool-requests-detected", mergedRequests.map((request) => ({
+            id: request.id,
+            kind: request.kind,
+            target: request.target,
+            status: request.status
+          })));
+        }
         const nextHandled: Record<number, "blocked"> = {};
         const nextErrors: Record<number, string> = {};
         mergedRequests.forEach((request, index) => {
@@ -519,7 +538,7 @@ function ToolRequests({
         setErrors(nextErrors);
       })
       .catch((error) => {
-        onLog("error", "tool-requests-load-failed", error);
+        onLog("error", "tool", "tool-requests-load-failed", error);
         setErrors({ 0: error instanceof Error ? error.message : String(error) });
       });
     void loadRequests();
@@ -547,7 +566,7 @@ function ToolRequests({
         })
         .catch((error) => {
           delete pollTimersRef.current[index];
-          onLog("error", "main-agent-transfer-poll-failed", { id: request.id, error });
+          onLog("error", "terminal", "main-agent-transfer-poll-failed", { id: request.id, error });
           setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
           setHandled((current) => ({ ...current, [index]: "error" }));
         });
@@ -569,7 +588,7 @@ function ToolRequests({
         if (request) scheduleMainAgentTransferPoll(request, index);
       })
       .catch((error) => {
-        onLog("error", "main-agent-transfer-password-failed", { transferId: transfer.transferId, error });
+        onLog("error", "terminal", "main-agent-transfer-password-failed", { transferId: transfer.transferId, error });
         setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
         setHandled((current) => ({ ...current, [index]: "error" }));
       });
@@ -582,6 +601,8 @@ function ToolRequests({
         const state = handled[index];
         const unsupported = !toolRequestSupported(request);
         const actionLabel = request.kind === "main-agent-save-file" ? "Save" : request.kind === "file-transfer" ? "Transfer" : request.kind === "adapter-install" ? "Install" : "Run";
+        const transfer = transfers[index];
+        const runningTransfer = request.kind === "main-agent-save-file" && request.status === "running";
         return (
           <div className={`terminal-request-card ${request.kind === "file-transfer" ? "file-transfer-card" : ""}`} key={request.id}>
             <div>
@@ -591,11 +612,12 @@ function ToolRequests({
               {request.reason ? <p>{request.reason}</p> : null}
               <code>{toolRequestCode(request)}</code>
               <small>requestId: {request.id}</small>
+              {request.error ? <p className="request-error">{request.error}</p> : null}
               {unsupported ? <p className="request-error">{unsupportedTargetMessage(request)}</p> : null}
               {errors[index] ? <p className="request-error">{errors[index]}</p> : null}
               {resultSummaries[index] ? <small>{resultSummaries[index]}</small> : null}
-              {transfers[index] ? <InlineTransferProgress transfer={transfers[index]} /> : null}
-              {transfers[index]?.status === "waiting-password" || transfers[index]?.needsPassword ? (
+              {transfer ? <InlineTransferProgress transfer={transfer} /> : null}
+              {transfer?.status === "waiting-password" || transfer?.needsPassword ? (
                 <label className="inline-password-prompt">
                   <span>SSH password required</span>
                   <input
@@ -617,22 +639,22 @@ function ToolRequests({
               <button
                 type="button"
                 className="secondary-button"
-                disabled={unsupported || Boolean(state && state !== "error")}
+                disabled={unsupported || runningTransfer || Boolean(state && state !== "error")}
                 onClick={() => {
                   if (!confirmElevatedRisk(request)) return;
-                  onLog("info", "tool-request-approve", { id: request.id, kind: request.kind, target: request.target });
+                  onLog("info", "tool", "tool-request-approve", { id: request.id, kind: request.kind, target: request.target });
                   setHandled((current) => ({ ...current, [index]: "running" }));
                   approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated", actor: decisionActor(clientIdentity) })
                     .then((response) => {
                       if (!response.execution?.wroteToTerminal && request.kind !== "main-agent-save-file") throw new Error(response.message || "Broker did not execute the request.");
                       if (request.kind !== "file-transfer" && request.kind !== "main-agent-save-file") onReveal();
-                      onLog("info", "tool-request-approved", { id: request.id, execution: response.execution });
-                      setHandled((current) => ({ ...current, [index]: "approved" }));
+                      onLog("info", "terminal", "tool-request-approved", { id: request.id, execution: response.execution });
+                      setHandled((current) => ({ ...current, [index]: request.kind === "main-agent-save-file" && !response.execution?.completed ? "running" : "approved" }));
                       return fetchToolRequestResult(request.id);
                     })
                     .then((response) => {
                       if (!response) return;
-                      onLog("info", "tool-result-fetched", { id: request.id, result: response.result });
+                      onLog("info", "terminal", "tool-result-fetched", { id: request.id, result: response.result });
                       const transfer = transferFromResult(response);
                       setResultSummaries((current) => ({
                         ...current,
@@ -642,7 +664,7 @@ function ToolRequests({
                       if (request.kind === "main-agent-save-file") scheduleMainAgentTransferPoll(request, index);
                     })
                     .catch((error) => {
-                      onLog("error", "tool-request-approve-failed", { id: request.id, error });
+                      onLog("error", "tool", "tool-request-approve-failed", { id: request.id, error });
                       setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
                       setHandled((current) => ({ ...current, [index]: "error" }));
                     });
@@ -651,8 +673,8 @@ function ToolRequests({
                 <Check size={15} />
                 {state === "approved"
                   ? request.kind === "file-transfer" ? "Transferred" : "Approved"
-                  : state === "running"
-                    ? request.kind === "file-transfer" ? "Transferring" : "Approving"
+                  : state === "running" || runningTransfer
+                    ? transfer?.status === "waiting-password" || transfer?.needsPassword ? "Waiting password" : request.kind === "file-transfer" ? "Transferring" : "Running"
                     : request.risk?.level === "elevated" ? `Confirm ${actionLabel}` : actionLabel}
               </button>
               <button
@@ -660,7 +682,7 @@ function ToolRequests({
                 className="secondary-button"
                 disabled={Boolean(state && state !== "error")}
                 onClick={() => {
-                  onLog("warn", "tool-request-reject", { id: request.id, kind: request.kind, target: request.target });
+                  onLog("info", "tool", "tool-request-reject", { id: request.id, kind: request.kind, target: request.target });
                   void rejectToolRequest(request.id, { actor: decisionActor(clientIdentity) });
                   setHandled((current) => ({ ...current, [index]: "rejected" }));
                 }}
@@ -677,14 +699,14 @@ function ToolRequests({
                   className="icon-button"
                   title="Retry result forward"
                   onClick={() => {
-                    onLog("info", "tool-result-forward-retry", { id: request.id });
+                    onLog("info", "tool", "tool-result-forward-retry", { id: request.id });
                     retryToolResultForward(request.id)
                       .then((response) => {
-                        onLog("info", "tool-result-forward-retried", { id: request.id, result: response.result });
+                        onLog("info", "terminal", "tool-result-forward-retried", { id: request.id, result: response.result });
                         setResultSummaries((current) => ({ ...current, [index]: toolResultSummary(response) }));
                       })
                       .catch((error) => {
-                        onLog("error", "tool-result-forward-retry-failed", { id: request.id, error });
+                        onLog("error", "tool", "tool-result-forward-retry-failed", { id: request.id, error });
                         setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
                       });
                   }}
@@ -707,16 +729,6 @@ function decisionActor(identity: ClientIdentity | null) {
     displayName: identity?.displayName,
     source: "detaches-ui" as const
   };
-}
-
-function formatLogDetail(value: unknown): string {
-  if (value instanceof Error) return value.stack || value.message;
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }
 
 function mergeToolRequests(primary: ToolRequestRecord[], updates: ToolRequestRecord[]): ToolRequestRecord[] {
@@ -853,7 +865,7 @@ function buildDefaultAttachmentContext(attachments: UploadedFileRef[]): string {
   if (!attachments.length) return "";
   return [
     "[[DETACH_AGENT_FILE_STAGED]]",
-    "用户已在 detaches_agent Web 添加文件。该文件当前只存在于 detaches_agent 本机，不在 Main Agent 机器上。",
+    "The user added file(s) in detaches_agent. These files currently exist only in detaches_agent local staging, not on the Host/Main Agent machine.",
     "",
     `fileCount: ${attachments.length}`,
     "",
@@ -864,33 +876,38 @@ function buildDefaultAttachmentContext(attachments: UploadedFileRef[]): string {
       `   size: ${file.size}`,
       `   mimeType: ${file.mimeType || "application/octet-stream"}`,
       `   sourceLocalPath: ${file.localPath || "not exposed"}`,
-      "   currentLocation: 用户本机 detaches_agent staging 区",
+      "   currentLocation: user-local-machine detaches_agent staging",
       "   remotePath: not uploaded",
-      "   role: 主输入/待确认",
+      "   role: primary user input; confirm intended use before choosing a destination",
       ""
     ]),
-    "如果用户明确要求保存该文件到 Main Agent 机器，请阅读 detach-agent-relationship skill，并生成 main-agent-save-file 请求。",
-    "destination.path 必须由 Main Agent 根据自己的规则决定，且必须是完整的绝对目标文件路径：包含目录、最终文件名和扩展名。",
-    "destination.path 不能是目录，不能是只到 screenshots/、docs/、_staging/ 等目录的路径；如果只知道目录，必须先根据 displayName 生成确定的文件名。",
-    "如果文件用途或归档目录不明确，不要编造分类目录或 _staging 目录；先询问用户用途，或选择 Main Agent 规则中明确允许的通用 screenshots/attachments 文件路径。",
-    "destination.user 和 destination.path 是 Main Agent 必须决定的核心字段；destination.user 是远端 SSH/Linux 用户，例如 aispeech。",
-    "destination.host/port 可省略，detaches_agent broker 会使用当前 Main Agent SSH/Gateway 配置补全。",
-    "不要在 destination.user/host/port 中填写占位符、示例值或“请替换”文本；如果不知道 destination.user，先说明无法生成保存请求。",
-    "不要假设 Main Agent 已经能直接读取 sourceLocalPath；该路径只能作为 detaches_agent 本机传输源。",
-    "不要启动 HTTP 上传服务器，不要发明 curl/http-upload 方法；main-agent-save-file 只支持 rsync 或 scp。",
-    "不要生成 ssh/rsync/scp/curl 命令，不要要求用户在 terminal 手动执行命令；只生成 main-agent-save-file JSON 请求。",
-    "detaches_agent 只负责把 staged 文件传输到 destination.path，不负责创建远端目录、验证远端文件或整理 Main Agent 文件系统。",
-    "请求格式必须是唯一一个 fenced code block：",
+    "If the user explicitly asks to save a staged file to the Main Agent machine, create exactly one main-agent-save-file request.",
+    "destination.path must be chosen by the Main Agent according to its own rules and must be a complete absolute POSIX target file path: directory plus final filename and extension.",
+    "destination.path cannot be a directory and cannot stop at generic folders such as screenshots/, docs/, or _staging/. If you only know a directory, derive a concrete filename from displayName first.",
+    "destination.user and destination.path are the core required fields. destination.user is the real remote SSH/Linux account that owns or can write the destination path.",
+    "If destination.path starts with /home/<account>/, destination.user must match <account>; do not use a different SSH user for another account's home directory.",
+    "destination.host/port may be omitted; detaches_agent fills them from the current Main Agent SSH/Gateway settings.",
+    "Do not put placeholders or example values in destination.user/host/port. If destination.user is unknown, say the save request cannot be created yet.",
+    "Do not assume the Main Agent can read sourceLocalPath directly. That path exists only on the detaches_agent local machine and can only be used as the transfer source by detaches_agent.",
+    "Do not start an HTTP upload server or invent a curl/http-upload method. main-agent-save-file supports only rsync or scp.",
+    "Do not generate ssh/rsync/scp/curl commands and do not ask the user to run transfer commands in a terminal. Generate only the structured main-agent-save-file JSON request.",
+    "detaches_agent only transfers the staged file to destination.path. It does not create remote directories, validate the remote file afterward, or organize the Main Agent filesystem.",
+    "The request must be exactly one fenced code block:",
     "```main-agent-save-file",
-    "{\"fileId\":\"上面的文件 id\",\"sourceLocalPath\":\"上面的 sourceLocalPath\",\"displayName\":\"原始文件名\",\"size\":12345,\"destination\":{\"user\":\"aispeech\",\"path\":\"/absolute/path/to/final-filename.ext\"},\"methodPreference\":\"rsync\",\"reason\":\"说明为什么需要保存到 Main Agent，以及为什么选择这个具体文件路径\"}",
+    "{\"fileId\":\"file id listed above\",\"sourceLocalPath\":\"sourceLocalPath listed above\",\"displayName\":\"original filename\",\"size\":12345,\"destination\":{\"user\":\"zhangst\",\"path\":\"/home/zhangst/path/to/final-filename.ext\"},\"methodPreference\":\"rsync\",\"reason\":\"why this file should be saved to the Main Agent machine and why this destination path is correct\"}",
     "```",
-    "用户批准后，detaches_agent broker 会执行结构化 rsync/scp 传输；如果 SSH 需要密码，detaches_agent UI 会显示一次性密码输入框。",
-    "用户批准前不要假装已经读取文件；如果传输失败，只根据 [detaches_agent 工具结果] 报告失败原因，不要尝试替代传输方法。"
+    "After user approval, detaches_agent broker performs the structured rsync/scp transfer. If SSH needs a password, detaches_agent UI shows a one-time password input.",
+    "Before approval, do not pretend to have read the file. If transfer fails, report only the approved detaches_agent tool result and do not invent alternative transfer methods."
   ].join("\n").trimEnd();
 }
 
 function displayFileName(file: UploadedFileRef): string {
   return file.displayName || file.name;
+}
+
+function isRelationshipSkillCheckMessage(text: string): boolean {
+  return text.includes("[[DETACH_AGENT_RELATIONSHIP_SKILL_CHECK]]")
+    || text.includes("DETACH_AGENT_SKILL_STATUS:");
 }
 
 function formatFileSize(size: number): string {

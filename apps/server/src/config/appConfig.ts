@@ -22,6 +22,12 @@ function stringEnv(name: string, fallback = ""): string {
   return process.env[name]?.trim() || fallback;
 }
 
+function boolEnv(name: string, fallback = false): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
 export const appConfig = {
   serverHost: stringEnv("DETACHES_SERVER_HOST", "127.0.0.1"),
   serverPort: intEnv("DETACHES_SERVER_PORT", 38888),
@@ -33,6 +39,8 @@ export const appConfig = {
   remoteSshPort: intEnv("OPENCLAW_REMOTE_SSH_PORT", 22),
   remoteUser: stringEnv("OPENCLAW_REMOTE_USER"),
   remoteIdentityPath: stringEnv("OPENCLAW_REMOTE_IDENTITY_PATH"),
+  mainAgentServiceEnabled: boolEnv("DETACHES_MAIN_AGENT_SERVICE_ENABLED", false),
+  localSshBridgeEnabled: boolEnv("DETACHES_LOCAL_SSH_BRIDGE_ENABLED", false),
   gatewayTransport: stringEnv("OPENCLAW_GATEWAY_TRANSPORT", "direct") as "ssh" | "direct",
   gatewayDirectHost: stringEnv("OPENCLAW_GATEWAY_DIRECT_HOST", stringEnv("OPENCLAW_REMOTE_HOST", DEFAULT_OPENCLAW_REMOTE_HOST)),
   gatewayDirectUrl: stringEnv("OPENCLAW_GATEWAY_DIRECT_URL"),
@@ -44,7 +52,7 @@ export const appConfig = {
   authPassword: stringEnv("OPENCLAW_AUTH_PASSWORD"),
   remoteWorkspaceRoot: stringEnv("OPENCLAW_REMOTE_WORKSPACE_ROOT", "~/.openclaw/workspace"),
   storageDir: platformService.getAppDataDir(),
-  maxUploadMb: intEnv("DETACHES_MAX_UPLOAD_MB", 100)
+  maxUploadMb: intEnv("DETACHES_MAX_UPLOAD_MB", 1024)
 };
 
 export type AppConfig = typeof appConfig;

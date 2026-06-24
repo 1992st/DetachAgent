@@ -373,6 +373,8 @@ async function main() {
     const brokerCapabilities = await requestJson("/api/tools/broker/capabilities");
     assert.equal(brokerCapabilities.ok, true);
     assert.equal(brokerCapabilities.protocolVersion, 1);
+    assert.equal(typeof brokerCapabilities.localMachine?.os, "string");
+    assert.equal(typeof brokerCapabilities.localMachine?.commandDialect, "string");
     assert.equal(brokerCapabilities.gatewayEventEndpoint, `${reverseBridgeBaseUrl}/api/tools/events/gateway`);
     assert.equal(brokerCapabilities.requestFormats.includes("broker-event"), true);
     assert.equal(brokerCapabilities.contextExport.oneTime, true);
@@ -519,11 +521,11 @@ async function main() {
     assert.match(userChatSend.message, /\[\[DETACH_AGENT_FILE_STAGED\]\]/);
     assert.match(userChatSend.message, /P100协议说明-示例\.txt/);
     assert.match(userChatSend.message, new RegExp(`fileId: ${upload.file.id}`));
-    assert.match(userChatSend.message, /currentLocation: 用户本机 detaches_agent staging 区/);
+    assert.match(userChatSend.message, /currentLocation: user-local-machine detaches_agent staging/);
     assert.match(userChatSend.message, /remotePath: not uploaded/);
     assert.match(userChatSend.message, /```main-agent-save-file/);
     assert.match(userChatSend.message, /"destination":\{/);
-    assert.match(userChatSend.message, /detaches_agent 接入上下文/);
+    assert.match(userChatSend.message, /\[detaches_agent context\]/);
     assert.match(userChatSend.message, /agentId: agent-alpha/);
     assert.match(userChatSend.message, /remoteAdapter: state=error/);
     assert.match(userChatSend.message, /contextExport\.consumeUrl/);
@@ -535,6 +537,8 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.version, 1);
     assert.equal(userChatSend.clientContext?.detaches?.sessionKey, chatSessionKey);
     assert.equal(userChatSend.clientContext?.detaches?.agentId, "agent-alpha");
+    assert.equal(typeof userChatSend.clientContext?.detaches?.localMachine?.os, "string");
+    assert.equal(typeof userChatSend.clientContext?.detaches?.localMachine?.commandDialect, "string");
     assert.equal(userChatSend.clientContext?.detaches?.adapterStatus?.remoteAgentHost?.state, "error");
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.length, 1);
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.fileId, upload.file.id);
@@ -570,7 +574,7 @@ async function main() {
     assert.equal(userPromptEvent.includeClientContext, true);
     assert.match(userPromptEvent.payload.message, /^hello smoke/);
     assert.match(userPromptEvent.payload.message, /\[\[DETACH_AGENT_FILE_STAGED\]\]/);
-    assert.match(userPromptEvent.payload.message, /detaches_agent 接入上下文/);
+    assert.match(userPromptEvent.payload.message, /\[detaches_agent context\]/);
     assert.equal(userPromptEvent.payload.clientContext.detaches.broker.submitToken, userChatSend.clientContext.detaches.broker.submitToken);
     assert.match(userPromptEvent.payload.clientContext.detaches.files.staged[0].transfer.remotePathRule, /main-agent-save-file request/);
     const decisionActor = {
@@ -1071,7 +1075,7 @@ async function main() {
     assert.equal(compatAttempts.length, 2);
     assert.equal(compatAttempts[0].clientContext?.app, "detaches_agent");
     assert.equal(compatAttempts[1].clientContext, undefined);
-    assert.match(compatAttempts[1].message, /detaches_agent 兼容上下文/);
+    assert.match(compatAttempts[1].message, /\[detaches_agent compatibility context\]/);
     assert.match(compatAttempts[1].message, /contextExport\.consumeUrl: http:\/\/127\.0\.0\.1:39888\/api\/context\/exports\//);
     assert.match(compatAttempts[1].message, /doctor --url/);
     const fallbackUrl = /contextExport\.consumeUrl: (http:\/\/[^\s]+)/.exec(compatAttempts[1].message)?.[1];

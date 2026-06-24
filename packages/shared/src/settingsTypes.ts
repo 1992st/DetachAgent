@@ -5,6 +5,8 @@ export interface RemoteProfile {
   remoteSshPort: number;
   remoteUser: string;
   remoteIdentityPath: string;
+  mainAgentServiceEnabled: boolean;
+  localSshBridgeEnabled: boolean;
   reverseBridgeRemoteHost: string;
   reverseBridgeRemotePort: number;
   gatewayTransport: "ssh" | "direct";
@@ -32,6 +34,8 @@ export interface RemoteProfileUpdate {
   remoteSshPort?: number;
   remoteUser?: string;
   remoteIdentityPath?: string;
+  mainAgentServiceEnabled?: boolean;
+  localSshBridgeEnabled?: boolean;
   reverseBridgeRemoteHost?: string;
   reverseBridgeRemotePort?: number;
   gatewayTransport?: "ssh" | "direct";

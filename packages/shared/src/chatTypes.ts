@@ -37,6 +37,8 @@ export interface ChatSendResponse {
   raw?: unknown;
 }
 
+export type RelationshipSkillStatus = "unknown" | "checking" | "ready" | "missing" | "error";
+
 export type ChatSocketServerEvent =
   | { type: "ready"; sessionKey: string }
   | { type: "history"; payload: ChatHistoryResponse }
@@ -44,9 +46,11 @@ export type ChatSocketServerEvent =
   | { type: "agent"; payload: unknown }
   | { type: "health"; ok: boolean; payload?: unknown }
   | { type: "sent"; payload: ChatSendResponse }
+  | { type: "relationship-skill-status"; status: RelationshipSkillStatus; message?: string; raw?: unknown }
   | { type: "error"; message: string; details?: unknown };
 
 export type ChatSocketClientEvent =
   | { type: "send"; message: string; thinking?: string; attachments?: UploadedFileRef[]; attachmentContextOverride?: string; idempotencyKey?: string }
+  | { type: "bootstrap-relationship-skill-check"; idempotencyKey?: string }
   | { type: "history" }
   | { type: "abort"; runId: string };

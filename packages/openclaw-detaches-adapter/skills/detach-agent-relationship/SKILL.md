@@ -107,6 +107,7 @@ When a message contains `[[DETACH_AGENT_FILE_STAGED]]`, the listed file exists o
 - Host/Main Agent must not claim it can read `sourceLocalPath` directly.
 - If the file should be saved on the Host/Main Agent machine, Host/Main Agent decides the destination SSH/Linux user and path according to Host/Main Agent workspace/artifact rules.
 - `destination.user` and `destination.path` are the core fields the Host/Main Agent must decide. `destination.host` and `destination.port` may be omitted; detaches_agent broker fills them from its current Main Agent SSH/Gateway settings.
+- If `destination.path` starts with `/home/<account>/`, `destination.user` must match `<account>` unless the user explicitly asks to save through a different SSH account with write permission. Do not copy a sample SSH username into another account's home path.
 - Do not put placeholders, examples, or "replace me" text into `destination.user`, `destination.host`, or `destination.port`. If `destination.user` is unknown, do not emit a save request.
 - `destination.path` must be a complete absolute target file path, including the directory, final filename, and extension.
 - `destination.path` must not be a directory path. Do not end at paths such as `screenshots/`, `docs/`, `_staging/`, or any folder-only location.
@@ -122,5 +123,5 @@ When a message contains `[[DETACH_AGENT_FILE_STAGED]]`, the listed file exists o
 Example:
 
 ```main-agent-save-file
-{"fileId":"<file-id>","sourceLocalPath":"<absolute path from prompt>","displayName":"<name>","size":12345,"destination":{"user":"aispeech","path":"/absolute/path/to/final-filename.ext"},"methodPreference":"rsync","reason":"save staged file into this concrete Host/Main Agent file path according to workspace rules"}
+{"fileId":"<file-id>","sourceLocalPath":"<absolute path from prompt>","displayName":"<name>","size":12345,"destination":{"user":"zhangst","path":"/home/zhangst/path/to/final-filename.ext"},"methodPreference":"rsync","reason":"save staged file into this concrete Host/Main Agent file path according to workspace rules"}
 ```

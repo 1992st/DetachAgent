@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Copy, FileInput, Play, Plus, Save, ShieldCheck, Trash2, Wifi } from "lucide-react";
+import { Copy, FileInput, Play, Plus, Save, Settings2, ShieldCheck, Trash2, Wifi, X } from "lucide-react";
 import type { NetworkTestResponse, PublicSettings, RemoteProfile, RemoteProfileUpdate } from "@detaches/shared";
 import { activateRemoteProfile, createRemoteProfile, deleteRemoteProfile, fetchSettings, saveRemoteProfile, testNetwork } from "../../lib/api.js";
 import { AgentConfigAssistantDialog } from "./agentConfigAssistant/AgentConfigAssistantDialog.js";
@@ -20,6 +20,9 @@ export function SettingsPanel({ onSaved }: Props) {
   const [testResult, setTestResult] = useState<NetworkTestResponse | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [assistantApplying, setAssistantApplying] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [guideStage, setGuideStage] = useState<"idle" | "import-agent" | "gateway-health" | "test-network">("idle");
+  const [copiedPairingCommand, setCopiedPairingCommand] = useState(false);
 
   useEffect(() => {
     fetchSettings()
@@ -31,6 +34,9 @@ export function SettingsPanel({ onSaved }: Props) {
   }, []);
 
   const selectedProfile = settings?.profiles.find((profile) => profile.id === selectedProfileId) ?? settings ?? null;
+  const gatewayHealthStep = testResult?.steps.find((step) => step.id === "gateway-health") ?? null;
+  const gatewayConnected = gatewayHealthStep?.state === "ok";
+  const gatewayNeedsPairing = Boolean(gatewayHealthStep && networkStepApproveCommand(gatewayHealthStep.details));
   const selectedIdentityPath = selectedProfile?.remoteIdentityPath ?? "";
   const identityLooksInvalid = Boolean(selectedIdentityPath)
     && !selectedIdentityPath.startsWith("/")
@@ -92,6 +98,8 @@ export function SettingsPanel({ onSaved }: Props) {
       remoteSshPort: Number(selectedProfile.remoteSshPort),
       remoteUser: selectedProfile.remoteUser,
       remoteIdentityPath: selectedProfile.remoteIdentityPath,
+      mainAgentServiceEnabled: selectedProfile.mainAgentServiceEnabled,
+      localSshBridgeEnabled: selectedProfile.localSshBridgeEnabled,
       reverseBridgeRemoteHost: selectedProfile.reverseBridgeRemoteHost,
       reverseBridgeRemotePort: Number(selectedProfile.reverseBridgeRemotePort),
       gatewayTransport: selectedProfile.gatewayTransport,
@@ -126,7 +134,17 @@ export function SettingsPanel({ onSaved }: Props) {
     setTesting(true);
     setStatus(null);
     try {
-      setTestResult(await testNetwork());
+      const result = await testNetwork();
+      setTestResult(result);
+      const gatewayStep = result.steps.find((step) => step.id === "gateway-health");
+      if (gatewayStep?.state === "ok") {
+        setGuideStage("idle");
+        setCopiedPairingCommand(false);
+      } else if (gatewayStep && networkStepApproveCommand(gatewayStep.details)) {
+        setGuideStage("gateway-health");
+        setCopiedPairingCommand(false);
+      }
+      onSaved();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
@@ -144,6 +162,9 @@ export function SettingsPanel({ onSaved }: Props) {
       });
       setSettings(saved);
       setSelectedProfileId(saved.activeProfileId);
+      setTestResult(null);
+      setCopiedPairingCommand(false);
+      setGuideStage("import-agent");
       setStatus("Created profile.");
       onSaved();
     } catch (error) {
@@ -187,6 +208,7 @@ export function SettingsPanel({ onSaved }: Props) {
         name: selectedProfile.name,
         remoteHost: selectedProfile.remoteHost,
         gatewayTransport: "direct",
+        localSshBridgeEnabled: false,
         gatewayDirectUrl: selectedProfile.gatewayDirectUrl,
         gatewayDirectHost: selectedProfile.gatewayDirectHost || selectedProfile.remoteHost,
         gatewayRemotePort: Number(selectedProfile.gatewayRemotePort),
@@ -227,6 +249,8 @@ export function SettingsPanel({ onSaved }: Props) {
         remoteSshPort: Number(selectedProfile.remoteSshPort),
         remoteUser: selectedProfile.remoteUser,
         remoteIdentityPath: selectedProfile.remoteIdentityPath,
+        mainAgentServiceEnabled: selectedProfile.mainAgentServiceEnabled,
+        localSshBridgeEnabled: selectedProfile.localSshBridgeEnabled,
         reverseBridgeRemoteHost: selectedProfile.reverseBridgeRemoteHost,
         reverseBridgeRemotePort: Number(selectedProfile.reverseBridgeRemotePort),
         gatewayTransport: selectedProfile.gatewayTransport,
@@ -257,6 +281,12 @@ export function SettingsPanel({ onSaved }: Props) {
     } finally {
       setAssistantApplying(false);
     }
+  }
+
+  function handleCopyPairingCommand(command: string) {
+    void copyText(command);
+    setCopiedPairingCommand(true);
+    setGuideStage("test-network");
   }
 
   if (!settings || !selectedProfile) {
@@ -306,19 +336,32 @@ export function SettingsPanel({ onSaved }: Props) {
       <form className="settings-panel primary" onSubmit={submit}>
         <div className="settings-title">
           <div>
-            <h2>网络与连接</h2>
-            <p>连接 Main Agent 的 OpenClaw Gateway，并提供本机可被 Main Agent 回连的地址。</p>
+            <h2>网络连接</h2>
+            <p>默认直连 Main Agent 的 OpenClaw Gateway；SSH 保留在高级配置中按需启用。</p>
           </div>
-          <button type="button" className="secondary-button" onClick={runTest} disabled={testing}>
-            <Play size={16} />
-            {testing ? "测试中" : "测试网络"}
-          </button>
+          <div className="settings-title-actions">
+            <button type="button" className="secondary-button" onClick={() => setAdvancedOpen(true)}>
+              <Settings2 size={16} />
+              高级配置
+            </button>
+            <button type="button" className={`secondary-button ${guideStage === "test-network" && !gatewayConnected ? "guide-breathe" : ""}`} onClick={runTest} disabled={testing}>
+              <Play size={16} />
+              {testing ? "测试中" : "测试网络"}
+            </button>
+          </div>
         </div>
 
         <section className="settings-section">
           <div className="settings-section-heading">
             <h3>Main Agent Gateway</h3>
-            <button type="button" className="secondary-button compact agent-config-import-button" onClick={() => setAssistantOpen(true)}>
+            <button
+              type="button"
+              className={`secondary-button compact agent-config-import-button ${guideStage === "import-agent" ? "guide-breathe" : ""}`}
+              onClick={() => {
+                setAssistantOpen(true);
+                if (guideStage === "import-agent") setGuideStage("idle");
+              }}
+            >
               <FileInput size={16} />
               导入 Agent 配置
             </button>
@@ -351,52 +394,6 @@ export function SettingsPanel({ onSaved }: Props) {
             <small className="field-hint">如果 Main Agent 使用 `bind=loopback` + `tailscale.mode=serve`，这里填 Tailscale Serve 的 HTTPS 地址；会自动按 WSS 连接。</small>
           </label>
         </section>
-
-        <details className="settings-section advanced-settings">
-          <summary>高级连接设置</summary>
-          <div className="settings-grid">
-            <label>
-              Gateway transport
-              <select value={selectedProfile.gatewayTransport} onChange={(e) => updateSelectedProfile({ gatewayTransport: e.target.value as PublicSettings["gatewayTransport"] })}>
-                <option value="direct">direct / Tailscale</option>
-                <option value="ssh">SSH tunnel</option>
-              </select>
-            </label>
-            <label>
-              Direct Gateway host
-              <input value={selectedProfile.gatewayDirectHost} onChange={(e) => updateSelectedProfile({ gatewayDirectHost: e.target.value })} />
-            </label>
-          </div>
-          <div className="settings-grid">
-            <label>
-              SSH port
-              <input type="number" value={selectedProfile.remoteSshPort} onChange={(e) => updateSelectedProfile({ remoteSshPort: Number(e.target.value) })} />
-            </label>
-            <label>
-              Local tunnel port
-              <input type="number" value={selectedProfile.gatewayLocalPort} onChange={(e) => updateSelectedProfile({ gatewayLocalPort: Number(e.target.value) })} />
-            </label>
-          </div>
-          <div className="settings-grid">
-            <label>
-              Reverse bridge host
-              <input value={selectedProfile.reverseBridgeRemoteHost} onChange={(e) => updateSelectedProfile({ reverseBridgeRemoteHost: e.target.value })} />
-            </label>
-            <label>
-              Reverse bridge port
-              <input type="number" value={selectedProfile.reverseBridgeRemotePort} onChange={(e) => updateSelectedProfile({ reverseBridgeRemotePort: Number(e.target.value) })} />
-            </label>
-          </div>
-          <label>
-            SSH identity / 私钥路径
-              <input
-                value={selectedProfile.remoteIdentityPath}
-              placeholder="~/.ssh/detaches_agent_ed25519"
-                onChange={(e) => updateSelectedProfile({ remoteIdentityPath: e.target.value })}
-              />
-            {identityLooksInvalid ? <small className="field-warning">这里应填写私钥文件路径，不是 SSH 账号；账号请填在 SSH user。</small> : null}
-          </label>
-        </details>
 
         <section className="settings-section">
           <h3>Gateway 认证</h3>
@@ -435,7 +432,7 @@ export function SettingsPanel({ onSaved }: Props) {
         </section>
 
         <section className="settings-section">
-          <h3>Main Agent 回连本机</h3>
+          <h3>本机访问地址</h3>
           <label>
             Public base URL
             <input
@@ -472,21 +469,28 @@ export function SettingsPanel({ onSaved }: Props) {
         <div className="settings-title">
           <div>
             <h2>网络测试</h2>
-            <p>检查 SSH 端口、隧道、本地 Gateway 端口和 Gateway health。</p>
+            <p>默认检查 Gateway 直连；高级 SSH 链路开启后才参与检测。</p>
           </div>
           <ShieldCheck size={18} />
         </div>
         {testResult ? (
           <div className="network-test-list">
             {testResult.steps.map((step) => (
-              <article className={`network-test-step ${step.state}`} key={step.id}>
+              <article
+                className={`network-test-step ${step.state} ${step.id === "gateway-health" && guideStage === "gateway-health" && gatewayNeedsPairing && !copiedPairingCommand ? "guide-breathe" : ""}`}
+                key={step.id}
+              >
                 <strong>{step.label}</strong>
                 <p>{step.message}</p>
                 {networkStepApproveCommand(step.details) ? (
                   <div className="network-test-command">
                     <span>在 Main Agent 主机执行</span>
                     <code>{networkStepApproveCommand(step.details)}</code>
-                    <button type="button" className="secondary-button compact" onClick={() => copyText(networkStepApproveCommand(step.details) ?? "")}>
+                    <button
+                      type="button"
+                      className={`secondary-button compact ${guideStage === "gateway-health" && !copiedPairingCommand ? "guide-breathe" : ""}`}
+                      onClick={() => handleCopyPairingCommand(networkStepApproveCommand(step.details) ?? "")}
+                    >
                       <Copy size={14} />
                       复制命令
                     </button>
@@ -539,6 +543,148 @@ export function SettingsPanel({ onSaved }: Props) {
         onClose={() => setAssistantOpen(false)}
         onApply={applyAgentConfig}
       />
+      {advancedOpen ? (
+        <AdvancedSettingsDialog
+          profile={selectedProfile}
+          identityLooksInvalid={identityLooksInvalid}
+          onClose={() => setAdvancedOpen(false)}
+          onUpdate={updateSelectedProfile}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function AdvancedSettingsDialog({
+  profile,
+  identityLooksInvalid,
+  onClose,
+  onUpdate
+}: {
+  profile: RemoteProfile;
+  identityLooksInvalid: boolean;
+  onClose: () => void;
+  onUpdate: (patch: Partial<RemoteProfileUpdate>) => void;
+}) {
+  const sshServiceEnabled = profile.mainAgentServiceEnabled || profile.gatewayTransport === "ssh";
+  return (
+    <div className="advanced-config-backdrop" role="presentation">
+      <section className="advanced-config-dialog" role="dialog" aria-modal="true" aria-label="高级配置">
+        <header className="advanced-config-header">
+          <div>
+            <strong>高级配置</strong>
+            <small>SSH 是高级兼容能力，默认不参与 Gateway 直连主流程。</small>
+          </div>
+          <button type="button" className="icon-button small" title="关闭高级配置" onClick={onClose}>
+            <X size={15} />
+          </button>
+        </header>
+        <div className="advanced-config-body">
+          <section className="advanced-config-section">
+            <div>
+              <h3>Main Agent 服务信息</h3>
+              <p>当前支持 SSH；后续会扩展 scp 等协议。</p>
+            </div>
+            <label className="check-row advanced-toggle">
+              <input
+                type="checkbox"
+                checked={sshServiceEnabled}
+                onChange={(event) => onUpdate({
+                  mainAgentServiceEnabled: event.target.checked,
+                  gatewayTransport: event.target.checked ? profile.gatewayTransport : "direct"
+                })}
+              />
+              启用 Main Agent 服务信息配置
+            </label>
+            <div className="settings-grid">
+              <label>
+                协议
+                <select disabled={!sshServiceEnabled} value="ssh" onChange={() => undefined}>
+                  <option value="ssh">SSH</option>
+                </select>
+              </label>
+              <label>
+                Gateway transport
+                <select
+                  disabled={!sshServiceEnabled}
+                  value={profile.gatewayTransport}
+                  onChange={(e) => onUpdate({
+                    gatewayTransport: e.target.value as PublicSettings["gatewayTransport"],
+                    mainAgentServiceEnabled: e.target.value === "ssh" ? true : profile.mainAgentServiceEnabled
+                  })}
+                >
+                  <option value="direct">direct / Tailscale</option>
+                  <option value="ssh">SSH tunnel</option>
+                </select>
+              </label>
+            </div>
+            <div className="settings-grid">
+              <label>
+                SSH host
+                <input disabled={!sshServiceEnabled} value={profile.remoteHost} onChange={(e) => onUpdate({ remoteHost: e.target.value })} />
+              </label>
+              <label>
+                SSH port
+                <input disabled={!sshServiceEnabled} type="number" value={profile.remoteSshPort} onChange={(e) => onUpdate({ remoteSshPort: Number(e.target.value) })} />
+              </label>
+            </div>
+            <div className="settings-grid">
+              <label>
+                SSH user
+                <input disabled={!sshServiceEnabled} value={profile.remoteUser} onChange={(e) => onUpdate({ remoteUser: e.target.value })} />
+              </label>
+              <label>
+                SSH identity / 私钥路径
+                <input
+                  disabled={!sshServiceEnabled}
+                  value={profile.remoteIdentityPath}
+                  placeholder="~/.ssh/detaches_agent_ed25519"
+                  onChange={(e) => onUpdate({ remoteIdentityPath: e.target.value })}
+                />
+              </label>
+            </div>
+            {identityLooksInvalid && sshServiceEnabled ? <small className="field-warning">这里应填写私钥文件路径，不是 SSH 账号；账号请填在 SSH user。</small> : null}
+          </section>
+
+          <section className="advanced-config-section">
+            <div>
+              <h3>本机 SSH 回连</h3>
+              <p>Main Agent 当前不依赖 SSH 控制本机 terminal；只有需要 reverse bridge 时才开启。</p>
+            </div>
+            <label className="check-row advanced-toggle">
+              <input
+                type="checkbox"
+                checked={profile.localSshBridgeEnabled}
+                onChange={(e) => onUpdate({ localSshBridgeEnabled: e.target.checked })}
+              />
+              连接本机 SSH / reverse bridge
+            </label>
+            {profile.localSshBridgeEnabled ? (
+              <>
+                <div className="settings-grid">
+                  <label>
+                    Reverse bridge host
+                    <input value={profile.reverseBridgeRemoteHost} onChange={(e) => onUpdate({ reverseBridgeRemoteHost: e.target.value })} />
+                  </label>
+                  <label>
+                    Reverse bridge port
+                    <input type="number" value={profile.reverseBridgeRemotePort} onChange={(e) => onUpdate({ reverseBridgeRemotePort: Number(e.target.value) })} />
+                  </label>
+                </div>
+                <label>
+                  Local tunnel port
+                  <input type="number" value={profile.gatewayLocalPort} onChange={(e) => onUpdate({ gatewayLocalPort: Number(e.target.value) })} />
+                </label>
+              </>
+            ) : (
+              <p className="advanced-disabled-note">已关闭。直连 Gateway 聊天、文件暂存和普通工具请求不会使用这条 SSH 链路。</p>
+            )}
+          </section>
+        </div>
+        <footer className="advanced-config-actions">
+          <button type="button" className="primary-button" onClick={onClose}>完成</button>
+        </footer>
+      </section>
     </div>
   );
 }

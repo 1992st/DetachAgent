@@ -1,6 +1,6 @@
 import { Plus, RefreshCw, Server, ShieldAlert, TerminalSquare, Wifi } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { AppHealth, LocalTerminalApp } from "@detaches/shared";
+import type { AppHealth, LocalTerminalApp, RelationshipSkillStatus } from "@detaches/shared";
 
 interface Props {
   health: AppHealth | null;
@@ -12,6 +12,9 @@ interface Props {
   terminalAppsError?: string | null;
   onLoadTerminalApps?: () => void;
   onOpenTerminalApp?: (appId: string) => void;
+  relationshipSkillStatus?: RelationshipSkillStatus;
+  relationshipSkillMessage?: string;
+  onRelationshipSkillAction?: () => void;
 }
 
 function pill(state: string, label: string, message?: string) {
@@ -31,7 +34,10 @@ export function ConnectionBar({
   terminalAppsLoading = false,
   terminalAppsError = null,
   onLoadTerminalApps,
-  onOpenTerminalApp
+  onOpenTerminalApp,
+  relationshipSkillStatus = "unknown",
+  relationshipSkillMessage,
+  onRelationshipSkillAction
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -71,6 +77,14 @@ export function ConnectionBar({
             <span className="error-inline">
               <ShieldAlert size={15} />
               {error}
+            </span>
+          ) : null}
+          {relationshipSkillStatus === "missing" || relationshipSkillStatus === "checking" || relationshipSkillStatus === "error" ? (
+            <span className={`relationship-skill-alert ${relationshipSkillStatus}`} title={relationshipSkillMessage}>
+              {relationshipSkillStatus === "checking" ? "检查 relationship skill" : relationshipSkillStatus === "error" ? "Skill 检测失败" : "Relationship skill 未安装"}
+              {relationshipSkillStatus === "missing" ? (
+                <button type="button" onClick={onRelationshipSkillAction}>查看安装</button>
+              ) : null}
             </span>
           ) : null}
           <button className="icon-button" onClick={onRefresh} disabled={loading} title="Refresh connection">

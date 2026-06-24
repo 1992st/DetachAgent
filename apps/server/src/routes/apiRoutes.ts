@@ -24,6 +24,7 @@ import { sshCredentialSessionService } from "../services/ssh/sshCredentialSessio
 import { localTerminalAppService } from "../services/terminal/localTerminalAppService.js";
 import { resolveDirectGatewayUrl } from "../services/gateway/gatewayClient.js";
 import { platformService } from "../services/platform/platformService.js";
+import { buildLocalMachineContext } from "../services/platform/localMachineContext.js";
 import { cloudPromptLogService } from "../services/gateway/cloudPromptLogService.js";
 import { interactionBrokerService } from "../services/interactions/interactionBrokerService.js";
 
@@ -31,6 +32,7 @@ const upload = multer({
   dest: path.join(appConfig.storageDir, "cache"),
   limits: { fileSize: appConfig.maxUploadMb * 1024 * 1024 }
 });
+const uploadSingleFile = upload.single("file");
 
 export const apiRoutes = express.Router();
 
@@ -184,6 +186,9 @@ async function reverseBridgeProbe(): Promise<{ ok: boolean; message: string; det
 async function runNetworkTest(): Promise<NetworkTestResponse> {
   const config = await runtimeConfig();
   const steps: NetworkTestStep[] = [];
+  const sshTunnelEnabled = config.gatewayTransport === "ssh";
+  const shouldCheckMainAgentSsh = config.mainAgentServiceEnabled || sshTunnelEnabled || config.localSshBridgeEnabled;
+  const shouldUseReverseBridge = sshTunnelEnabled || config.localSshBridgeEnabled;
   const directGatewayUrl = resolveDirectGatewayUrl(config.gatewayDirectUrl, config.gatewayDirectHost, config.gatewayRemotePort);
   steps.push({
     id: "settings",
@@ -195,6 +200,8 @@ async function runNetworkTest(): Promise<NetworkTestResponse> {
     details: {
       remoteHost: config.remoteHost,
       remoteSshPort: config.remoteSshPort,
+      mainAgentServiceEnabled: config.mainAgentServiceEnabled,
+      localSshBridgeEnabled: config.localSshBridgeEnabled,
       gatewayTransport: config.gatewayTransport,
       gatewayDirectHost: config.gatewayDirectHost,
       gatewayDirectUrl: config.gatewayDirectUrl,
@@ -216,35 +223,47 @@ async function runNetworkTest(): Promise<NetworkTestResponse> {
       details: tailscale
     });
   }
-  const ssh = await tcpProbe(config.remoteHost, config.remoteSshPort);
-  steps.push({
-    id: "ssh-tcp",
-    label: "SSH 端口",
-    state: ssh.ok ? "ok" : "error",
-    message: ssh.message,
-    details: ssh
-  });
-  const reverseTunnel = config.gatewayTransport === "ssh"
-    ? await sshTunnelService.ensure()
-    : await sshTunnelService.ensureReverseBridge();
-  steps.push({
-    id: "ssh-reverse-bridge",
-    label: "SSH 反向桥",
-    state: reverseTunnel.ok ? "ok" : "error",
-    message: reverseTunnel.ok && reverseTunnel.pid
-      ? `SSH reverse bridge is active at ${reverseTunnel.reverseBrokerUrl}.`
-      : reverseTunnel.message,
-    details: reverseTunnel
-  });
-  if (reverseTunnel.ok) {
-    const reverseBridge = await reverseBridgeProbe();
+  if (shouldCheckMainAgentSsh) {
+    const ssh = await tcpProbe(config.remoteHost, config.remoteSshPort);
     steps.push({
-      id: "reverse-bridge",
-      label: "远端反向控制入口",
-      state: reverseBridge.ok ? "ok" : "error",
-      message: reverseBridge.message,
-      details: reverseBridge
+      id: "ssh-tcp",
+      label: "SSH 端口",
+      state: ssh.ok ? "ok" : "error",
+      message: ssh.message,
+      details: ssh
     });
+  } else {
+    steps.push({
+      id: "ssh-disabled",
+      label: "SSH 高级链路",
+      state: "disabled",
+      message: "默认直连 Gateway 模式未启用 SSH，不检查 Main Agent SSH 或本机 SSH 回连。"
+    });
+  }
+
+  if (shouldUseReverseBridge) {
+    const reverseTunnel = sshTunnelEnabled
+      ? await sshTunnelService.ensure()
+      : await sshTunnelService.ensureReverseBridge();
+    steps.push({
+      id: "ssh-reverse-bridge",
+      label: "SSH 反向桥",
+      state: reverseTunnel.ok ? "ok" : "error",
+      message: reverseTunnel.ok && reverseTunnel.pid
+        ? `SSH reverse bridge is active at ${reverseTunnel.reverseBrokerUrl}.`
+        : reverseTunnel.message,
+      details: reverseTunnel
+    });
+    if (reverseTunnel.ok) {
+      const reverseBridge = await reverseBridgeProbe();
+      steps.push({
+        id: "reverse-bridge",
+        label: "远端反向控制入口",
+        state: reverseBridge.ok ? "ok" : "error",
+        message: reverseBridge.message,
+        details: reverseBridge
+      });
+    }
   }
 
   if (config.gatewayTransport === "ssh") {
@@ -297,9 +316,12 @@ async function runNetworkTest(): Promise<NetworkTestResponse> {
 
 async function checkHealth(): Promise<AppHealth> {
   const config = await runtimeConfig();
+  const shouldUseReverseBridge = config.gatewayTransport === "ssh" || config.localSshBridgeEnabled;
   const tunnel = config.gatewayTransport === "ssh"
     ? await sshTunnelService.ensure()
-    : await sshTunnelService.status();
+    : config.localSshBridgeEnabled
+      ? await sshTunnelService.ensureReverseBridge()
+      : await sshTunnelService.status();
   let gatewayOk = false;
   let gatewayMessage = "Gateway not checked.";
   try {
@@ -312,8 +334,8 @@ async function checkHealth(): Promise<AppHealth> {
   const body: AppHealth = {
     server: { state: "ok", message: "Local server is running." },
     ssh: {
-      state: tunnel.ok ? "ok" : "error",
-      message: tunnel.message,
+      state: !shouldUseReverseBridge ? "disabled" : tunnel.ok ? "ok" : "error",
+      message: shouldUseReverseBridge ? tunnel.message : "SSH tunnel / reverse bridge is disabled by default.",
       details: tunnel
     },
     gateway: {
@@ -324,6 +346,8 @@ async function checkHealth(): Promise<AppHealth> {
     config: {
       remoteHost: config.remoteHost,
       remoteSshPort: config.remoteSshPort,
+      mainAgentServiceEnabled: config.mainAgentServiceEnabled,
+      localSshBridgeEnabled: config.localSshBridgeEnabled,
       gatewayTransport: config.gatewayTransport,
       gatewayDirectHost: config.gatewayDirectHost,
       gatewayLocalPort: config.gatewayLocalPort,
@@ -426,7 +450,7 @@ function diagnosticsFromHealth(health: AppHealth): DiagnosticItem[] {
       severity: "info",
       title: "Direct Gateway transport",
       message: `Connecting directly to ${health.config.gatewayDirectHost}:${health.config.gatewayRemotePort}.`,
-      action: "Use this mode when the remote Gateway allows Tailscale/LAN access. Switch back to SSH tunnel if the Gateway only binds to remote loopback."
+      action: "SSH tunnel and local SSH reverse bridge are advanced options and stay disabled unless explicitly enabled."
     });
   }
 
@@ -448,7 +472,9 @@ function diagnosticsFromHealth(health: AppHealth): DiagnosticItem[] {
       id: "ready",
       severity: "info",
       title: "Connection ready",
-      message: "Local server, SSH tunnel, and Gateway health check passed."
+      message: health.config.gatewayTransport === "direct" && !health.config.localSshBridgeEnabled
+        ? "Local server and direct Gateway health check passed. SSH advanced links are disabled."
+        : "Local server, configured SSH link, and Gateway health check passed."
     });
   }
   return items;
@@ -474,7 +500,15 @@ apiRoutes.get("/diagnostics", async (_req, res) => {
 });
 
 apiRoutes.post("/network/test", async (_req, res) => {
-  res.json(await runNetworkTest());
+  const result = await runNetworkTest();
+  const gatewayOk = result.steps.some((step) => step.id === "gateway-health" && step.state === "ok");
+  try {
+    const settings = await settingsStore.publicSettings();
+    await settingsStore.markProfileTested(settings.activeProfileId, gatewayOk ? "ok" : "error");
+  } catch {
+    // Network test results are still useful even if persisting the profile status fails.
+  }
+  res.json(result);
 });
 
 apiRoutes.get("/ssh/session-password", (_req, res) => {
@@ -731,7 +765,19 @@ apiRoutes.get("/agents", async (_req, res) => {
   }
 });
 
-apiRoutes.post("/files/upload", upload.single("file"), async (req, res) => {
+apiRoutes.post("/files/upload", (req, res, next) => {
+  uploadSingleFile(req, res, (error) => {
+    if (!error) {
+      next();
+      return;
+    }
+    if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
+      res.status(413).json({ error: `File is too large. Maximum upload size is ${appConfig.maxUploadMb} MB.` });
+      return;
+    }
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  });
+}, async (req, res) => {
   if (!req.file) {
     res.status(400).json({ error: "Missing file." });
     return;
@@ -915,10 +961,12 @@ apiRoutes.post("/interactions/events/gateway", async (req, res) => {
 apiRoutes.get("/tools/broker/capabilities", async (_req, res) => {
   const config = await runtimeConfig();
   const bridgeBaseUrl = reverseBridgeBaseUrl(config);
+  const localMachine = buildLocalMachineContext();
   res.json({
     ok: true,
     app: "detaches_agent",
     protocolVersion: 1,
+    localMachine,
     gatewayEventEndpoint: `${bridgeBaseUrl}/api/tools/events/gateway`,
     interactionEventEndpoint: `${bridgeBaseUrl}/api/interactions/events/gateway`,
     eventSource: "gateway-event",
