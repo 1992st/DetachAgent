@@ -18,7 +18,7 @@ Keep the main chat page focused while still making `detach-agent-relationship` e
 - On every new chat socket/session, the UI starts in `checking` and the server sends a short bootstrap prompt to Main Agent.
 - The prompt asks for fixed response lines including version:
   - `DETACH_AGENT_SKILL_STATUS: ready`
-  - `DETACH_AGENT_SKILL_VERSION: 1.1.0`
+  - `DETACH_AGENT_SKILL_VERSION: 1.1.1`
   - `DETACH_AGENT_SKILL_STATUS: missing`
   - `DETACH_AGENT_SKILL_VERSION: none`
   - `DETACH_AGENT_SKILL_STATUS: outdated`

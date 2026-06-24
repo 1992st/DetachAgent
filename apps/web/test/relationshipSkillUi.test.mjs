@@ -4,6 +4,8 @@ import path from "node:path";
 
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 
+const rootPackage = fs.readFileSync(path.join(repoRoot, "package.json"), "utf8");
+const waitForServer = fs.readFileSync(path.join(repoRoot, "scripts/wait-for-server.mjs"), "utf8");
 const settingsPanel = fs.readFileSync(path.join(repoRoot, "apps/web/src/features/settings/SettingsPanel.tsx"), "utf8");
 const chatPanel = fs.readFileSync(path.join(repoRoot, "apps/web/src/features/chat/ChatPanel.tsx"), "utf8");
 const connectionBar = fs.readFileSync(path.join(repoRoot, "apps/web/src/features/connection/ConnectionBar.tsx"), "utf8");
@@ -13,6 +15,8 @@ const css = fs.readFileSync(path.join(repoRoot, "apps/web/src/styles/global.css"
 const preview = fs.readFileSync(path.join(repoRoot, "docs/main-agent-advanced-settings-preview.html"), "utf8");
 
 assert.match(settingsPanel, /高级配置/, "settings page should expose an advanced configuration entry");
+assert.match(rootPackage, /wait-for-server\.mjs && pnpm --filter @detaches\/web dev/, "dev script should wait for the API server before starting Vite");
+assert.match(waitForServer, /\/api\/health/, "wait-for-server should poll the local API health endpoint");
 assert.match(settingsPanel, /Main Agent 服务信息/, "advanced settings should include Main Agent service information");
 assert.match(settingsPanel, /Main Agent 回连本机/, "settings should include gateway-terminal callback settings");
 assert.match(settingsPanel, /选择本机回连 IP/, "settings should expose callback IP selection");
@@ -40,6 +44,7 @@ assert.match(app, /navigator\.clipboard\.writeText\(relationshipSkillInstallProm
 assert.match(skillInstallPanel, /DETACH_AGENT_RELATIONSHIP_SKILL_VERSION/, "Skill install panel should use the shared required skill version");
 assert.match(skillInstallPanel, /export const relationshipSkillInstallPrompt/, "Skill install panel should export the shared install/update prompt");
 assert.match(skillInstallPanel, /安装或更新 OpenClaw relationship skill 到当前要求版本/, "Skill install panel should give Main Agent an update prompt");
+assert.match(skillInstallPanel, /detaches-agent-adapter\.mjs/, "Skill install prompt should also install the adapter CLI helper");
 
 assert.match(css, /@keyframes skill-alert-pulse/, "CSS should include the orange breathing alert animation");
 assert.match(css, /relationship-skill-prompt-dialog/, "CSS should style the relationship skill prompt dialog");

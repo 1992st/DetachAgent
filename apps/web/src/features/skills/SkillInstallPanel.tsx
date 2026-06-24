@@ -11,8 +11,10 @@ export const relationshipSkillVersion = DETACH_AGENT_RELATIONSHIP_SKILL_VERSION;
 export const relationshipSkillProtocolVersion = DETACH_AGENT_RELATIONSHIP_SKILL_PROTOCOL_VERSION;
 export const relationshipSkillPackageVersion = DETACH_AGENT_RELATIONSHIP_SKILL_VERSION;
 export const relationshipSkillTargetDir = "~/.openclaw/skills";
+export const relationshipSkillAdapterBinDir = "~/.detach_agent/bin";
 export const relationshipSkillRepositoryUrl = "https://github.com/1992st/DetachAgent.git";
 export const relationshipSkillSourcePath = "packages/openclaw-detaches-adapter/skills/detach-agent-relationship";
+export const relationshipSkillAdapterSourcePath = "packages/openclaw-detaches-adapter/bin/detaches-agent-adapter.mjs";
 
 export function SkillInstallPanel({ sessionKey: _sessionKey, agentId: _agentId }: { sessionKey?: string | null; agentId?: string | null }) {
   const [mode, setMode] = useState<"install" | "verify" | null>(null);
@@ -123,6 +125,10 @@ export const relationshipSkillInstallCommand = [
   `test -f ${relationshipSkillTargetDir}/${relationshipSkillName}/VERSION`,
   `test -f ${relationshipSkillTargetDir}/${relationshipSkillName}/CHANGELOG.md`,
   `cat ${relationshipSkillTargetDir}/${relationshipSkillName}/VERSION`,
+  `mkdir -p ${relationshipSkillAdapterBinDir}`,
+  `cp "$tmp_dir/DetachAgent/${relationshipSkillAdapterSourcePath}" ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs`,
+  `chmod +x ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs`,
+  `test -f ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs`,
   "rm -rf \"$tmp_dir\""
 ].join(" && ");
 
@@ -132,7 +138,8 @@ export const relationshipSkillVerifyCommand = [
   `test -f ${relationshipSkillTargetDir}/${relationshipSkillName}/VERSION`,
   `test -f ${relationshipSkillTargetDir}/${relationshipSkillName}/CHANGELOG.md`,
   `printf 'detach-agent-relationship version: '`,
-  `cat ${relationshipSkillTargetDir}/${relationshipSkillName}/VERSION`
+  `cat ${relationshipSkillTargetDir}/${relationshipSkillName}/VERSION`,
+  `test -f ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs`
 ].join(" && ");
 
 export const relationshipSkillInstallPrompt = `请在 Main Agent 机器上安装或更新 OpenClaw relationship skill 到当前要求版本。
@@ -142,6 +149,7 @@ export const relationshipSkillInstallPrompt = `请在 Main Agent 机器上安装
 GitHub 仓库: ${relationshipSkillRepositoryUrl}
 仓库内路径: ${relationshipSkillSourcePath}
 安装路径: ${relationshipSkillTargetDir}/${relationshipSkillName}
+Adapter CLI 路径: ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs
 
 请在 Main Agent 机器执行以下步骤：
 1. 从 GitHub clone 仓库。
@@ -149,7 +157,8 @@ GitHub 仓库: ${relationshipSkillRepositoryUrl}
 3. 确认安装目录包含 SKILL.md、README.md、VERSION、CHANGELOG.md。
 4. 确认 VERSION 内容为 ${relationshipSkillVersion}。
 5. 如果已有旧版本，请覆盖更新到 ${relationshipSkillVersion}。
-6. 安装后刷新或重启 Main Agent / OpenClaw skill 索引，让新 skill 生效。
+6. 同步安装 adapter CLI 到 ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs，并设置可执行权限。
+7. 安装后刷新或重启 Main Agent / OpenClaw skill 索引，让新 skill 生效。
 
 不要把这个 skill 安装到 Detach Agent 机器，除非这台机器同时也是 Main Agent 机器。`;
 
@@ -158,12 +167,14 @@ export const relationshipSkillVerifyPrompt = `请在 Main Agent 机器上验证 
 目标 skill: ${relationshipSkillName}
 期望版本: ${relationshipSkillVersion}
 安装路径: ${relationshipSkillTargetDir}/${relationshipSkillName}
+Adapter CLI 路径: ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs
 
 请检查：
 1. ${relationshipSkillTargetDir}/${relationshipSkillName}/SKILL.md 存在。
 2. ${relationshipSkillTargetDir}/${relationshipSkillName}/README.md 存在。
 3. ${relationshipSkillTargetDir}/${relationshipSkillName}/VERSION 存在，内容为 ${relationshipSkillVersion}。
 4. ${relationshipSkillTargetDir}/${relationshipSkillName}/CHANGELOG.md 存在。
-5. Main Agent / OpenClaw 已刷新或重启 skill 索引，可以加载该 skill。
+5. ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs 存在且可执行。
+6. Main Agent / OpenClaw 已刷新或重启 skill 索引，可以加载该 skill。
 
 请返回 installedPath、version、packageStructureStatus、reloadOrReindexStatus。`;

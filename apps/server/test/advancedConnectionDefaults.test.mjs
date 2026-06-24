@@ -11,6 +11,7 @@ const apiRoutesSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/rou
 const clientContextSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/clientContextService.ts"), "utf8");
 const sshTunnelSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/tunnel/sshTunnelService.ts"), "utf8");
 const chatSocketSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/ws/chatSocket.ts"), "utf8");
+const relationshipSkillSource = fs.readFileSync(path.join(repoRoot, "packages/openclaw-detaches-adapter/skills/detach-agent-relationship/SKILL.md"), "utf8");
 const relationshipSkillTypesSource = fs.readFileSync(path.join(repoRoot, "packages/shared/src/relationshipSkillTypes.ts"), "utf8");
 const relationshipSkillVersion = fs.readFileSync(path.join(repoRoot, "packages/openclaw-detaches-adapter/skills/detach-agent-relationship/VERSION"), "utf8").trim();
 
@@ -90,6 +91,36 @@ assert.match(
   clientContextSource,
   /const preferred: TerminalChannelName = gatewayReady \? "gateway-terminal" : sshReady \? "ssh-terminal" : "chat-terminal"/,
   "terminal channel priority should be gateway, then ssh, then chat fallback"
+);
+
+assert.match(
+  clientContextSource,
+  /Do not use interactionEventEndpoint for terminal commands/,
+  "readable terminal routing prompt should not direct terminal commands to the interaction endpoint"
+);
+
+assert.match(
+  clientContextSource,
+  /fetch contextExport\.consumeUrl to obtain the machine-readable context with broker\.submitToken/,
+  "readable prompt should explain where Main Agent obtains the broker submit token"
+);
+
+assert.match(
+  apiRoutesSource,
+  /buildContextExportBody\(record\.sessionKey, record\.sessionMode, true, record\.attachments\)/,
+  "one-time context export consumption should include broker.submitToken for gateway-terminal"
+);
+
+assert.match(
+  relationshipSkillSource,
+  /Do not send terminal commands to `interactionEventEndpoint`/,
+  "relationship skill should keep terminal and interaction endpoints separate"
+);
+
+assert.match(
+  relationshipSkillSource,
+  /POST <toolEventEndpoint>/,
+  "relationship skill should include a raw HTTP terminal example for missing adapter installs"
 );
 
 assert.match(

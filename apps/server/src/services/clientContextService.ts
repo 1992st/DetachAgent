@@ -309,6 +309,7 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
     ...terminalChannelLines,
     consumeUrl ? `contextExport.consumeUrl: ${consumeUrl}` : "contextExport.consumeUrl: unavailable",
     `localControl.baseUrl: ${context.localControl?.baseUrl || "unavailable"}`,
+    `localControl.toolEventEndpoint: ${context.localControl?.toolEventEndpoint || "unavailable"}`,
     `localControl.interactionEventEndpoint: ${context.localControl?.interactionEventEndpoint || "unavailable"}`,
     `localControl.reverseBridge.ok: ${context.localControl?.reverseBridge?.ok ?? false}`,
     `localControl.reverseBridge.message: ${context.localControl?.reverseBridge?.message || "unknown"}`,
@@ -318,6 +319,7 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
     callbackEndpointRule(context),
     "Local terminal control does not use SSH. Do not ask for the user's local SSH username/password/port. The user only approves the tool request; ordinary local terminal commands must not trigger an SSH password dialog.",
     "SSH is used only for reverse bridge reachability, saving staged files to the Main Agent machine, or a user-approved SSH credential/login request.",
+    "The bearer submit token is intentionally not printed in this readable prompt. Use structured clientContext.detaches.broker.submitToken or fetch contextExport.consumeUrl to obtain the machine-readable context with broker.submitToken.",
     "If the remote side has the detaches-agent skill and contextExport.consumeUrl is available, run this only on the real Host/Main Agent machine: `node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --url \"$CONSUME_URL\" --output-context /tmp/detaches-client-context.json`; if context is already saved, run `doctor --context <context-json>`.",
     "Every tool request must be approved through detaches_agent. Do not claim that a command, file read, transfer, download, archive, or modification is complete until approved tool output proves it.",
     "Do not degrade remote-agent-host, gateway-managed, or main-agent-machine requests into local-user-machine."
@@ -344,12 +346,15 @@ export function renderDetachesClientContextFallback(context: DetachesSessionCont
     ...terminalChannelLines,
     consumeUrl ? `contextExport.consumeUrl: ${consumeUrl}` : "contextExport.consumeUrl: unavailable",
     `localControl.baseUrl: ${context.localControl?.baseUrl || "unavailable"}`,
+    `localControl.toolEventEndpoint: ${context.localControl?.toolEventEndpoint || "unavailable"}`,
+    `localControl.interactionEventEndpoint: ${context.localControl?.interactionEventEndpoint || "unavailable"}`,
     `localControl.reverseBridge.ok: ${context.localControl?.reverseBridge?.ok ?? false}`,
     `localControl.reverseBridge.message: ${context.localControl?.reverseBridge?.message || "unknown"}`,
     terminalRoutingRule(context),
     "Terminal source mapping: source=text-extract is chat-terminal; source=gateway-event is the HTTP broker path used by gateway-terminal or ssh-terminal.",
     localMachineCommandRule(localMachine),
     "The local terminal path does not use SSH. Do not ask for the user's local SSH username/password/port, and do not ask the user to manually run ssh -R, scp, copy broker tokens, or find a local IP.",
+    "The bearer submit token is intentionally not printed in this readable prompt. Use structured clientContext.detaches.broker.submitToken or fetch contextExport.consumeUrl to obtain the machine-readable context with broker.submitToken.",
     "If consumeUrl or localControl/broker URLs are unreachable, say broker/context direct access is unavailable; fenced detaches-terminal fallback is still available.",
     "If broker-event or full machine-readable context is needed, run this only on the real Host/Main Agent machine:",
     "node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --url \"$CONSUME_URL\" --output-context /tmp/detaches-client-context.json",
@@ -387,7 +392,7 @@ function terminalRoutingRule(context: DetachesSessionContext): string {
   const preferred = context.terminalChannels?.preferred ?? "chat-terminal";
   if (preferred === "gateway-terminal") {
     return [
-      "Terminal routing: preferred gateway-terminal. Submit local-user-machine terminal requests to gatewayTerminal.toolEventEndpoint/localControl.toolEventEndpoint with Authorization: Bearer broker.submitToken.",
+      "Terminal routing: preferred gateway-terminal. Submit local-user-machine terminal requests to gatewayTerminal.toolEventEndpoint/localControl.toolEventEndpoint with Authorization: Bearer broker.submitToken. Do not use interactionEventEndpoint for terminal commands.",
       "If HTTP broker access fails, report DETACHES_ENDPOINT_UNREACHABLE and fall back to exactly one detaches-terminal fenced block.",
       "Never run local-user-machine commands in the Main Agent shell, never ask for Detach Agent PC SSH credentials, and wait for Detach Agent Tool Queue approval."
     ].join(" ");
@@ -395,6 +400,7 @@ function terminalRoutingRule(context: DetachesSessionContext): string {
   if (preferred === "ssh-terminal") {
     return [
       "Terminal routing: preferred ssh-terminal. Use the context-provided ssh-terminal/localControl URL only because the advanced reverse bridge is ready.",
+      "Submit terminal commands to localControl.toolEventEndpoint/broker.gatewayEventEndpoint, not interactionEventEndpoint.",
       "Do not ask for SSH password and do not replace this URL with any guessed 127.0.0.1 value.",
       "If HTTP broker access fails, use exactly one detaches-terminal fenced block fallback."
     ].join(" ");

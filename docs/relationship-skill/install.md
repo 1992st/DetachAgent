@@ -47,6 +47,10 @@ test -f ~/.openclaw/skills/detach-agent-relationship/README.md
 test -f ~/.openclaw/skills/detach-agent-relationship/VERSION
 test -f ~/.openclaw/skills/detach-agent-relationship/CHANGELOG.md
 cat ~/.openclaw/skills/detach-agent-relationship/VERSION
+mkdir -p ~/.detach_agent/bin
+cp "$tmp_dir/DetachAgent/packages/openclaw-detaches-adapter/bin/detaches-agent-adapter.mjs" ~/.detach_agent/bin/detaches-agent-adapter.mjs
+chmod +x ~/.detach_agent/bin/detaches-agent-adapter.mjs
+test -f ~/.detach_agent/bin/detaches-agent-adapter.mjs
 rm -rf "$tmp_dir"
 ```
 
@@ -68,11 +72,16 @@ cp -R /Users/zhangshutong/code/detaches_agent/packages/openclaw-detaches-adapter
 One-line install command:
 
 ```bash
-tmp_dir=$(mktemp -d) && git clone --depth 1 https://github.com/1992st/DetachAgent.git "$tmp_dir/DetachAgent" && mkdir -p ~/.openclaw/skills && rm -rf ~/.openclaw/skills/detach-agent-relationship && cp -R "$tmp_dir/DetachAgent/packages/openclaw-detaches-adapter/skills/detach-agent-relationship" ~/.openclaw/skills/detach-agent-relationship && test -f ~/.openclaw/skills/detach-agent-relationship/SKILL.md && test -f ~/.openclaw/skills/detach-agent-relationship/README.md && test -f ~/.openclaw/skills/detach-agent-relationship/VERSION && test -f ~/.openclaw/skills/detach-agent-relationship/CHANGELOG.md && cat ~/.openclaw/skills/detach-agent-relationship/VERSION && rm -rf "$tmp_dir"
+tmp_dir=$(mktemp -d) && git clone --depth 1 https://github.com/1992st/DetachAgent.git "$tmp_dir/DetachAgent" && mkdir -p ~/.openclaw/skills && rm -rf ~/.openclaw/skills/detach-agent-relationship && cp -R "$tmp_dir/DetachAgent/packages/openclaw-detaches-adapter/skills/detach-agent-relationship" ~/.openclaw/skills/detach-agent-relationship && test -f ~/.openclaw/skills/detach-agent-relationship/SKILL.md && test -f ~/.openclaw/skills/detach-agent-relationship/README.md && test -f ~/.openclaw/skills/detach-agent-relationship/VERSION && test -f ~/.openclaw/skills/detach-agent-relationship/CHANGELOG.md && cat ~/.openclaw/skills/detach-agent-relationship/VERSION && mkdir -p ~/.detach_agent/bin && cp "$tmp_dir/DetachAgent/packages/openclaw-detaches-adapter/bin/detaches-agent-adapter.mjs" ~/.detach_agent/bin/detaches-agent-adapter.mjs && chmod +x ~/.detach_agent/bin/detaches-agent-adapter.mjs && test -f ~/.detach_agent/bin/detaches-agent-adapter.mjs && rm -rf "$tmp_dir"
 ```
 
 Then restart the Host/Main Agent session or refresh the OpenClaw skill index so
 the new skill can be discovered.
+
+The install command also places the optional adapter CLI at
+`~/.detach_agent/bin/detaches-agent-adapter.mjs`. This CLI is not required when
+the Main Agent can construct raw HTTP broker requests, but it gives the skill a
+stable `doctor`, `context-fetch`, and `terminal-request` helper.
 
 ## Install From The Skill Zip
 
@@ -122,10 +131,11 @@ test -f ~/.openclaw/skills/detach-agent-relationship/README.md
 test -f ~/.openclaw/skills/detach-agent-relationship/VERSION
 test -f ~/.openclaw/skills/detach-agent-relationship/CHANGELOG.md
 cat ~/.openclaw/skills/detach-agent-relationship/VERSION
+test -f ~/.detach_agent/bin/detaches-agent-adapter.mjs
 ```
 
 The current package version is recorded in `VERSION`; this release expects
-`1.1.0`.
+`1.1.1`.
 
 ## Troubleshooting
 

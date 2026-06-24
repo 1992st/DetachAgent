@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1
+
+- Clarify that terminal commands must use `toolEventEndpoint` / `broker.gatewayEventEndpoint`, not `interactionEventEndpoint`.
+- Add a raw HTTP terminal broker example for Host/Main Agent environments where the adapter CLI is not installed.
+- Clarify that readable fallback prompts do not print `broker.submitToken`; Main Agent must use structured context or `contextExport.consumeUrl` to obtain it.
+
 ## 1.1.0
 
 - Add versioned terminal channel guidance for `gateway-terminal`, `ssh-terminal`, and `chat-terminal`.

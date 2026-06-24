@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n server,web -c cyan,green \"pnpm --filter @detaches/server dev\" \"pnpm --filter @detaches/web dev\"",
+    "dev": "concurrently -n server,web -c cyan,green --kill-others-on-fail \"pnpm --filter @detaches/server dev\" \"node scripts/wait-for-server.mjs && pnpm --filter @detaches/web dev\"",
     "dev:restart": "bash scripts/restart-dev.sh",
     "build": "pnpm --filter @detaches/shared build && pnpm --filter @detaches/server build && pnpm --filter @detaches/web build",
     "typecheck": "pnpm --filter @detaches/shared build && pnpm --filter @detaches/server typecheck && pnpm --filter @detaches/web typecheck && pnpm --filter @detaches/desktop build",

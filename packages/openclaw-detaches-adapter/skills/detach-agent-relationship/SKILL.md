@@ -54,6 +54,8 @@ When the target is `local-user-machine`, request execution with exactly one chan
 - Prefer `gateway-terminal` when it is the preferred ready channel.
 - Use `ssh-terminal` only when the context marks it ready and selected.
 - Use `chat-terminal` fenced block when it is preferred or when HTTP broker access is unreachable.
+- Terminal commands must use `broker.gatewayEventEndpoint`, `terminalChannels.<selected>.toolEventEndpoint`, or `localControl.toolEventEndpoint`.
+- Do not send terminal commands to `interactionEventEndpoint`; that endpoint is only for user-visible local interactions such as credential popups.
 
 Gateway terminal example:
 
@@ -63,6 +65,16 @@ node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-request \
   --command 'pwd' \
   --reason 'check current directory on Detach Agent PC' \
   --source-event-id 'terminal:pwd:<unique-id>'
+```
+
+Raw HTTP terminal example, if the adapter script is unavailable:
+
+```http
+POST <toolEventEndpoint>
+Authorization: Bearer <broker.submitToken>
+Content-Type: application/json
+
+{"kind":"terminal","target":"local-user-machine","sessionKey":"<sessionKey>","agentId":"<agentId>","source":"gateway-event","sourceEventId":"terminal:<unique-id>","reason":"check current directory on Detach Agent PC","payload":{"command":"pwd"},"metadata":{"terminalChannel":"gateway-terminal","preferredChannel":"gateway-terminal","callbackBaseUrl":"<localControl.baseUrl>"}}
 ```
 
 Chat terminal fallback example:
