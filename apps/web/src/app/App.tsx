@@ -58,6 +58,16 @@ export function App() {
     }
   }, []);
 
+  const refreshNetworkGuide = useCallback(async () => {
+    try {
+      const settings = await fetchSettings();
+      const activeProfile = settings.profiles.find((profile) => profile.id === settings.activeProfileId) ?? settings;
+      setNetworkConfigured(activeProfile.lastStatus === "ok");
+    } catch {
+      setNetworkConfigured(false);
+    }
+  }, []);
+
   const refreshAgents = useCallback(async () => {
     setAgentsLoading(true);
     setAgentsError(null);
@@ -92,16 +102,6 @@ export function App() {
       setDiagnosticsError(error instanceof Error ? error.message : String(error));
     } finally {
       setDiagnosticsLoading(false);
-    }
-  }, []);
-
-  const refreshNetworkGuide = useCallback(async () => {
-    try {
-      const settings = await fetchSettings();
-      const activeProfile = settings.profiles.find((profile) => profile.id === settings.activeProfileId) ?? settings;
-      setNetworkConfigured(activeProfile.lastStatus === "ok");
-    } catch {
-      setNetworkConfigured(false);
     }
   }, []);
 

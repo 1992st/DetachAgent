@@ -209,6 +209,7 @@ async function buildCleanAttachmentContext(attachments?: UploadedFileRef[], over
     "If the user explicitly asks to save a staged file to the Main Agent machine, create exactly one main-agent-save-file request.",
     "destination.path must be chosen by the Main Agent according to its own rules and must be a complete absolute POSIX target file path: directory plus final filename and extension.",
     "destination.path cannot be a directory and cannot stop at generic folders such as screenshots/, docs/, or _staging/. If you only know a directory, derive a concrete filename from displayName first.",
+    "If the file purpose or archive category is unclear, ask the user for the intended use; do not invent supplier/product/category folders or a _staging path without evidence.",
     "destination.user and destination.path are the core required fields. destination.user is the real remote SSH/Linux account that owns or can write the destination path.",
     configuredSshUser
       ? `Current configured Main Agent SSH user is "${configuredSshUser}". Use it as destination.user unless the chosen destination path clearly belongs to another Linux account.`

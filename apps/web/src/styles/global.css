@@ -105,6 +105,9 @@ button, input, textarea {
   background: transparent;
   color: var(--muted);
   padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   cursor: pointer;
 }
 

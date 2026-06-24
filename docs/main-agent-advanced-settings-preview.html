@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Main Agent 高级配置预览</title>
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --panel: #fff;
+      --ink: #1f2933;
+      --muted: #64748b;
+      --line: #d8dee8;
+      --accent: #0f766e;
+      --blue: #2563eb;
+      --warn: #b45309;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); }
+    button, input, select { font: inherit; }
+    .shell { min-height: 100vh; display: grid; grid-template-rows: 64px 44px 1fr; }
+    .bar {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--panel);
+    }
+    .brand, .status, .actions { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .brand strong { display: block; }
+    .brand span, .muted { color: var(--muted); font-size: 12px; }
+    .pill { height: 24px; display: inline-flex; align-items: center; padding: 0 9px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 800; }
+    .pill.disabled { background: var(--warn); }
+    .skill-alert {
+      height: 34px; display: inline-flex; align-items: center; gap: 8px; padding: 0 10px;
+      border: 1px solid #f59e0b; border-radius: 8px; background: #fffbeb; color: #92400e;
+      font-size: 12px; font-weight: 800; animation: pulse 1.8s ease-in-out infinite;
+    }
+    .skill-alert button { height: 24px; border: 1px solid currentColor; border-radius: 6px; background: transparent; color: inherit; font-size: 11px; font-weight: 800; }
+    @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgb(245 158 11 / 34%); } 50% { box-shadow: 0 0 0 6px rgb(245 158 11 / 0%); } }
+    .tabs { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: #f8fafc; }
+    .tabs button, .secondary, .primary { height: 32px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; cursor: pointer; }
+    .tabs button { border: 1px solid transparent; background: transparent; color: var(--muted); }
+    .tabs .active { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; font-weight: 800; }
+    .workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr) 340px; gap: 14px; max-width: 1180px; width: 100%; margin: 0 auto; padding: 18px; }
+    .panel { padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+    .title { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+    h1, h2, h3, p { margin: 0; letter-spacing: 0; }
+    h2 { font-size: 16px; } h3 { font-size: 14px; }
+    .title p, .section p { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .profile { display: grid; gap: 4px; min-height: 76px; padding: 10px; border: 1px solid var(--blue); border-radius: 8px; background: #fff; box-shadow: 0 0 0 2px rgb(37 99 235 / 10%); }
+    .profile span, .profile small { color: var(--muted); overflow-wrap: anywhere; }
+    .section { padding: 12px 0; border-top: 1px solid var(--line); }
+    .section:first-of-type { border-top: 0; padding-top: 0; }
+    label { display: block; margin-top: 10px; color: var(--muted); font-size: 12px; font-weight: 800; }
+    input, select { width: 100%; margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 9px; background: #fff; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .title-actions, .form-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .secondary { border: 1px solid var(--line); background: #fff; color: var(--ink); }
+    .primary { border: 0; background: var(--blue); color: #fff; }
+    .test-step { margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; }
+    .test-step strong, .test-step p { display: block; }
+    .test-step p { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .advanced-backdrop { position: fixed; inset: 0; display: flex; justify-content: flex-end; background: rgb(15 23 42 / 24%); }
+    .advanced {
+      width: min(560px, calc(100vw - 28px)); height: 100%; display: grid; grid-template-rows: auto 1fr auto;
+      border-left: 1px solid var(--line); background: #fff; box-shadow: -18px 0 44px rgb(15 23 42 / 20%);
+    }
+    .advanced header, .advanced footer { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .advanced footer { justify-content: flex-end; border-top: 1px solid var(--line); border-bottom: 0; }
+    .advanced header small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .advanced-body { overflow: auto; display: grid; align-content: start; gap: 12px; padding: 14px 16px; }
+    .advanced-section { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; }
+    .toggle { min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; color: #1e40af; font-size: 12px; font-weight: 800; }
+    .toggle input { width: auto; margin: 0; }
+    .disabled-note { padding: 10px; border: 1px dashed #cbd5e1; border-radius: 8px; background: #fff; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    @media (max-width: 980px) { .workspace { grid-template-columns: 1fr; } .status { flex-wrap: wrap; justify-content: flex-end; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="bar">
+      <div class="brand">
+        <strong>detaches_agent</strong>
+        <span>Local UI to remote OpenClaw</span>
+      </div>
+      <div class="status">
+        <span class="pill disabled">SSH off</span>
+        <span class="pill">Gateway</span>
+        <span class="muted">main-agent.tailnet.ts.net</span>
+        <span class="skill-alert">Relationship skill 未安装 <button>查看安装</button></span>
+      </div>
+    </header>
+    <nav class="tabs">
+      <button>聊天</button>
+      <button class="active">连接设置</button>
+    </nav>
+    <main class="workspace">
+      <aside class="panel">
+        <div class="title"><div><h2>远端服务</h2><p>保存多个 Gateway 连接配置。</p></div></div>
+        <div class="profile"><strong>Default</strong><span>main-agent.tailnet.ts.net</span><small>当前生效 · direct</small></div>
+      </aside>
+      <section class="panel">
+        <div class="title">
+          <div><h2>网络连接</h2><p>默认直连 Main Agent Gateway；SSH 保留在高级配置中按需启用。</p></div>
+          <div class="title-actions"><button class="secondary">高级配置</button><button class="secondary">测试网络</button></div>
+        </div>
+        <div class="section">
+          <h3>Main Agent Gateway</h3>
+          <label>Profile name<input value="Default"></label>
+          <div class="grid">
+            <label>Remote host<input value="main-agent.tailnet.ts.net"></label>
+            <label>Gateway port<input value="18789"></label>
+          </div>
+          <label>Gateway URL / Tailscale Serve<input value="https://main-agent.tail09cff1.ts.net"></label>
+        </div>
+        <div class="section">
+          <h3>Gateway 认证</h3>
+          <label>Auth mode<select><option>token</option></select></label>
+        </div>
+        <div class="section">
+          <h3>本机访问地址</h3>
+          <label>Public base URL<input value="http://100.10.20.30:38888"></label>
+        </div>
+        <div class="form-actions"><button class="primary">保存配置</button><button class="secondary">保存并测试直连</button></div>
+      </section>
+      <aside class="panel">
+        <div class="title"><div><h2>网络测试</h2><p>默认只检查 Gateway 直连。</p></div></div>
+        <div class="test-step"><strong>SSH 高级链路</strong><p>默认直连 Gateway 模式未启用 SSH，不检查 Main Agent SSH 或本机 SSH 回连。</p></div>
+        <div class="test-step"><strong>Gateway health</strong><p>Gateway health check passed.</p></div>
+      </aside>
+    </main>
+  </div>
+  <div class="advanced-backdrop">
+    <section class="advanced">
+      <header><div><strong>高级配置</strong><small>SSH 是高级兼容能力，默认不参与 Gateway 直连主流程。</small></div><button class="secondary">关闭</button></header>
+      <div class="advanced-body">
+        <section class="advanced-section">
+          <div><h3>Main Agent 服务信息</h3><p>当前支持 SSH；后续会扩展 scp 等协议。</p></div>
+          <label class="toggle"><input type="checkbox">启用 Main Agent 服务信息配置</label>
+          <div class="grid">
+            <label>协议<select disabled><option>SSH</option></select></label>
+            <label>Gateway transport<select disabled><option>direct / Tailscale</option><option>SSH tunnel</option></select></label>
+          </div>
+          <div class="grid">
+            <label>SSH host<input disabled value="main-agent.tailnet.ts.net"></label>
+            <label>SSH port<input disabled value="22"></label>
+          </div>
+        </section>
+        <section class="advanced-section">
+          <div><h3>本机 SSH 回连</h3><p>Main Agent 当前不依赖 SSH 控制本机 terminal；只有需要 reverse bridge 时才开启。</p></div>
+          <label class="toggle"><input type="checkbox">连接本机 SSH / reverse bridge</label>
+          <p class="disabled-note">已关闭。直连 Gateway 聊天、文件暂存和普通工具请求不会使用这条 SSH 链路。</p>
+        </section>
+      </div>
+      <footer><button class="primary">完成</button></footer>
+    </section>
+  </div>
+</body>
+</html>
