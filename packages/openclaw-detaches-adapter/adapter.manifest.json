@@ -45,12 +45,17 @@
     "doctor": "Turn a detaches context file or one-time context export URL into an agent-side runbook: current identity, requestable targets, blocked targets, safety rules, and exact broker-event command templates.",
     "context-fetch": "Fetch a one-time detaches_agent context export URL, validate it, and write clientContext or detaches JSON for subsequent adapter commands.",
     "broker-probe": "Verify a detaches_agent Tool Broker capabilities endpoint before submitting requests.",
+    "terminal-run": "Primary gateway-terminal runtime command. Bootstrap/refresh a lease from --host, submit a command, wait for Detach Agent approval and execution, then return status/output/exitCode.",
+    "terminal-stream": "Stream an Agent Terminal Runtime run by runId.",
+    "terminal-cancel": "Cancel an Agent Terminal Runtime run by runId.",
+    "terminal-session": "Bootstrap or inspect the cached Agent Terminal Runtime session for --host.",
     "terminal-request": "Emit a detaches-terminal fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Supports --context to read session and broker fields; use --submit to post with the context endpoint.",
     "file-transfer-request": "Emit a detaches-file-transfer fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Supports --context to read session and broker fields; use --submit to post with the context endpoint.",
     "main-agent-save-file-request": "Emit a main-agent-save-file fenced request block, emit a Tool Broker gateway-event envelope, or submit it to detaches_agent. Host/Main Agent chooses destination path; detaches_agent broker runs a structured rsync/scp transfer after user approval.",
     "credential-request": "Submit a credential.request interaction to detaches_agent and optionally wait up to 300000ms for a user-visible password/secret popup result."
   },
   "requestFormats": [
+    "agent-terminal-run",
     "fence",
     "broker-event"
   ],
@@ -65,6 +70,7 @@
   "optionalContextFields": [
     "adapterStatus",
     "files.staged",
+    "agentTerminal",
     "broker.gatewayEventEndpoint",
     "broker.interactionEventEndpoint",
     "broker.submitToken",
@@ -79,8 +85,9 @@
   "hardRules": [
     "Never claim a command, file read, file transfer, download, archive, or modification has happened until approved tool output proves it.",
     "Never change a target from remote-agent-host, gateway-managed, or main-agent-machine to local-user-machine as a fallback.",
-    "Every tool request must be a single fenced code block using the declared request fence.",
-    "Every tool request must include target and reason.",
+    "Use terminal-run --host for ordinary local-user-machine terminal commands; fenced blocks and broker-event requests are compatibility fallbacks.",
+    "Never use interactionEventEndpoint for terminal commands.",
+    "Every compatibility tool request must include target and reason.",
     "Files attached by detaches_agent start in the user's local staging area and are not available on the remote agent host or Host/Main Agent machine until an approved transfer succeeds."
   ]
 }

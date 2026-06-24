@@ -160,6 +160,9 @@ Adapter CLI 路径: ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs
 6. 同步安装 adapter CLI 到 ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs，并设置可执行权限。
 7. 安装后刷新或重启 Main Agent / OpenClaw skill 索引，让新 skill 生效。
 
+更新后，对 Detach Agent 本机命令使用：
+node ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs terminal-run --host <Detach Agent callback address> --command 'pwd' --reason 'check gateway-terminal'
+
 不要把这个 skill 安装到 Detach Agent 机器，除非这台机器同时也是 Main Agent 机器。`;
 
 export const relationshipSkillVerifyPrompt = `请在 Main Agent 机器上验证 OpenClaw relationship skill 是否安装正确。

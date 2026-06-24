@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0
+
+- Make `terminal-run --host <Detach Agent callback address>` the primary gateway-terminal path.
+- Hide raw broker endpoints and submit tokens from normal terminal guidance.
+- Add Agent Terminal Runtime behavior: wait for approval, wait for completion, return output/exitCode, and use stream/cancel helpers for long-running commands.
+- Keep `context-fetch`, `terminal-request`, `chat-terminal`, and `ssh-terminal` as compatibility paths.
+
 ## 1.1.1
 
 - Clarify that terminal commands must use `toolEventEndpoint` / `broker.gatewayEventEndpoint`, not `interactionEventEndpoint`.

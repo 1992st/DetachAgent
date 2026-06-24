@@ -139,6 +139,13 @@ class TerminalService {
     return this.info(terminal);
   }
 
+  interrupt(sessionKey: string): boolean {
+    const terminal = this.terminals.get(sessionKey);
+    if (!terminal || terminal.status === "exited") return false;
+    this.write(terminal, "\x03");
+    return true;
+  }
+
   resize(terminal: ManagedTerminal, cols: number, rows: number): void {
     const safeCols = Math.min(Math.max(Math.floor(cols), 40), 240);
     const safeRows = Math.min(Math.max(Math.floor(rows), 10), 80);

@@ -30,6 +30,10 @@ assert.equal(parsedManifest.targets["remote-agent-host"].status, "reserved");
 assert.equal(parsedManifest.cliCommands["inspect-context"].includes("routing warnings"), true);
 assert.equal(parsedManifest.cliCommands["doctor"].includes("runbook"), true);
 assert.equal(parsedManifest.cliCommands["context-fetch"].includes("one-time"), true);
+assert.equal(parsedManifest.cliCommands["terminal-run"].includes("Primary gateway-terminal runtime"), true);
+assert.equal(parsedManifest.requestFormats.includes("agent-terminal-run"), true);
+assert.equal(parsedManifest.hardRules.some((rule) => /terminal-run --host/.test(rule)), true);
+assert.equal(parsedManifest.hardRules.some((rule) => /Every tool request must be a single fenced code block/.test(rule)), false);
 assert.match(parsedManifest.cliCommands["credential-request"], /credential\.request/);
 assert.equal(parsedManifest.optionalContextFields.includes("broker.interactionEventEndpoint"), true);
 assert.equal(parsedManifest.optionalContextFields.includes("localControl.interactionEventEndpoint"), true);
@@ -41,15 +45,20 @@ assert.equal(parsedSkillManifest.entrypoints.instructions, "AGENT.md");
 assert.equal(parsedSkillManifest.entrypoints.skill, "SKILL.md");
 assert.match(parsedSkillManifest.commands.credentialRequest, /credential-request/);
 assert.match(parsedSkillManifest.commands.credentialRequest, /--timeout-ms 300000/);
+assert.match(parsedSkillManifest.commands.terminalRun, /terminal-run/);
 assert.equal(parsedSkillManifest.safety.executesToolsDirectly, false);
 
 const readme = await fs.readFile(path.join(adapterDir, "README.md"), "utf8");
 assert.match(readme, /context-fetch/);
 assert.match(readme, /doctor --context/);
+assert.match(readme, /terminal-run/);
 assert.match(readme, /require user approval/i);
 const skillMd = await fs.readFile(path.join(adapterDir, "SKILL.md"), "utf8");
 assert.match(skillMd, /^name:\s*detaches-agent/m);
 assert.match(skillMd, /metadata:.*openclaw/);
+assert.match(skillMd, /terminal-run/);
+assert.match(skillMd, /Do not ask the user for broker tokens/);
+assert.doesNotMatch(skillMd, /Prefer structured broker events over fenced text/);
 assert.match(skillMd, /doctor --context/);
 
 const validContext = await run(["validate-context", "test/valid-context.json"]);
@@ -469,6 +478,74 @@ assert.equal(brokerProbe.code, 0);
 const parsedBrokerProbe = JSON.parse(brokerProbe.stdout);
 assert.equal(parsedBrokerProbe.ok, true);
 assert.equal(parsedBrokerProbe.capabilities.gatewayEventEndpoint, "http://127.0.0.1:38888/api/tools/events/gateway");
+
+let terminalRunAuth = "";
+let terminalRunBody = null;
+const terminalRuntimeServer = http.createServer((req, res) => {
+  res.setHeader("Content-Type", "application/json");
+  if (req.url === "/api/agent-terminal/bootstrap" && req.method === "POST") {
+    res.end(JSON.stringify({
+      ok: true,
+      terminalSession: {
+        terminalSessionId: "ats-test",
+        sessionKey: "gateway-terminal",
+        agentId: "main-agent",
+        remoteAddress: "127.0.0.1",
+        state: "ready",
+        createdAt: new Date().toISOString(),
+        lastActiveAt: new Date().toISOString(),
+        leaseExpiresAt: new Date(Date.now() + 3600000).toISOString(),
+        refreshAfter: new Date(Date.now() + 1800000).toISOString()
+      },
+      leaseToken: "lease-test-token",
+      leaseExpiresAt: new Date(Date.now() + 3600000).toISOString(),
+      refreshAfter: new Date(Date.now() + 1800000).toISOString(),
+      capabilities: { supportsWait: true, supportsStreaming: true, supportsCancel: true, approvalRequired: true }
+    }));
+    return;
+  }
+  if (req.url.startsWith("/api/agent-terminal/runs") && req.method === "POST") {
+    terminalRunAuth = req.headers.authorization || "";
+    let body = "";
+    req.on("data", (chunk) => { body += chunk.toString("utf8"); });
+    req.on("end", () => {
+      terminalRunBody = JSON.parse(body);
+      res.end(JSON.stringify({
+        ok: true,
+        status: "completed",
+        pollEndpoint: "/api/agent-terminal/runs/run-test",
+        streamEndpoint: "/api/agent-terminal/runs/run-test/stream",
+        output: "hello",
+        exitCode: 0,
+        run: {
+          runId: "run-test",
+          terminalSessionId: "ats-test",
+          requestId: "tool-test",
+          command: terminalRunBody.command,
+          status: "completed",
+          output: "hello",
+          exitCode: 0,
+          guard: { decision: "allow", riskLevel: "safe", matchedRules: [], normalizedCommand: terminalRunBody.command },
+          createdAt: new Date().toISOString()
+        }
+      }));
+    });
+    return;
+  }
+  res.statusCode = 404;
+  res.end(JSON.stringify({ error: "not found" }));
+});
+terminalRuntimeServer.listen(0, "127.0.0.1");
+await once(terminalRuntimeServer, "listening");
+const terminalRuntimePort = terminalRuntimeServer.address().port;
+const terminalRun = await run(["terminal-run", "--host", `http://127.0.0.1:${terminalRuntimePort}`, "--command", "echo hello", "--reason", "test terminal run"]);
+terminalRuntimeServer.close();
+assert.equal(terminalRun.code, 0);
+const parsedTerminalRun = JSON.parse(terminalRun.stdout);
+assert.equal(parsedTerminalRun.status, "completed");
+assert.equal(parsedTerminalRun.output, "hello");
+assert.equal(terminalRunAuth, "Bearer lease-test-token");
+assert.equal(terminalRunBody.command, "echo hello");
 
 const badProbeServer = http.createServer((_req, res) => {
   res.setHeader("Content-Type", "application/json");

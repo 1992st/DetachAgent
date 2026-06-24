@@ -27,14 +27,17 @@ install instructions live at `docs/relationship-skill/install.md`.
 ## Basic Flow
 
 1. Install this package on the remote OpenClaw agent host.
-2. In detaches_agent, generate a one-time context URL for the selected session.
-3. On the remote agent host, run the agent-side doctor. Prefer the one-step URL flow when a fresh export URL is available:
+2. In detaches_agent, configure `publicBaseUrl` / callback host for gateway-terminal.
+3. On the remote agent host, use Agent Terminal Runtime for ordinary local-user-machine commands:
 
 ```sh
-node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --url "$DETACHES_CONTEXT_EXPORT_URL" --output-context /tmp/detaches-client-context.json
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-run \
+  --host "$DETACH_AGENT_HOST" \
+  --command "pwd" \
+  --reason "check the user's local working directory"
 ```
 
-4. If you already saved the context, run doctor against the file:
+4. `context-fetch`, `doctor`, and `terminal-request --context` remain compatibility/troubleshooting paths:
 
 ```sh
 node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --context /tmp/detaches-client-context.json

@@ -71,7 +71,7 @@ export function ConnectionBar({
           {health ? (
             <>
               {pill(health.gateway.state, "Gateway", health.gateway.message)}
-              {pill(health.config.gatewayTerminalLastStatus === "ok" ? "ok" : health.config.publicBaseUrl ? "error" : "disabled", "Gateway terminal", health.config.gatewayTerminalLastError || health.config.publicBaseUrl)}
+              {pill(health.agentTerminal.state, "Agent terminal", health.agentTerminal.message)}
               {pill(health.ssh.state, health.config.localSshBridgeEnabled ? "SSH bridge" : "SSH", health.ssh.message)}
               <span className="remote-host">{health.config.remoteHost}</span>
             </>

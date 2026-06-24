@@ -18,6 +18,10 @@ function usage(exitCode = 0) {
     "  doctor --url <one-time-context-export-url> [--output-context <file>]",
     "  context-fetch <one-time-context-export-url> [--output <file> --print client-context|detaches|export]",
     "  broker-probe <detaches-agent-base-url-or-capabilities-url>",
+    "  terminal-run --host <detach-agent-base-url> --command <command> --reason <reason> [--timeout-ms 120000]",
+    "  terminal-session --host <detach-agent-base-url>",
+    "  terminal-cancel --host <detach-agent-base-url> --run-id <run-id>",
+    "  terminal-stream --host <detach-agent-base-url> --run-id <run-id>",
     "  terminal-request --command <command> --reason <reason> --source-event-id <id> --context <detaches-context-json> [--target <target> --format fence|broker-event --session-key <key> --agent-id <id> --submit-token <token> --submit-url <url> --submit]",
     "  ping-channel --context <detaches-context-json>",
     "  file-transfer-request --file-id <id> --target <target> --remote-path <path> --reason <reason> [--context <detaches-context-json> --format fence|broker-event --session-key <key> --agent-id <id> --source-event-id <id> --submit-token <token> --submit-url <url> --submit]",
@@ -696,6 +700,23 @@ async function postJson(url, body, submitToken) {
   return parseJsonResponse(response);
 }
 
+async function postJsonOptionalAuth(url, body, token) {
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(body)
+    });
+  } catch (error) {
+    failWithCode("DETACHES_TERMINAL_HOST_UNREACHABLE", error instanceof Error ? error.message : String(error));
+  }
+  return parseJsonResponse(response);
+}
+
 async function getJson(url) {
   let response;
   try {
@@ -714,7 +735,7 @@ async function parseJsonResponse(response) {
   } catch {
     failWithCode("DETACHES_PROTOCOL_ERROR", `Non-JSON response: ${text}`);
   }
-  if (!response.ok) failWithCode(payload?.errorCode || "DETACHES_PROTOCOL_ERROR", payload?.error || `HTTP ${response.status}`);
+  if (!response.ok) failWithCode(payload?.code || payload?.errorCode || "DETACHES_PROTOCOL_ERROR", payload?.error || `HTTP ${response.status}`);
   return payload;
 }
 
@@ -722,6 +743,103 @@ function parseTimeoutMs(value) {
   const parsed = Number(value || 300000);
   if (!Number.isFinite(parsed) || parsed <= 0) return 300000;
   return Math.min(parsed, 300000);
+}
+
+function normalizeHost(value) {
+  const raw = String(value || "").trim();
+  if (!raw) failWithCode("DETACHES_TERMINAL_HOST_UNREACHABLE", "--host is required.");
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
+  return withScheme.replace(/\/+$/, "");
+}
+
+function runtimeCachePath(host) {
+  const safe = Buffer.from(host).toString("base64url").slice(0, 80);
+  const home = process.env.HOME || process.env.USERPROFILE || ".";
+  return path.join(home, ".detach_agent", "runtime", safe, "terminal-session.json");
+}
+
+function readSessionCache(host) {
+  try {
+    return JSON.parse(fs.readFileSync(runtimeCachePath(host), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionCache(host, payload) {
+  const file = runtimeCachePath(host);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+}
+
+async function bootstrapTerminal(host, args = {}) {
+  const baseUrl = normalizeHost(host);
+  const cached = readSessionCache(baseUrl);
+  if (cached?.leaseToken && cached?.leaseExpiresAt && Date.parse(cached.leaseExpiresAt) > Date.now() + 60_000) {
+    return { baseUrl, ...cached };
+  }
+  const response = await postJsonOptionalAuth(`${baseUrl}/api/agent-terminal/bootstrap`, {
+    sessionKey: optionalString(args, "session-key"),
+    agentId: optionalString(args, "agent-id"),
+    displayName: optionalString(args, "display-name") || "Main Agent"
+  });
+  const cache = {
+    terminalSession: response.terminalSession,
+    leaseToken: response.leaseToken,
+    leaseExpiresAt: response.leaseExpiresAt,
+    refreshAfter: response.refreshAfter,
+    capabilities: response.capabilities
+  };
+  writeSessionCache(baseUrl, cache);
+  return { baseUrl, ...cache };
+}
+
+async function terminalRun(args) {
+  const bootstrap = await bootstrapTerminal(requireOption(args, "host"), args);
+  const timeoutMs = parseTimeoutMs(optionalString(args, "timeout-ms") || "120000");
+  const response = await postJsonOptionalAuth(
+    `${bootstrap.baseUrl}/api/agent-terminal/runs?wait=true&timeoutMs=${encodeURIComponent(String(timeoutMs))}`,
+    {
+      command: requireOption(args, "command"),
+      reason: optionalString(args, "reason") || "gateway-terminal command",
+      workingDirectory: optionalString(args, "cwd") || null,
+      sourceEventId: optionalString(args, "source-event-id") || `terminal-run:${Date.now()}:${Math.random().toString(16).slice(2)}`
+    },
+    bootstrap.leaseToken
+  );
+  console.log(JSON.stringify(response, null, 2));
+  if (!response.ok && response.status !== "waiting_for_approval" && response.status !== "running") process.exit(1);
+}
+
+async function terminalSession(args) {
+  const bootstrap = await bootstrapTerminal(requireOption(args, "host"), args);
+  console.log(JSON.stringify({ ok: true, ...bootstrap }, null, 2));
+}
+
+async function terminalCancel(args) {
+  const bootstrap = await bootstrapTerminal(requireOption(args, "host"), args);
+  const response = await postJsonOptionalAuth(
+    `${bootstrap.baseUrl}/api/agent-terminal/runs/${encodeURIComponent(requireOption(args, "run-id"))}/cancel`,
+    {},
+    bootstrap.leaseToken
+  );
+  console.log(JSON.stringify(response, null, 2));
+}
+
+async function terminalStream(args) {
+  const bootstrap = await bootstrapTerminal(requireOption(args, "host"), args);
+  const response = await fetch(`${bootstrap.baseUrl}/api/agent-terminal/runs/${encodeURIComponent(requireOption(args, "run-id"))}/stream`, {
+    headers: { Authorization: `Bearer ${bootstrap.leaseToken}`, Accept: "text/event-stream" }
+  });
+  if (!response.ok) failWithCode("DETACHES_TERMINAL_INTERNAL_ERROR", await response.text() || `HTTP ${response.status}`);
+  const reader = response.body?.getReader();
+  if (!reader) failWithCode("DETACHES_TERMINAL_INTERNAL_ERROR", "Response body is not readable.");
+  const decoder = new TextDecoder();
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    process.stdout.write(decoder.decode(value));
+  }
 }
 
 function sleep(ms) {
@@ -804,6 +922,26 @@ async function main() {
   }
 
   const args = parseArgs(rest);
+  if (command === "terminal-run") {
+    await terminalRun(args);
+    return;
+  }
+
+  if (command === "terminal-session") {
+    await terminalSession(args);
+    return;
+  }
+
+  if (command === "terminal-cancel") {
+    await terminalCancel(args);
+    return;
+  }
+
+  if (command === "terminal-stream") {
+    await terminalStream(args);
+    return;
+  }
+
   if (command === "terminal-request") {
     await submitTerminalRequest(args);
     return;

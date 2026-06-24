@@ -286,6 +286,11 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
                 <strong>{toolRequestTitle(request)}</strong>
                 <p className={`target-pill ${request.target}`}>Target: {targetLabels[request.target]}</p>
                 {request.risk ? <p className={`risk-pill ${request.risk.level}`}>Risk: {request.risk.level}{request.risk.reasons.length ? ` · ${request.risk.reasons.join("; ")}` : ""}</p> : null}
+                {request.guard ? (
+                  <p className={`risk-pill ${request.guard.riskLevel}`}>
+                    Guard: {request.guard.decision}{request.guard.matchedRules.length ? ` · ${request.guard.matchedRules.join(", ")}` : ""}
+                  </p>
+                ) : null}
                 <small>{request.status} · {request.source || "unknown"}{request.sourceEventId ? ` · ${request.sourceEventId}` : ""}</small>
                 {request.reason ? <p>{request.reason}</p> : null}
                 <code>{toolRequestCode(request)}</code>

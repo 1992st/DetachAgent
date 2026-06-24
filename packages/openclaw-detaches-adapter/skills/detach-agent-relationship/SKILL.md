@@ -23,58 +23,52 @@ Apply these rules only when a conversation was bootstrapped as a Detach Agent co
 - Cross-environment work requires explicit handoff, pasted output, copied files, or user confirmation.
 - If the target environment is unclear, ask before acting.
 
-## Terminal Channels
+## Agent Terminal Runtime
 
-The current detaches context may expose three terminal channels. Always follow `clientContext.detaches.terminalChannels.preferred` when it is present.
+For ordinary `local-user-machine` commands, use the Agent Terminal Runtime through the adapter CLI. The user or Detach Agent prompt provides the Detach Agent callback address; pass only that address with `--host`.
 
-- `gateway-terminal`: preferred long-term path. The Host/Main Agent calls the Detach Agent HTTP broker through `gatewayTerminal.toolEventEndpoint` / `localControl.toolEventEndpoint` derived from Detach Agent `publicBaseUrl`. Requests use `source="gateway-event"` and still require Detach Agent Tool Queue approval.
-- `ssh-terminal`: advanced compatibility path. Use it only when `terminalChannels.sshTerminal.state` is `ready` and the selected/preferred channel is `ssh-terminal`. Its `baseUrl` may be a Main Agent loopback reverse bridge URL. Do not ask for an SSH password.
-- `chat-terminal`: fenced-block fallback. Emit exactly one `detaches-terminal` block when `preferred` is `chat-terminal` or when the selected HTTP broker endpoint is unreachable. Requests are parsed by Detach Agent as `source="text-extract"`.
+Primary command:
 
-Channel rules:
+```bash
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-run \
+  --host '<Detach Agent callback address>' \
+  --command 'pwd' \
+  --reason 'check current directory on Detach Agent PC'
+```
 
-- Prefer HTTP broker only when `terminalChannels.preferred` is `gateway-terminal` or `ssh-terminal` and the selected channel is ready.
-- If the selected HTTP endpoint fails, report `DETACHES_ENDPOINT_UNREACHABLE` and use `chat-terminal` fallback.
-- Do not try alternate IPs or invent callback URLs.
-- Do not use `127.0.0.1` unless the selected channel is `ssh-terminal` and the context explicitly provides that URL.
-- Do not run `local-user-machine` commands in the Host/Main Agent shell.
-- Terminal channel selection does not change staged file save rules.
+Runtime rules:
+
+- Do not ask for broker tokens, session keys, endpoint names, local SSH credentials, or manual command execution.
+- Do not use or describe `interactionEventEndpoint` for terminal commands.
+- `terminal-run` bootstraps/refreshes its lease, submits the run, waits for Detach Agent Tool Queue approval, waits for command completion, and returns output plus exitCode.
+- `terminal-run` returns machine-readable JSON; decide success from `status`, `output`, and `exitCode`, not from shell-side guesses.
+- If `terminal-run` reports `waiting_for_approval` or `running`, continue waiting, polling, or streaming; do not invent a result.
+- If `terminal-run` reports `rejected` or `blocked`, explain that Detach Agent denied or blocked the command and do not bypass it.
+- For long-running commands, use `terminal-stream` with the returned `runId`.
+- Terminal Runtime selection does not change staged file save rules.
 
 ## User Local Terminal
 
-Selection rule: use the selected terminal channel for ordinary commands on the user's local machine. Use `credential-request` only when a real password or secret is needed.
+Selection rule: use `terminal-run --host` for ordinary commands on the user's local machine. Use `credential-request` only when a real password or secret is needed.
 
-When the target is `local-user-machine`, request execution with exactly one channel-appropriate broker event or `detaches-terminal` block.
+When the target is `local-user-machine`, request execution with exactly one `terminal-run` command.
 
 - Do not SSH into the user's local machine.
 - Do not ask for the user's local SSH username, password, port, or key path.
 - Do not wrap local-user-machine commands in `ssh`.
 - detaches_agent runs approved `local-user-machine` terminal requests in a local terminal on the user's machine.
 - The user only approves the detaches_agent tool request; this local terminal path does not require an SSH password.
-- Prefer `gateway-terminal` when it is the preferred ready channel.
-- Use `ssh-terminal` only when the context marks it ready and selected.
-- Use `chat-terminal` fenced block when it is preferred or when HTTP broker access is unreachable.
-- Terminal commands must use `broker.gatewayEventEndpoint`, `terminalChannels.<selected>.toolEventEndpoint`, or `localControl.toolEventEndpoint`.
+- Prefer `terminal-run --host` when a Detach Agent callback address is available.
+- Use `chat-terminal` fenced block only when the Agent Terminal Runtime is unavailable.
 - Do not send terminal commands to `interactionEventEndpoint`; that endpoint is only for user-visible local interactions such as credential popups.
 
 Gateway terminal example:
 
 ```bash
-node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-request \
-  --context /tmp/detaches-client-context.json \
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-run \
+  --host '<Detach Agent callback address>' \
   --command 'pwd' \
-  --reason 'check current directory on Detach Agent PC' \
-  --source-event-id 'terminal:pwd:<unique-id>'
-```
-
-Raw HTTP terminal example, if the adapter script is unavailable:
-
-```http
-POST <toolEventEndpoint>
-Authorization: Bearer <broker.submitToken>
-Content-Type: application/json
-
-{"kind":"terminal","target":"local-user-machine","sessionKey":"<sessionKey>","agentId":"<agentId>","source":"gateway-event","sourceEventId":"terminal:<unique-id>","reason":"check current directory on Detach Agent PC","payload":{"command":"pwd"},"metadata":{"terminalChannel":"gateway-terminal","preferredChannel":"gateway-terminal","callbackBaseUrl":"<localControl.baseUrl>"}}
+  --reason 'check current directory on Detach Agent PC'
 ```
 
 Chat terminal fallback example:
@@ -83,22 +77,20 @@ Chat terminal fallback example:
 {"target":"local-user-machine","command":"df -h /","reason":"check root disk usage on the user's local machine"}
 ```
 
-SSH terminal note:
+Compatibility note:
 
-Use `ssh-terminal` only when `terminalChannels.sshTerminal.state` is `ready`. Its base URL points to the Main Agent loopback reverse bridge supplied by context.
+`context-fetch`, `terminal-request --context`, `chat-terminal`, and `ssh-terminal` are compatibility paths. Do not use them as the primary path when `terminal-run --host` is available.
 
 ## Local Interaction API
 
 Selection rule: use this path only for user-visible local interactions such as password/secret entry. Do not use it for ordinary terminal commands.
 
-The Host/Main Agent may trigger detaches_agent local UI events through the interaction API when the current detaches context provides it.
+The Host/Main Agent may trigger detaches_agent local UI events through the adapter `credential-request` helper when a real password or secret is needed.
 
 - The script/API call is made by the Host/Main Agent machine, not by the user's local machine.
-- Do not use `127.0.0.1` unless that exact URL appears in the current context as reachable from the Host/Main Agent machine.
-- Read the reachable server URL from `clientContext.detaches.localControl.interactionEventEndpoint` or `clientContext.detaches.broker.interactionEventEndpoint`.
-- The detaches_agent server port is fixed by the context-provided URL, but the host/IP must come from the prompt/context because the Host/Main Agent and the user's PC are different machines.
-- Use the same `broker.submitToken` as a bearer token.
-- Use a unique `sourceEventId` for idempotency.
+- Do not use `127.0.0.1` unless the adapter/context explicitly selects a loopback compatibility path.
+- Let the adapter read any required compatibility endpoint/token from the saved detaches context; do not ask the user to copy broker tokens.
+- Use a unique `sourceEventId` for idempotency when invoking the helper.
 - Poll the interaction result for at most 300000ms. On timeout, report `DETACHES_INTERACTION_TIMEOUT`; do not keep waiting indefinitely.
 - The 300000ms timeout applies to this `credential-request` script/API path only. It does not change other detaches_agent SSH transfer password waits.
 - Do not ask the user to paste passwords into chat. For real SSH login credentials, request a local detaches_agent popup.
@@ -126,26 +118,14 @@ The script prints JSON. Success has `ok: true` and `interaction.status: "resolve
 Defined error codes:
 
 - `DETACHES_CONTEXT_INVALID`: context/session data is missing or invalid.
-- `DETACHES_AUTH_REQUIRED`: the broker submit token is missing or rejected.
-- `DETACHES_ENDPOINT_UNREACHABLE`: the Host/Main Agent machine cannot reach the context-provided detaches_agent URL.
+- `DETACHES_AUTH_REQUIRED`: saved compatibility context is missing or rejected; ask the user for a fresh Detach Agent message.
+- `DETACHES_ENDPOINT_UNREACHABLE`: the Host/Main Agent machine cannot reach the selected detaches_agent helper URL.
 - `DETACHES_CHANNEL_UNAVAILABLE`: the selected terminal channel is not ready.
 - `DETACHES_APPROVAL_REQUIRED`: the request was submitted and is waiting for Detach Agent Tool Queue approval.
 - `DETACHES_PROTOCOL_ERROR`: the server response is malformed or unexpected.
 - `DETACHES_INTERACTION_REJECTED`: the user dismissed/rejected the popup.
 - `DETACHES_INTERACTION_EXPIRED`: detaches_agent expired the pending interaction.
 - `DETACHES_INTERACTION_TIMEOUT`: the script waited 300000ms without a final user decision.
-
-Raw API shape, if the adapter script is unavailable:
-
-```http
-POST <interactionEventEndpoint>
-Authorization: Bearer <broker.submitToken>
-Content-Type: application/json
-
-{"kind":"credential.request","sessionKey":"<sessionKey>","agentId":"<agentId>","source":"gateway-event","sourceEventId":"credential:<unique-id>","reason":"SSH login requires a password","payload":{"title":"Main agent credential request","prompt":"Enter the SSH password for this login","target":{"user":"<ssh-user>","host":"<ssh-host>","port":22}}}
-```
-
-Then poll `GET <localControl.baseUrl>/api/interactions/<interactionId>?submitToken=<broker.submitToken>` until `resolved`, `rejected`, `expired`, or 300000ms elapses.
 
 ## Staged Files From Detach Agent
 

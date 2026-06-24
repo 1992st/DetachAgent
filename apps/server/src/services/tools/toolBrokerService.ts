@@ -33,6 +33,7 @@ import { gatewayClient } from "../gateway/gatewayClient.js";
 import { terminalService } from "../terminal/terminalService.js";
 import { openclawDetachesAdapterService } from "../adapters/openclawDetachesAdapterService.js";
 import { platformService } from "../platform/platformService.js";
+import { commandGuardService } from "./commandGuardService.js";
 
 const DETACH_AGENT_SKILL_NAME = DETACH_AGENT_RELATIONSHIP_SKILL_NAME;
 const DETACH_AGENT_SKILL_VERSION = DETACH_AGENT_RELATIONSHIP_SKILL_VERSION;
@@ -147,15 +148,17 @@ class ToolBrokerService {
       if (existing) return existing;
     }
     const now = new Date().toISOString();
-    const risk = assessRisk(input);
+    const guard = commandGuardService.assess({ kind: input.kind, payload: input.payload });
+    const risk = assessRisk(input, guard);
     const supported = this.targetSupported(input.kind, input.target);
     const blockedReason = supported
-      ? risk.level === "destructive" ? `Tool request blocked by risk policy: ${risk.reasons.join("; ")}` : undefined
+      ? guard.decision === "block" || risk.level === "destructive" ? `Tool request blocked by Command Guard: ${risk.reasons.join("; ")}` : undefined
       : unsupportedTargetMessage(input.kind, input.target);
     const record: ToolRequestRecord = {
       ...input,
       id: nanoid(),
       risk,
+      guard,
       status: blockedReason ? "blocked" : "pending",
       createdAt: now,
       updatedAt: now,
@@ -199,6 +202,11 @@ class ToolBrokerService {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, limit);
     return { requests };
+  }
+
+  async request(requestId: string): Promise<ToolRequestRecord> {
+    await this.load();
+    return this.requireRequest(requestId);
   }
 
   async approve(requestId: string, input: ToolRequestApproveInput = {}): Promise<ToolRequestDecisionResponse> {
@@ -471,6 +479,11 @@ class ToolBrokerService {
     await this.save();
     await this.audit({ type: "tool.reject", requestId, status: updated.status, actor: input.actor });
     return updated;
+  }
+
+  async waitForResult(requestId: string, timeoutMs: number): Promise<ToolExecutionResultSnapshot> {
+    await this.load();
+    return this.waitForExecutionResult(requestId, { timeoutMs });
   }
 
   async retryForward(requestId: string): Promise<ToolExecutionResultResponse> {
@@ -1219,7 +1232,11 @@ function unsupportedTargetMessage(kind: ToolRequestKind, target: ToolTarget): st
   return `${kind} target ${target} is not available. The request cannot fallback to local-user-machine.`;
 }
 
-function assessRisk(input: Pick<ToolRequestRecord, "kind" | "payload">): ToolRiskAssessment {
+function assessRisk(input: Pick<ToolRequestRecord, "kind" | "payload">, guard?: ReturnType<typeof commandGuardService.assess>): ToolRiskAssessment {
+  if (guard) {
+    const mapped = commandGuardService.toToolRisk(guard);
+    if (mapped.level !== "safe") return mapped;
+  }
   if (input.kind === "main-agent-save-file") return { level: "elevated", reasons: ["将通过本机 SSH/SCP/Rsync 把 staged 文件保存到 Main Agent 机器"] };
   if (input.kind === "adapter-install") return { level: "elevated", reasons: ["将在远端 agent host 安装 detaches adapter"] };
   if (input.kind === "skill-install") return { level: "elevated", reasons: ["将在 Host/Main Agent 的 OpenClaw 全局 skills 路径安装或覆盖 skill"] };

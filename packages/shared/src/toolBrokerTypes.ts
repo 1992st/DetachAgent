@@ -2,6 +2,7 @@ import type { MainAgentFileTransferSnapshot, ToolTarget } from "./fileTypes.js";
 import type { SshCredentialSocketEvent } from "./connectionTypes.js";
 import type { InteractionSocketEvent } from "./interactionTypes.js";
 import type { TerminalChannelName } from "./detachesContextTypes.js";
+import type { CommandGuardResult } from "./agentTerminalTypes.js";
 
 export type ToolRequestKind = "terminal" | "file-transfer" | "main-agent-save-file" | "adapter-install" | "skill-install" | "skill-verify";
 export type ToolRequestStatus = "pending" | "running" | "succeeded" | "approved" | "rejected" | "blocked" | "started" | "failed";
@@ -43,6 +44,7 @@ export interface ToolRequestCreateInput {
     fallbackMode?: "chat-fenced-block";
     preferredChannel?: TerminalChannelName;
     callbackBaseUrl?: string;
+    agentTerminalRunId?: string;
   };
   payload: Record<string, unknown>;
 }
@@ -67,6 +69,7 @@ export interface ToolRequestRecord extends ToolRequestCreateInput {
   id: string;
   status: ToolRequestStatus;
   risk?: ToolRiskAssessment;
+  guard?: CommandGuardResult;
   lastDecision?: ToolDecisionRecord;
   createdAt: string;
   updatedAt: string;

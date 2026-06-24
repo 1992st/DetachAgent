@@ -96,6 +96,17 @@ export interface DetachesSessionContext {
     staged: DetachesStagedFileContext[];
   };
   terminalChannels?: DetachesTerminalChannels;
+  agentTerminal?: {
+    state: "ready" | "fallback_chat";
+    mode: TerminalChannelName;
+    host?: string;
+    adapterCommand: "terminal-run";
+    approvalRequired: true;
+    supportsWait: boolean;
+    supportsStreaming: boolean;
+    supportsCancel: boolean;
+    note: string;
+  };
   broker?: {
     gatewayEventEndpoint: string;
     interactionEventEndpoint?: string;

@@ -2829,3 +2829,52 @@ h3 { font-size: 14px; }
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+
+.agent-terminal-status {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.compact-heading {
+  margin: 0;
+}
+
+.terminal-session-list {
+  display: grid;
+  gap: 8px;
+}
+
+.terminal-session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.terminal-session-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.terminal-session-row strong,
+.terminal-session-row span,
+.terminal-session-row small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.terminal-session-row span,
+.terminal-session-row small {
+  color: var(--muted);
+  font-size: 12px;
+}

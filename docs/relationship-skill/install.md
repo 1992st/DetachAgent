@@ -135,7 +135,7 @@ test -f ~/.detach_agent/bin/detaches-agent-adapter.mjs
 ```
 
 The current package version is recorded in `VERSION`; this release expects
-`1.1.1`.
+`1.2.0`.
 
 ## Troubleshooting
 

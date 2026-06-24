@@ -10,6 +10,7 @@ export interface AppHealth {
   server: HealthCheck;
   ssh: HealthCheck;
   gateway: HealthCheck;
+  agentTerminal: HealthCheck;
   config: {
     remoteHost: string;
     remoteSshPort: number;

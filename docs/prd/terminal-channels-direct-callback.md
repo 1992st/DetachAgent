@@ -93,7 +93,7 @@ Routing rules:
 - Do not try alternate IPs.
 - Do not use `127.0.0.1` unless selected channel is `ssh-terminal`.
 
-The `detach-agent-relationship` skill version is `1.1.1` and must preserve staged file save rules separately from terminal channel selection.
+The `detach-agent-relationship` skill version is `1.2.0` and must preserve staged file save rules separately from terminal channel selection.
 
 ## Adapter CLI Requirements
 

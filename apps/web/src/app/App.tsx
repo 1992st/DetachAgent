@@ -298,6 +298,7 @@ export function App() {
           message={relationshipSkillMessage}
           installedVersion={relationshipSkillInstalledVersion}
           requiredVersion={relationshipSkillRequiredVersion}
+          callbackHost={health?.config.publicBaseUrl}
           onDismiss={() => setRelationshipSkillPromptOpen(false)}
         />
       ) : null}
@@ -393,19 +394,24 @@ function RelationshipSkillPromptDialog({
   message,
   installedVersion,
   requiredVersion,
+  callbackHost,
   onDismiss
 }: {
   status: RelationshipSkillStatus;
   message?: string;
   installedVersion?: string;
   requiredVersion?: string;
+  callbackHost?: string;
   onDismiss: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const targetVersion = requiredVersion || relationshipSkillVersion;
+  const prompt = callbackHost
+    ? `${relationshipSkillInstallPrompt}\n\n当前 Detach Agent callback host: ${callbackHost}\n安装/更新后，Main Agent 可用：\nnode ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-run --host ${callbackHost} --command 'pwd' --reason 'check gateway-terminal'`
+    : relationshipSkillInstallPrompt;
 
   async function copyPrompt() {
-    await navigator.clipboard.writeText(relationshipSkillInstallPrompt);
+    await navigator.clipboard.writeText(prompt);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   }
@@ -436,7 +442,7 @@ function RelationshipSkillPromptDialog({
               <Copy size={14} />
             </button>
           </div>
-          <pre>{relationshipSkillInstallPrompt}</pre>
+          <pre>{prompt}</pre>
           {copied ? <small>已复制</small> : null}
         </div>
       </section>

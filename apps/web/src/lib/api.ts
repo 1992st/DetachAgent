@@ -1,5 +1,7 @@
 import type {
   AgentsListResponse,
+  AgentTerminalSessionsResponse,
+  AgentTerminalSession,
   AppHealth,
   ClientIdentity,
   DetachesContextExportCreateResponse,
@@ -154,6 +156,24 @@ export async function testCallback(publicBaseUrl: string): Promise<{ ok: boolean
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ publicBaseUrl })
   });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function fetchAgentTerminalSessions(): Promise<AgentTerminalSessionsResponse> {
+  const res = await fetch(apiUrl("/api/agent-terminal/sessions"));
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function revokeAgentTerminalSession(terminalSessionId: string): Promise<{ terminalSession: AgentTerminalSession }> {
+  const res = await fetch(apiUrl(`/api/agent-terminal/sessions/${encodeURIComponent(terminalSessionId)}/revoke`), { method: "POST" });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function authorizeAgentTerminalSession(terminalSessionId: string): Promise<{ terminalSession: AgentTerminalSession }> {
+  const res = await fetch(apiUrl(`/api/agent-terminal/sessions/${encodeURIComponent(terminalSessionId)}/authorize`), { method: "POST" });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }

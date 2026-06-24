@@ -28,6 +28,7 @@ import { buildLocalMachineContext } from "../services/platform/localMachineConte
 import { cloudPromptLogService } from "../services/gateway/cloudPromptLogService.js";
 import { interactionBrokerService } from "../services/interactions/interactionBrokerService.js";
 import { callbackAddressService } from "../services/callback/callbackAddressService.js";
+import { agentTerminalService } from "../services/agentTerminal/agentTerminalService.js";
 
 const upload = multer({
   dest: path.join(appConfig.storageDir, "cache"),
@@ -59,6 +60,140 @@ apiRoutes.post("/terminal/apps/:appId/open", async (req, res) => {
   }
 });
 
+apiRoutes.post("/agent-terminal/bootstrap", async (req, res) => {
+  try {
+    res.json(await agentTerminalService.bootstrap({
+      remoteAddress: req.socket.remoteAddress || "",
+      sessionKey: typeof req.body?.sessionKey === "string" ? req.body.sessionKey : undefined,
+      agentId: typeof req.body?.agentId === "string" ? req.body.agentId : undefined,
+      displayName: typeof req.body?.displayName === "string" ? req.body.displayName : undefined
+    }));
+  } catch (error) {
+    sendAgentTerminalError(res, error);
+  }
+});
+
+apiRoutes.post("/agent-terminal/sessions", async (req, res) => {
+  try {
+    res.json(await agentTerminalService.bootstrap({
+      remoteAddress: req.socket.remoteAddress || "",
+      sessionKey: typeof req.body?.sessionKey === "string" ? req.body.sessionKey : undefined,
+      agentId: typeof req.body?.agentId === "string" ? req.body.agentId : undefined,
+      displayName: typeof req.body?.displayName === "string" ? req.body.displayName : undefined
+    }));
+  } catch (error) {
+    sendAgentTerminalError(res, error);
+  }
+});
+
+apiRoutes.get("/agent-terminal/sessions", async (_req, res) => {
+  try {
+    res.json(await agentTerminalService.listSessions());
+  } catch (error) {
+    sendAgentTerminalError(res, error);
+  }
+});
+
+apiRoutes.get("/agent-terminal/sessions/:terminalSessionId", async (req, res) => {
+  try {
+    res.json({ terminalSession: await agentTerminalService.session(req.params.terminalSessionId) });
+  } catch (error) {
+    sendAgentTerminalError(res, error);
+  }
+});
+
+apiRoutes.post("/agent-terminal/sessions/:terminalSessionId/revoke", async (req, res) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Agent terminal sessions can only be revoked from the local Detach Agent UI." });
+    return;
+  }
+  try {
+    res.json({ terminalSession: await agentTerminalService.revokeSession(req.params.terminalSessionId) });
+  } catch (error) {
+    sendAgentTerminalError(res, error);
+  }
+});
+
+apiRoutes.post("/agent-terminal/sessions/:terminalSessionId/authorize", async (req, res) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Agent terminal sessions can only be authorized from the local Detach Agent UI." });
+    return;
+  }
+  try {
+    res.json(await agentTerminalService.authorizeSession(req.params.terminalSessionId));
+  } catch (error) {
+    sendAgentTerminalError(res, error);
+  }
+});
+
+apiRoutes.post("/agent-terminal/runs", async (req, res) => {
+  try {
+    const wait = req.query.wait === "true" || req.query.wait === "1";
+    const timeoutMs = wait ? parsePositiveInt(req.query.timeoutMs, 120_000, 10 * 60 * 1000) : 0;
+    res.json(await agentTerminalService.createRun({
+      leaseToken: extractBearerToken(req),
+      waitMs: timeoutMs,
+      request: {
+        command: String(req.body?.command || ""),
+        reason: typeof req.body?.reason === "string" ? req.body.reason : undefined,
+        workingDirectory: typeof req.body?.workingDirectory === "string" ? req.body.workingDirectory : null,
+        sourceEventId: typeof req.body?.sourceEventId === "string" ? req.body.sourceEventId : undefined
+      }
+    }));
+  } catch (error) {
+    sendAgentTerminalError(res, error);
+  }
+});
+
+apiRoutes.get("/agent-terminal/runs/:runId", async (req, res) => {
+  try {
+    await agentTerminalService.assertRunLease(req.params.runId, extractBearerToken(req));
+    const wait = req.query.wait === "true" || req.query.wait === "1";
+    const timeoutMs = wait ? parsePositiveInt(req.query.timeoutMs, 120_000, 10 * 60 * 1000) : 0;
+    res.json(wait ? await agentTerminalService.wait(req.params.runId, timeoutMs) : await agentTerminalService.run(req.params.runId));
+  } catch (error) {
+    sendAgentTerminalError(res, error);
+  }
+});
+
+apiRoutes.get("/agent-terminal/runs/:runId/stream", async (req, res) => {
+  try {
+    await agentTerminalService.assertRunLease(req.params.runId, extractBearerToken(req));
+  } catch (error) {
+    sendAgentTerminalError(res, error);
+    return;
+  }
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive"
+  });
+  const cleanup = await agentTerminalService.stream(req.params.runId, (event) => {
+    res.write(`event: ${event.type}\n`);
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  }).catch((error) => {
+    res.write(`event: failed\n`);
+    res.write(`data: ${JSON.stringify({ type: "failed", error: error instanceof Error ? error.message : String(error) })}\n\n`);
+    return undefined;
+  });
+  const interval = setInterval(() => {
+    void agentTerminalService.run(req.params.runId).catch(() => undefined);
+  }, 750);
+  req.on("close", () => {
+    clearInterval(interval);
+    cleanup?.();
+  });
+});
+
+apiRoutes.post("/agent-terminal/runs/:runId/cancel", async (req, res) => {
+  try {
+    await agentTerminalService.assertRunLease(req.params.runId, extractBearerToken(req));
+    res.json(await agentTerminalService.cancel(req.params.runId));
+  } catch (error) {
+    sendAgentTerminalError(res, error);
+  }
+});
+
 apiRoutes.get("/logs/cloud-prompts", async (req, res) => {
   try {
     const limit = parsePositiveInt(req.query.limit, 100, 500);
@@ -71,6 +206,19 @@ apiRoutes.get("/logs/cloud-prompts", async (req, res) => {
 function isLoopbackRequest(req: express.Request): boolean {
   const address = req.socket.remoteAddress || "";
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+function extractBearerToken(req: express.Request): string {
+  const auth = req.header("authorization") || "";
+  if (/^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, "").trim();
+  return "";
+}
+
+function sendAgentTerminalError(res: express.Response, error: unknown): void {
+  const anyError = error as Error & { code?: string };
+  const code = anyError.code || "DETACHES_TERMINAL_INTERNAL_ERROR";
+  const status = code === "DETACHES_TERMINAL_LEASE_REVOKED" || code === "DETACHES_TERMINAL_LEASE_EXPIRED" ? 401 : 400;
+  res.status(status).json({ ok: false, code, error: anyError.message || String(error) });
 }
 
 function cloneJson<T>(value: T): T {
@@ -344,6 +492,7 @@ async function checkHealth(): Promise<AppHealth> {
       message: gatewayMessage,
       details: { hello: gatewayClient.getHello(), lastError: gatewayClient.getLastError() }
     },
+    agentTerminal: buildAgentTerminalHealth(config),
     config: {
       remoteHost: config.remoteHost,
       remoteSshPort: config.remoteSshPort,
@@ -367,6 +516,31 @@ async function checkHealth(): Promise<AppHealth> {
     checkedAt: new Date().toISOString()
   };
   return body;
+}
+
+function buildAgentTerminalHealth(config: Awaited<ReturnType<typeof runtimeConfig>>): AppHealth["agentTerminal"] {
+  const listenerHosts = config.serverListenHosts.length ? config.serverListenHosts : [config.serverHost];
+  const selectedHost = config.gatewayTerminalLocalIp || callbackAddressService.hostFromBaseUrl(config.publicBaseUrl);
+  const listenerReady = Boolean(selectedHost && listenerHosts.includes(selectedHost));
+  const apiReady = Boolean(config.publicBaseUrl && config.gatewayTerminalLastStatus === "ok" && listenerReady);
+  return {
+    state: apiReady ? "ok" : config.publicBaseUrl ? "error" : "disabled",
+    message: config.publicBaseUrl
+      ? apiReady
+        ? `Agent Terminal API is ready at ${config.publicBaseUrl}. Awaiting or using Main Agent terminal-run bootstrap.`
+        : config.gatewayTerminalLastError || "Callback address is configured but listener/API is not fully ready."
+      : "Agent Terminal API is disabled until publicBaseUrl is configured.",
+    details: {
+      publicBaseUrl: config.publicBaseUrl,
+      listenerHosts,
+      listener_ready: listenerReady,
+      agent_terminal_api_ready: apiReady,
+      awaiting_agent_bootstrap: apiReady,
+      session_authorized: false,
+      last_run_succeeded: false,
+      last_run_failed: false
+    }
+  };
 }
 
 function classifyGatewayAuth(message: string): DiagnosticItem | null {
@@ -921,6 +1095,14 @@ function parseToolDecisionActor(value: unknown): ToolDecisionActor | undefined {
   };
 }
 
+function looksLikeTerminalPayload(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (record.kind === "terminal") return true;
+  const payload = record.payload;
+  return Boolean(payload && typeof payload === "object" && !Array.isArray(payload) && typeof (payload as Record<string, unknown>).command === "string");
+}
+
 function parseTerminalChannelName(value: unknown): TerminalChannelName | undefined {
   return value === "gateway-terminal" || value === "ssh-terminal" || value === "chat-terminal" ? value : undefined;
 }
@@ -1033,6 +1215,14 @@ apiRoutes.post("/tools/events/gateway", async (req, res) => {
 
 apiRoutes.post("/interactions/events/gateway", async (req, res) => {
   try {
+    if (looksLikeTerminalPayload(req.body)) {
+      res.status(400).json({
+        ok: false,
+        code: "DETACHES_WRONG_ENDPOINT_FOR_TERMINAL",
+        error: "Terminal commands must use agent-terminal runtime or the tool broker endpoint, not interactionEventEndpoint."
+      });
+      return;
+    }
     const kind = parseInteractionKind(req.body.kind);
     const sessionKey = typeof req.body.sessionKey === "string" ? req.body.sessionKey.trim() : "";
     const sourceEventId = typeof req.body.sourceEventId === "string" ? req.body.sourceEventId.trim() : "";

@@ -12,15 +12,25 @@ Before requesting tools, inspect the latest `clientContext.detaches` object or t
 - `agentId`
 - user device identity
 - staged files in `files.staged`
-- Tool Broker endpoint in `broker.gatewayEventEndpoint`
-- broker submit token in `broker.submitToken`
+- Agent Terminal Runtime host in `agentTerminal.host` when gateway-terminal is ready
 - supported capability targets
 - unavailable targets
 - execution invariants
 
 If the context is missing, ask the user to resend through detaches_agent or avoid tool requests.
 
-`clientContext.detaches.contextExport` describes how a fresh full context can be handed to the real agent host. The remote agent host consumes the URL, but only the user's local detaches_agent UI can create it.
+`clientContext.detaches.contextExport` is a compatibility/bootstrap path. For ordinary local-user-machine terminal commands, prefer Agent Terminal Runtime with the Detach Agent callback host.
+
+Primary terminal command:
+
+```sh
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-run \
+  --host "$DETACH_AGENT_HOST" \
+  --command "pwd" \
+  --reason "check the user's local working directory"
+```
+
+`terminal-run` bootstraps or refreshes its lease, submits the command, waits for Detach Agent Tool Queue approval, waits for completion, and returns output plus exitCode. Do not ask for broker tokens, endpoint names, SSH credentials, or manual command execution.
 
 If detaches_agent provides a one-time context export URL, consume it with `doctor` on the real agent host before requesting tools:
 
@@ -48,7 +58,7 @@ When this adapter is installed on the real OpenClaw agent host, use the CLI as a
 node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --context /path/to/clientContext.detaches.json
 ```
 
-`doctor` is the preferred first command. It prints the current session identity, requestable targets, blocked targets, staged files, hard rules, and exact broker-event command templates. It does not execute commands or transfer files.
+`doctor` is for troubleshooting, not the normal terminal path. It prints the current session identity, requestable targets, blocked targets, staged files, hard rules, and broker-event command templates. It does not execute commands or transfer files.
 
 ```sh
 node ~/.detach_agent/bin/detaches-agent-adapter.mjs inspect-context /path/to/clientContext.detaches.json
@@ -68,7 +78,7 @@ Never claim execution has happened just because you emitted a request block.
 
 Use exactly one fenced block for a tool request.
 
-If the OpenClaw runtime can send structured gateway tool events, prefer broker-event JSON over fenced text:
+Compatibility path only: if Agent Terminal Runtime is unavailable but a saved context exists, emit or submit a structured request:
 
 ```sh
 node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-request \

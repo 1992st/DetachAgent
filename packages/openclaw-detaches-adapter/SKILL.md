@@ -1,52 +1,51 @@
 ---
 name: detaches-agent
-description: Understand and operate detaches_agent mediated sessions through a one-time context export and approval broker.
+description: Understand and operate detaches_agent mediated sessions through Agent Terminal Runtime and the local approval broker.
 metadata: { "openclaw": { "emoji": "🔌", "skillKey": "detaches-agent" } }
 ---
 
 # detaches_agent Session Bridge
 
-Use this skill when the conversation includes `clientContext.detaches`, `[detaches_agent 接入上下文]`, or a one-time detaches_agent context export URL.
+Use this skill when the conversation includes `clientContext.detaches`, `[detaches_agent 接入上下文]`, an Agent Terminal Runtime host, or a one-time detaches_agent context export URL.
 
 detaches_agent is a local UI and approval broker running on the user's computer. It can bind a conversation to a hidden local terminal, staged files, and a Tool Broker. This skill does not execute tools directly and must not bypass detaches_agent approval.
 
 ## Required Flow
 
-1. Inspect the latest `clientContext.detaches`; if it is missing or stale, ask the user to send a fresh detaches_agent message with current connection settings.
-2. On the real OpenClaw agent host, run the agent-side doctor. Prefer the one-step URL flow when a fresh export URL is available:
+1. For ordinary `local-user-machine` terminal commands, use Agent Terminal Runtime with the Detach Agent callback host/IP. The adapter owns bootstrap, lease refresh, approval waiting, execution waiting, output, and exitCode:
 
 ```sh
-node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --url "$DETACHES_CONTEXT_EXPORT_URL" --output-context /tmp/detaches-client-context.json
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-run \
+  --host "$DETACH_AGENT_HOST" \
+  --command "pwd" \
+  --reason "check the user's local working directory"
 ```
 
-3. If you already saved the context, run doctor against the file:
+2. If the run is waiting for approval or still running, keep waiting or use the runtime stream command; do not claim completion until detaches_agent returns final output:
+
+```sh
+node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-stream \
+  --host "$DETACH_AGENT_HOST" \
+  --run-id "$RUN_ID"
+```
+
+3. Use `context-fetch`, `doctor`, and `terminal-request --context` only for compatibility or troubleshooting when the runtime host is unavailable:
 
 ```sh
 node ~/.detach_agent/bin/detaches-agent-adapter.mjs doctor --context /tmp/detaches-client-context.json
 ```
 
-4. If you need raw diagnostics, inspect the context:
+4. If every HTTP runtime path is unavailable, fall back to exactly one fenced `detaches-terminal` block and wait for Detach Agent approval:
 
-```sh
-node ~/.detach_agent/bin/detaches-agent-adapter.mjs inspect-context /tmp/detaches-client-context.json
-```
-
-5. Prefer structured broker events over fenced text:
-
-```sh
-node ~/.detach_agent/bin/detaches-agent-adapter.mjs terminal-request \
-  --context /tmp/detaches-client-context.json \
-  --target local-user-machine \
-  --command pwd \
-  --reason "check the user's local working directory" \
-  --format broker-event \
-  --source-event-id "$UNIQUE_EVENT_ID" \
-  --submit
+```detaches-terminal
+{"target":"local-user-machine","command":"pwd","reason":"check the user's local working directory"}
 ```
 
 ## Hard Rules
 
 - Never claim a command, file read, transfer, download, archive, or modification happened until detaches_agent returns approved tool output.
 - Never change `remote-agent-host` or `gateway-managed` requests to `local-user-machine` as a fallback.
-- Treat saved context files as sensitive because they can contain `broker.submitToken`.
+- Never use or describe `interactionEventEndpoint` for terminal commands.
+- Do not ask the user for broker tokens, endpoint internals, Detach Agent PC SSH credentials, or manual local terminal execution.
+- Treat saved context files as sensitive because compatibility paths can contain `broker.submitToken`.
 - Files staged by detaches_agent are initially on the user's local machine, not on the remote agent host.

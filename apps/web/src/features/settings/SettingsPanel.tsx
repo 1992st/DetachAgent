@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Copy, FileInput, Play, Plus, Save, Settings2, ShieldCheck, Trash2, Wifi, X } from "lucide-react";
-import type { NetworkTestResponse, PublicSettings, RemoteProfile, RemoteProfileUpdate } from "@detaches/shared";
-import { activateRemoteProfile, createRemoteProfile, deleteRemoteProfile, fetchCallbackIps, fetchSettings, saveRemoteProfile, testCallback, testNetwork, type CallbackIpCandidate } from "../../lib/api.js";
+import type { AgentTerminalSession, NetworkTestResponse, PublicSettings, RemoteProfile, RemoteProfileUpdate } from "@detaches/shared";
+import { activateRemoteProfile, authorizeAgentTerminalSession, createRemoteProfile, deleteRemoteProfile, fetchAgentTerminalSessions, fetchCallbackIps, fetchSettings, revokeAgentTerminalSession, saveRemoteProfile, testCallback, testNetwork, type CallbackIpCandidate } from "../../lib/api.js";
 import { AgentConfigAssistantDialog } from "./agentConfigAssistant/AgentConfigAssistantDialog.js";
 import { SkillInstallPanel } from "../skills/SkillInstallPanel.js";
 
@@ -25,6 +25,8 @@ export function SettingsPanel({ onSaved }: Props) {
   const [callbackPickerOpen, setCallbackPickerOpen] = useState(false);
   const [callbackCandidates, setCallbackCandidates] = useState<CallbackIpCandidate[]>([]);
   const [callbackTesting, setCallbackTesting] = useState(false);
+  const [agentTerminalSessions, setAgentTerminalSessions] = useState<AgentTerminalSession[]>([]);
+  const [agentTerminalLoading, setAgentTerminalLoading] = useState(false);
   const [guideStage, setGuideStage] = useState<"idle" | "import-agent" | "gateway-health" | "test-network">("idle");
   const [copiedPairingCommand, setCopiedPairingCommand] = useState(false);
 
@@ -35,6 +37,7 @@ export function SettingsPanel({ onSaved }: Props) {
         setSelectedProfileId(value.activeProfileId);
       })
       .catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
+    void loadAgentTerminalSessions();
   }, []);
 
   const selectedProfile = settings?.profiles.find((profile) => profile.id === selectedProfileId) ?? settings ?? null;
@@ -100,6 +103,38 @@ export function SettingsPanel({ onSaved }: Props) {
       ...(settings.activeProfileId === selectedProfile.id ? nextSelected : {}),
       profiles: nextProfiles
     });
+  }
+
+  async function loadAgentTerminalSessions() {
+    setAgentTerminalLoading(true);
+    try {
+      const response = await fetchAgentTerminalSessions();
+      setAgentTerminalSessions(response.sessions);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAgentTerminalLoading(false);
+    }
+  }
+
+  async function revokeTerminalSession(terminalSessionId: string) {
+    try {
+      await revokeAgentTerminalSession(terminalSessionId);
+      await loadAgentTerminalSessions();
+      setStatus("已撤销 Agent Terminal session。");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function authorizeTerminalSession(terminalSessionId: string) {
+    try {
+      await authorizeAgentTerminalSession(terminalSessionId);
+      await loadAgentTerminalSessions();
+      setStatus("已授权 Agent Terminal session。");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
   }
 
   async function submit(event: FormEvent) {
@@ -531,6 +566,42 @@ export function SettingsPanel({ onSaved }: Props) {
               当前 server 监听 {serverListenHosts.join(", ")}:{settings?.serverPort}，选择的回连 IP 是 {selectedCallbackIp}。保存配置并重启 Detach Agent 后生效。
             </p>
           ) : null}
+          <div className="agent-terminal-status">
+            <div className="settings-section-heading compact-heading">
+              <h4>Agent Terminal Runtime</h4>
+              <button type="button" className="secondary-button compact" onClick={() => void loadAgentTerminalSessions()} disabled={agentTerminalLoading}>
+                {agentTerminalLoading ? "刷新中" : "刷新"}
+              </button>
+            </div>
+            <p className="field-hint">
+              Main Agent 使用 adapter 调用 <code>terminal-run --host {selectedProfile.publicBaseUrl || "<publicBaseUrl>"}</code>，不需要接触 token 或 endpoint。
+            </p>
+            {agentTerminalSessions.length ? (
+              <div className="terminal-session-list">
+                {agentTerminalSessions.map((session) => (
+                  <div className="terminal-session-row" key={session.terminalSessionId}>
+                    <div>
+                      <strong>{session.agentId || "main-agent"}</strong>
+                      <span>{session.remoteAddress} · {session.state}</span>
+                      <small>last active {session.lastActiveAt} · last run {session.lastRunStatus || "none"}</small>
+                    </div>
+                    <div className="terminal-session-actions">
+                      {session.state === "pending_authorization" ? (
+                        <button type="button" className="secondary-button compact" onClick={() => void authorizeTerminalSession(session.terminalSessionId)}>
+                          authorize
+                        </button>
+                      ) : null}
+                      <button type="button" className="secondary-button compact danger" onClick={() => void revokeTerminalSession(session.terminalSessionId)}>
+                        revoke
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="field-hint">还没有授权的 Agent Terminal session。Main Agent 第一次运行 terminal-run 后会出现在这里。</p>
+            )}
+          </div>
           <label>
             Remote workspace
             <input value={selectedProfile.remoteWorkspaceRoot} onChange={(e) => updateSelectedProfile({ remoteWorkspaceRoot: e.target.value })} />

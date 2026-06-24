@@ -19,6 +19,9 @@ assert.match(rootPackage, /wait-for-server\.mjs && pnpm --filter @detaches\/web 
 assert.match(waitForServer, /\/api\/health/, "wait-for-server should poll the local API health endpoint");
 assert.match(settingsPanel, /Main Agent 服务信息/, "advanced settings should include Main Agent service information");
 assert.match(settingsPanel, /Main Agent 回连本机/, "settings should include gateway-terminal callback settings");
+assert.match(settingsPanel, /Agent Terminal Runtime/, "settings should show Agent Terminal Runtime session status");
+assert.match(settingsPanel, /revokeAgentTerminalSession/, "settings should allow revoking Agent Terminal sessions");
+assert.match(settingsPanel, /authorizeAgentTerminalSession/, "settings should allow authorizing pending Agent Terminal sessions");
 assert.match(settingsPanel, /选择本机回连 IP/, "settings should expose callback IP selection");
 assert.match(settingsPanel, /测试 gateway-terminal/, "settings should expose gateway-terminal test action");
 assert.match(settingsPanel, /保存配置并重启 Detach Agent 后生效/, "settings should warn when selected callback IP needs a server restart");
@@ -40,11 +43,13 @@ assert.match(app, /relationshipSkillRequiredVersion/, "App should keep the requi
 assert.match(app, /relationshipSkillCheckNonce/, "New session should explicitly trigger the relationship skill check");
 assert.match(app, /relationshipSkillPromptOpen/, "skill action should open the copyable prompt dialog");
 assert.match(app, /RelationshipSkillPromptDialog/, "App should render a relationship skill prompt dialog");
-assert.match(app, /navigator\.clipboard\.writeText\(relationshipSkillInstallPrompt\)/, "prompt dialog should copy the install/update prompt");
+assert.match(app, /navigator\.clipboard\.writeText\(prompt\)/, "prompt dialog should copy the generated install/update prompt");
+assert.match(app, /callbackHost/, "prompt dialog should include the current Detach Agent callback host when available");
 assert.match(skillInstallPanel, /DETACH_AGENT_RELATIONSHIP_SKILL_VERSION/, "Skill install panel should use the shared required skill version");
 assert.match(skillInstallPanel, /export const relationshipSkillInstallPrompt/, "Skill install panel should export the shared install/update prompt");
 assert.match(skillInstallPanel, /安装或更新 OpenClaw relationship skill 到当前要求版本/, "Skill install panel should give Main Agent an update prompt");
 assert.match(skillInstallPanel, /detaches-agent-adapter\.mjs/, "Skill install prompt should also install the adapter CLI helper");
+assert.match(skillInstallPanel, /terminal-run --host/, "Skill install prompt should show the new Agent Terminal Runtime command");
 
 assert.match(css, /@keyframes skill-alert-pulse/, "CSS should include the orange breathing alert animation");
 assert.match(css, /relationship-skill-prompt-dialog/, "CSS should style the relationship skill prompt dialog");

@@ -14,6 +14,12 @@ const chatSocketSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/ws
 const relationshipSkillSource = fs.readFileSync(path.join(repoRoot, "packages/openclaw-detaches-adapter/skills/detach-agent-relationship/SKILL.md"), "utf8");
 const relationshipSkillTypesSource = fs.readFileSync(path.join(repoRoot, "packages/shared/src/relationshipSkillTypes.ts"), "utf8");
 const relationshipSkillVersion = fs.readFileSync(path.join(repoRoot, "packages/openclaw-detaches-adapter/skills/detach-agent-relationship/VERSION"), "utf8").trim();
+const packagedSkillZip = fs.readFileSync(path.join(repoRoot, "apps/web/public/skills/detach-agent-relationship.skill.zip"));
+const agentTerminalServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/agentTerminal/agentTerminalService.ts"), "utf8");
+const terminalLeaseServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/agentTerminal/terminalLeaseService.ts"), "utf8");
+const terminalRunStoreSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/agentTerminal/terminalRunStore.ts"), "utf8");
+const terminalStreamHubSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/agentTerminal/terminalStreamHub.ts"), "utf8");
+const commandGuardServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/tools/commandGuardService.ts"), "utf8");
 
 assert.match(
   appConfigSource,
@@ -95,14 +101,26 @@ assert.match(
 
 assert.match(
   clientContextSource,
-  /Do not use interactionEventEndpoint for terminal commands/,
-  "readable terminal routing prompt should not direct terminal commands to the interaction endpoint"
+  /terminal-run --host/,
+  "readable terminal routing prompt should make terminal-run the primary gateway-terminal path"
 );
 
 assert.match(
   clientContextSource,
-  /fetch contextExport\.consumeUrl to obtain the machine-readable context with broker\.submitToken/,
-  "readable prompt should explain where Main Agent obtains the broker submit token"
+  /Do not ask for broker tokens or endpoint names for terminal commands/,
+  "readable prompt should hide broker token and endpoint details from the primary terminal path"
+);
+
+assert.doesNotMatch(
+  clientContextSource,
+  /Authorization: Bearer broker\.submitToken/,
+  "readable prompt should not teach Main Agent to construct raw terminal broker requests"
+);
+
+assert.doesNotMatch(
+  clientContextSource,
+  /gatewayTerminal\.toolEventEndpoint\/localControl\.toolEventEndpoint/,
+  "fallback prompt should not expose raw terminal endpoint internals"
 );
 
 assert.match(
@@ -119,8 +137,152 @@ assert.match(
 
 assert.match(
   relationshipSkillSource,
+  /terminal-run --host/,
+  "relationship skill should use terminal-run --host as the primary local terminal path"
+);
+
+assert.doesNotMatch(
+  relationshipSkillSource,
   /POST <toolEventEndpoint>/,
-  "relationship skill should include a raw HTTP terminal example for missing adapter installs"
+  "relationship skill should not put raw broker HTTP in the primary terminal guidance"
+);
+
+assert.match(
+  apiRoutesSource,
+  /DETACHES_WRONG_ENDPOINT_FOR_TERMINAL/,
+  "interaction endpoint should reject terminal-shaped payloads"
+);
+
+assert.match(
+  apiRoutesSource,
+  /\/agent-terminal\/runs/,
+  "server should expose Agent Terminal Runtime run endpoints"
+);
+
+assert.match(
+  apiRoutesSource,
+  /\/agent-terminal\/sessions\/:terminalSessionId\/authorize/,
+  "server should expose local UI authorization for pending Agent Terminal sessions"
+);
+
+assert.match(
+  apiRoutesSource,
+  /listener_ready/,
+  "Agent Terminal health should expose listener_ready status"
+);
+
+assert.match(
+  apiRoutesSource,
+  /agent_terminal_api_ready/,
+  "Agent Terminal health should expose agent_terminal_api_ready status"
+);
+
+assert.match(
+  apiRoutesSource,
+  /awaiting_agent_bootstrap/,
+  "Agent Terminal health should expose awaiting_agent_bootstrap status"
+);
+
+assert.match(
+  terminalLeaseServiceSource,
+  /leaseToken:\s*nanoid\(48\)/,
+  "Agent Terminal bootstrap should issue an opaque lease token"
+);
+
+assert.match(
+  terminalLeaseServiceSource,
+  /pending_authorization/,
+  "Agent Terminal first bootstrap should create a pending authorization session"
+);
+
+assert.match(
+  terminalLeaseServiceSource,
+  /terminalId:\s*sessionKey/,
+  "Agent Terminal sessions should bind a terminalId for the reused local terminal"
+);
+
+assert.match(
+  terminalLeaseServiceSource,
+  /DETACHES_TERMINAL_BOOTSTRAP_REQUIRED/,
+  "Agent Terminal should report bootstrap-required until the local UI authorizes the session"
+);
+
+assert.match(
+  terminalLeaseServiceSource,
+  /assertAllowedRemote/,
+  "Agent Terminal bootstrap should check the configured Main Agent allowlist before creating sessions"
+);
+
+assert.match(
+  terminalLeaseServiceSource,
+  /config\.remoteHost/,
+  "Agent Terminal allowlist should include the configured Main Agent remote host"
+);
+
+assert.match(
+  terminalLeaseServiceSource,
+  /config\.gatewayDirectHost/,
+  "Agent Terminal allowlist should include the configured direct Gateway host"
+);
+
+assert.match(
+  agentTerminalServiceSource,
+  /terminalLeaseService\.bootstrap/,
+  "Agent Terminal service should delegate lease/session bootstrap to terminalLeaseService"
+);
+
+assert.match(
+  agentTerminalServiceSource,
+  /terminalRunStore\.create/,
+  "Agent Terminal service should persist runs through terminalRunStore"
+);
+
+assert.match(
+  agentTerminalServiceSource,
+  /terminalStreamHub\.subscribe/,
+  "Agent Terminal service should stream through terminalStreamHub"
+);
+
+assert.match(
+  agentTerminalServiceSource,
+  /toolBrokerService\.reject/,
+  "Agent Terminal pending cancel should reject the pending Tool Queue request"
+);
+
+assert.match(
+  agentTerminalServiceSource,
+  /terminalService\.interrupt/,
+  "Agent Terminal running cancel or timeout should interrupt the local terminal"
+);
+
+assert.match(
+  terminalRunStoreSource,
+  /class TerminalRunStore/,
+  "Agent Terminal should have a dedicated TerminalRunStore"
+);
+
+assert.match(
+  terminalStreamHubSource,
+  /class TerminalStreamHub/,
+  "Agent Terminal should have a dedicated TerminalStreamHub"
+);
+
+assert.match(
+  agentTerminalServiceSource,
+  /toolBrokerService\.create/,
+  "Agent Terminal runs should still enter the Tool Queue through Tool Broker"
+);
+
+assert.match(
+  commandGuardServiceSource,
+  /decision:\s*"block"/,
+  "Command Guard should have a block decision"
+);
+
+assert.match(
+  commandGuardServiceSource,
+  /decision:\s*"require-confirmation"/,
+  "Command Guard should require confirmation for elevated commands"
 );
 
 assert.match(
@@ -157,6 +319,12 @@ assert.match(
   relationshipSkillTypesSource,
   new RegExp(`DETACH_AGENT_RELATIONSHIP_SKILL_VERSION\\s*=\\s*"${relationshipSkillVersion.replaceAll(".", "\\.")}"`),
   "shared relationship skill version should match the packaged skill VERSION file"
+);
+
+assert.match(
+  packagedSkillZip.toString("latin1"),
+  new RegExp(relationshipSkillVersion.replaceAll(".", "\\.")),
+  "packaged relationship skill zip should contain the current skill version"
 );
 
 console.log("advancedConnectionDefaults: ok");
