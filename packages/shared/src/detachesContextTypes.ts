@@ -130,6 +130,12 @@ export interface DetachesSessionContext {
       reverseBrokerUrl?: string;
       pid?: number;
     };
+    adminTerminal?: {
+      supported: boolean;
+      active: boolean;
+      controlledBy: "local-ui";
+      note: string;
+    };
     note: string;
   };
   contextExport?: {

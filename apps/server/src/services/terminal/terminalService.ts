@@ -11,7 +11,7 @@ import { platformService, type ShellLaunch } from "../platform/platformService.j
 
 const require = createRequire(import.meta.url);
 
-interface ManagedTerminal {
+export interface ManagedTerminal {
   id: string;
   sessionKey: string;
   status: TerminalStatus;
@@ -102,6 +102,7 @@ class TerminalService {
       terminalId: terminal.id,
       sessionKey: terminal.sessionKey,
       status: terminal.status,
+      privilege: "user",
       createdAt: terminal.createdAt,
       lastActiveAt: terminal.lastActiveAt,
       command: terminal.command

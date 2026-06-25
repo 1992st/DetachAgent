@@ -1,7 +1,17 @@
+import type { EventEmitter } from "node:events";
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { TerminalSocketClientEvent, TerminalSocketServerEvent } from "@detaches/shared";
-import { terminalService } from "../services/terminal/terminalService.js";
+import type { TerminalInfo, TerminalSocketClientEvent, TerminalSocketServerEvent } from "@detaches/shared";
+import { terminalService, type ManagedTerminal } from "../services/terminal/terminalService.js";
+import { adminTerminalService, type AdminTerminalHandle } from "../services/terminal/adminTerminalService.js";
+
+interface TerminalSocketBackend {
+  handle: { emitter: EventEmitter };
+  info(): TerminalInfo;
+  replay(): string;
+  write(data: string): void;
+  resize(cols: number, rows: number): void;
+}
 
 function send(socket: WebSocket, event: TerminalSocketServerEvent): void {
   if (socket.readyState === socket.OPEN) {
@@ -22,17 +32,29 @@ export function attachTerminalSocket(server: HttpServer): void {
 
   wss.on("connection", async (socket, request) => {
     const url = new URL(request.url ?? "", "http://127.0.0.1");
+    if (url.pathname === "/api/terminal/admin/helper") {
+      const token = url.searchParams.get("token") || "";
+      const sessionKey = url.searchParams.get("sessionKey") || "";
+      // 管理员 helper 通过一次性 token 连回本机 websocket，避免其他本机进程伪装成 elevated helper。
+      if (!adminTerminalService.attachHelper(socket, token, sessionKey)) return;
+      return;
+    }
+
     const sessionKey = decodeURIComponent(url.pathname.replace("/api/terminal/", ""));
     const cols = Number(url.searchParams.get("cols") ?? 100);
     const rows = Number(url.searchParams.get("rows") ?? 28);
+    const privilege = url.searchParams.get("privilege") === "administrator" ? "administrator" : "user";
 
     try {
-      const terminal = await terminalService.ensure(sessionKey, cols, rows);
+      // 管理员 terminal 是 UAC helper 维护的独立 session，不是把普通 terminal 原地升级。
+      const terminalApi = privilege === "administrator"
+        ? await adminBackend(sessionKey, cols, rows)
+        : await userBackend(sessionKey, cols, rows);
       const onData = (data: string) => send(socket, { type: "data", data });
-      const onStatus = () => send(socket, { type: "status", terminal: terminalService.info(terminal) });
-      terminal.emitter.on("data", onData);
-      terminal.emitter.on("status", onStatus);
-      send(socket, { type: "ready", terminal: terminalService.info(terminal), replay: terminalService.replay(terminal) });
+      const onStatus = () => send(socket, { type: "status", terminal: terminalApi.info() });
+      terminalApi.handle.emitter.on("data", onData);
+      terminalApi.handle.emitter.on("status", onStatus);
+      send(socket, { type: "ready", terminal: terminalApi.info(), replay: terminalApi.replay() });
 
       socket.on("message", (data) => {
         let event: TerminalSocketClientEvent;
@@ -43,19 +65,41 @@ export function attachTerminalSocket(server: HttpServer): void {
           return;
         }
         if (event.type === "input") {
-          terminalService.write(terminal, event.data);
+          terminalApi.write(event.data);
         } else if (event.type === "resize") {
-          terminalService.resize(terminal, event.cols, event.rows);
+          terminalApi.resize(event.cols, event.rows);
         }
       });
 
       socket.on("close", () => {
-        terminal.emitter.off("data", onData);
-        terminal.emitter.off("status", onStatus);
+        terminalApi.handle.emitter.off("data", onData);
+        terminalApi.handle.emitter.off("status", onStatus);
       });
     } catch (error) {
       send(socket, { type: "error", message: error instanceof Error ? error.message : String(error) });
       socket.close();
     }
   });
+}
+
+async function userBackend(sessionKey: string, cols: number, rows: number): Promise<TerminalSocketBackend> {
+  const terminal: ManagedTerminal = await terminalService.ensure(sessionKey, cols, rows);
+  return {
+    handle: terminal,
+    info: () => terminalService.info(terminal),
+    replay: () => terminalService.replay(terminal),
+    write: (data) => terminalService.write(terminal, data),
+    resize: (nextCols, nextRows) => terminalService.resize(terminal, nextCols, nextRows)
+  };
+}
+
+async function adminBackend(sessionKey: string, cols: number, rows: number): Promise<TerminalSocketBackend> {
+  const terminal: AdminTerminalHandle = await adminTerminalService.ensure(sessionKey, cols, rows);
+  return {
+    handle: terminal,
+    info: () => adminTerminalService.info(terminal, sessionKey),
+    replay: () => adminTerminalService.replay(terminal),
+    write: (data) => adminTerminalService.write(terminal, data),
+    resize: (nextCols, nextRows) => adminTerminalService.resize(terminal, nextCols, nextRows)
+  };
 }

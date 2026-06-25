@@ -22,6 +22,7 @@ import { contextExportService } from "../services/context/contextExportService.j
 import { bootstrapSshIdentity } from "../services/ssh/sshBootstrapService.js";
 import { sshCredentialSessionService } from "../services/ssh/sshCredentialSessionService.js";
 import { localTerminalAppService } from "../services/terminal/localTerminalAppService.js";
+import { adminTerminalService } from "../services/terminal/adminTerminalService.js";
 import { resolveDirectGatewayUrl } from "../services/gateway/gatewayClient.js";
 import { platformService } from "../services/platform/platformService.js";
 import { buildLocalMachineContext } from "../services/platform/localMachineContext.js";
@@ -58,6 +59,46 @@ apiRoutes.post("/terminal/apps/:appId/open", async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
+});
+
+apiRoutes.get("/terminal/admin/:sessionKey/status", async (req, res) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Administrator terminal status is only available from the local Detach Agent UI." });
+    return;
+  }
+  res.json(adminTerminalService.status(decodeURIComponent(req.params.sessionKey)));
+});
+
+apiRoutes.post("/terminal/admin/:sessionKey/enable", async (req, res) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Administrator terminal can only be enabled from the local Detach Agent UI." });
+    return;
+  }
+  try {
+    res.json(await adminTerminalService.enable(decodeURIComponent(req.params.sessionKey)));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/terminal/admin/:sessionKey/disable", async (req, res) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Administrator terminal can only be disabled from the local Detach Agent UI." });
+    return;
+  }
+  try {
+    res.json(await adminTerminalService.disable(decodeURIComponent(req.params.sessionKey)));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.get("/terminal/admin/:sessionKey/debug-launch", async (req, res) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: "Administrator terminal diagnostics are only available from the local Detach Agent UI." });
+    return;
+  }
+  res.json(adminTerminalService.debugLaunch(decodeURIComponent(req.params.sessionKey)));
 });
 
 apiRoutes.post("/agent-terminal/bootstrap", async (req, res) => {
@@ -827,7 +868,8 @@ apiRoutes.post("/context/exports", async (req, res) => {
     const record = contextExportService.create({ sessionKey, sessionMode });
     const context = await buildChatClientContext(sessionMode, sessionKey, [], { createContextExport: false });
     const detaches = context.detaches as DetachesContextExportResponse["detaches"];
-    const baseUrl = detaches.localControl?.baseUrl?.replace(/\/+$/, "") || "";
+    const config = await runtimeConfig();
+    const baseUrl = detaches.localControl?.baseUrl?.replace(/\/+$/, "") || reverseBridgeBaseUrl(config);
     res.json({
       sessionKey: record.sessionKey,
       sessionMode: record.sessionMode,

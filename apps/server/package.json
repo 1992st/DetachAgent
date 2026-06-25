@@ -8,7 +8,7 @@
     "build": "pnpm --filter @detaches/shared build && tsc -p tsconfig.json",
     "typecheck": "pnpm --filter @detaches/shared build && tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm build && node test/platformService.test.mjs && node test/sshCredentialSessionService.test.mjs && node test/interactionBrokerService.test.mjs && node test/advancedConnectionDefaults.test.mjs",
+    "test": "pnpm build && node test/platformService.test.mjs && node test/sshCredentialSessionService.test.mjs && node test/interactionBrokerService.test.mjs && node test/adminTerminalService.test.mjs && node test/advancedConnectionDefaults.test.mjs",
     "start": "node dist/index.js",
     "smoke": "pnpm build && node scripts/smoke-gateway.mjs"
   },

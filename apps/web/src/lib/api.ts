@@ -2,6 +2,7 @@ import type {
   AgentsListResponse,
   AgentTerminalSessionsResponse,
   AgentTerminalSession,
+  AdminTerminalStatusResponse,
   AppHealth,
   ClientIdentity,
   DetachesContextExportCreateResponse,
@@ -394,6 +395,24 @@ export async function testNetwork(): Promise<NetworkTestResponse> {
 
 export async function fetchLocalTerminalApps(): Promise<LocalTerminalAppsResponse> {
   const res = await fetch(apiUrl("/api/terminal/apps"));
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function fetchAdminTerminalStatus(sessionKey: string): Promise<AdminTerminalStatusResponse> {
+  const res = await fetch(apiUrl(`/api/terminal/admin/${encodeURIComponent(sessionKey)}/status`));
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function enableAdminTerminal(sessionKey: string): Promise<AdminTerminalStatusResponse> {
+  const res = await fetch(apiUrl(`/api/terminal/admin/${encodeURIComponent(sessionKey)}/enable`), { method: "POST" });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function disableAdminTerminal(sessionKey: string): Promise<AdminTerminalStatusResponse> {
+  const res = await fetch(apiUrl(`/api/terminal/admin/${encodeURIComponent(sessionKey)}/disable`), { method: "POST" });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }

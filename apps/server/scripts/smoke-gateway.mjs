@@ -528,8 +528,8 @@ async function main() {
     assert.match(userChatSend.message, /\[detaches_agent context\]/);
     assert.match(userChatSend.message, /agentId: agent-alpha/);
     assert.match(userChatSend.message, /remoteAdapter: state=error/);
-    assert.match(userChatSend.message, /contextExport\.consumeUrl/);
-    assert.match(userChatSend.message, /doctor --url/);
+    assert.match(userChatSend.message, /contextExport\.consumeUrl: unavailable/);
+    assert.doesNotMatch(userChatSend.message, /doctor --url/);
     assert.doesNotMatch(userChatSend.message, new RegExp(`toolBroker: gatewayEventEndpoint=${publicBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
     assert.equal(userChatSend.idempotencyKey, "smoke-idempotency");
     assert.equal(userChatSend.clientContext?.app, "detaches_agent");
@@ -548,7 +548,7 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.defaultTarget, "main-agent-machine");
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.supportedTargets?.includes("remote-agent-host"), true);
     assert.equal(userChatSend.clientContext?.detaches?.files?.staged?.[0]?.transfer?.supportedTargets?.includes("main-agent-machine"), true);
-    assert.equal(userChatSend.clientContext?.detaches?.broker?.gatewayEventEndpoint, `${reverseBridgeBaseUrl}/api/tools/events/gateway`);
+    assert.equal(userChatSend.clientContext?.detaches?.broker?.gatewayEventEndpoint, "");
     assert.equal(typeof userChatSend.clientContext?.detaches?.broker?.submitToken, "string");
     assert.equal(userChatSend.clientContext?.detaches?.broker?.submitToken, exportedContextWithToken.detaches.broker.submitToken);
     assert.equal(userChatSend.clientContext?.detaches?.broker?.submitTokenHeader, "Authorization");
@@ -556,9 +556,9 @@ async function main() {
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.oneTime, true);
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.adapterCommand, "context-fetch");
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.doctorCommand, "doctor");
-    assert.equal(userChatSend.clientContext?.detaches?.contextExport?.createdBy, "detaches-ui-reverse-bridge");
+    assert.equal(userChatSend.clientContext?.detaches?.contextExport?.createdBy, "detaches-ui-loopback");
     assert.equal(userChatSend.clientContext?.detaches?.contextExport?.generatedForMessage, true);
-    assert.match(userChatSend.clientContext?.detaches?.contextExport?.consumeUrl, new RegExp(`^${reverseBridgeBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/api/context/exports/`));
+    assert.equal(userChatSend.clientContext?.detaches?.contextExport?.consumeUrl, undefined);
     assert.equal(userChatSend.clientContext?.detaches?.capabilities?.some((capability) => capability.name === "terminal" && capability.supportedTargets.includes("local-user-machine")), true);
     assert.equal(userChatSend.clientContext?.routeContext?.origin?.provider, "detaches_agent");
     assert.equal(userChatSend.attachments, undefined);
@@ -584,31 +584,6 @@ async function main() {
       source: "detaches-ui"
     };
     const brokerSubmitToken = userChatSend.clientContext.detaches.broker.submitToken;
-    const autoDoctorContextPath = path.join(smokeStorageDir, "cache/auto-doctor-context.json");
-    await fs.mkdir(path.dirname(autoDoctorContextPath), { recursive: true });
-    const autoDoctor = await execFileAsync(process.execPath, [
-      adapterCli,
-      "doctor",
-      "--url",
-      userChatSend.clientContext.detaches.contextExport.consumeUrl,
-      "--output-context",
-      autoDoctorContextPath
-    ]);
-    const parsedAutoDoctor = JSON.parse(autoDoctor.stdout);
-    assert.equal(parsedAutoDoctor.ok, true);
-    assert.equal(parsedAutoDoctor.contextSource.type, "one-time-url");
-    assert.equal(parsedAutoDoctor.session.sessionKey, chatSessionKey);
-    assert.equal(parsedAutoDoctor.session.agentId, "agent-alpha");
-    assert.equal(parsedAutoDoctor.broker.submitTokenAvailable, true);
-    assert.equal(parsedAutoDoctor.stagedFiles.length, 1);
-    assert.equal(parsedAutoDoctor.stagedFiles[0].fileId, upload.file.id);
-    assert.match(parsedAutoDoctor.commands.fileTransferBrokerEvent, /file-transfer-request/);
-    const autoDoctorContext = JSON.parse(await fs.readFile(autoDoctorContextPath, "utf8"));
-    assert.equal(autoDoctorContext.sessionKey, chatSessionKey);
-    assert.equal(autoDoctorContext.files.staged[0].fileId, upload.file.id);
-    assert.equal(autoDoctorContext.contextExport.consumeUrl, undefined);
-    const repeatedAutoContextExport = await fetch(userChatSend.clientContext.detaches.contextExport.consumeUrl);
-    assert.equal(repeatedAutoContextExport.status, 404);
 
     const preparedTransfer = await requestJson("/api/files/transfer/prepare", {
       method: "POST",
@@ -790,7 +765,7 @@ async function main() {
     });
     assert.equal(elevatedTerminalTool.request.status, "pending");
     assert.equal(elevatedTerminalTool.request.risk.level, "elevated");
-    assert.match(elevatedTerminalTool.request.risk.reasons.join(" "), /权限/);
+    assert.match(elevatedTerminalTool.request.risk.reasons.join(" "), /elevated\.permissions/);
     const rejectedElevatedApprove = await fetch(`http://${host}:${serverPort}/api/tools/requests/${elevatedTerminalTool.request.id}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -820,7 +795,7 @@ async function main() {
     });
     assert.equal(adapterInstallTool.request.status, "pending");
     assert.equal(adapterInstallTool.request.risk.level, "elevated");
-    assert.match(adapterInstallTool.request.risk.reasons.join(" "), /远端 agent host/);
+    assert.match(adapterInstallTool.request.risk.reasons.join(" "), /Command Guard policy matched/);
     const adapterInstallWithoutConfirmation = await fetch(`http://${host}:${serverPort}/api/tools/requests/${adapterInstallTool.request.id}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -850,7 +825,7 @@ async function main() {
     });
     assert.equal(destructiveTerminalTool.request.status, "blocked");
     assert.equal(destructiveTerminalTool.request.risk.level, "destructive");
-    assert.match(destructiveTerminalTool.request.error, /risk policy/);
+    assert.match(destructiveTerminalTool.request.error, /destructive\.rm-root/);
 
     const blockedTerminalTool = await requestJson("/api/tools/requests", {
       method: "POST",
@@ -891,7 +866,12 @@ async function main() {
       })
     });
     assert.equal(brokerTransfer.request.status, "pending");
-    const approvedBrokerTransfer = await requestJson(`/api/tools/requests/${brokerTransfer.request.id}/approve`, { method: "POST" });
+    assert.equal(brokerTransfer.request.risk.level, "elevated");
+    const approvedBrokerTransfer = await requestJson(`/api/tools/requests/${brokerTransfer.request.id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ riskAccepted: true, actor: decisionActor })
+    });
     assert.equal(approvedBrokerTransfer.request.status, "succeeded");
     assert.match(approvedBrokerTransfer.command, /curl(?:\.exe)? -fL/);
     assert.match(approvedBrokerTransfer.command, /detaches-note-via-broker\.txt/);
@@ -930,7 +910,12 @@ async function main() {
         payload: { fileId: failingUpload.file.id, remotePath: failingTransferPath }
       })
     });
-    const approvedFailingBrokerTransfer = await requestJson(`/api/tools/requests/${failingBrokerTransfer.request.id}/approve`, { method: "POST" });
+    assert.equal(failingBrokerTransfer.request.risk.level, "elevated");
+    const approvedFailingBrokerTransfer = await requestJson(`/api/tools/requests/${failingBrokerTransfer.request.id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ riskAccepted: true, actor: decisionActor })
+    });
     assert.equal(approvedFailingBrokerTransfer.request.status, "failed");
     assert.equal(approvedFailingBrokerTransfer.execution.completed, true);
     assert.notEqual(approvedFailingBrokerTransfer.execution.exitCode, 0);
@@ -1076,25 +1061,8 @@ async function main() {
     assert.equal(compatAttempts[0].clientContext?.app, "detaches_agent");
     assert.equal(compatAttempts[1].clientContext, undefined);
     assert.match(compatAttempts[1].message, /\[detaches_agent compatibility context\]/);
-    assert.match(compatAttempts[1].message, /contextExport\.consumeUrl: http:\/\/127\.0\.0\.1:39888\/api\/context\/exports\//);
-    assert.match(compatAttempts[1].message, /doctor --url/);
-    const fallbackUrl = /contextExport\.consumeUrl: (http:\/\/[^\s]+)/.exec(compatAttempts[1].message)?.[1];
-    assert.equal(typeof fallbackUrl, "string");
-    const fallbackDoctorContextPath = path.join(smokeStorageDir, "cache/fallback-doctor-context.json");
-    const fallbackDoctor = await execFileAsync(process.execPath, [
-      adapterCli,
-      "doctor",
-      "--url",
-      fallbackUrl,
-      "--output-context",
-      fallbackDoctorContextPath
-    ]);
-    const parsedFallbackDoctor = JSON.parse(fallbackDoctor.stdout);
-    assert.equal(parsedFallbackDoctor.ok, true);
-    assert.equal(parsedFallbackDoctor.contextSource.type, "one-time-url");
-    assert.equal(parsedFallbackDoctor.session.sessionKey, chatSessionKey);
-    const repeatedFallbackContextExport = await fetch(fallbackUrl);
-    assert.equal(repeatedFallbackContextExport.status, 404);
+    assert.match(compatAttempts[1].message, /contextExport\.consumeUrl: unavailable/);
+    assert.doesNotMatch(compatAttempts[1].message, /doctor --url/);
 
     chat.send(JSON.stringify({ type: "abort", runId: "run-smoke-1" }));
     while (!observed.abort) {

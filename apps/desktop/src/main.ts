@@ -12,6 +12,26 @@ const __dirname = path.dirname(__filename);
 let mainWindow: BrowserWindow | null = null;
 let serverProcess: ChildProcessWithoutNullStreams | null = null;
 
+function isDesktopDevMode(): boolean {
+  return isDev || process.env.DETACHES_DESKTOP_DEV === "1";
+}
+
+function repoRoot(): string {
+  return path.resolve(__dirname, "../../..");
+}
+
+function configureElectronRuntime(): void {
+  if (process.platform !== "win32" || !isDesktopDevMode()) return;
+
+  const userDataDir = process.env.DETACHES_DESKTOP_USER_DATA_DIR || path.join(repoRoot(), ".tmp-electron-user-data");
+  fs.mkdirSync(userDataDir, { recursive: true });
+  app.setPath("userData", userDataDir);
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+}
+
+configureElectronRuntime();
+
 function log(message: string): void {
   const line = `[${new Date().toISOString()}] ${message}\n`;
   console.log(message);
@@ -23,19 +43,15 @@ function log(message: string): void {
   }
 }
 
-function repoRoot(): string {
-  return path.resolve(__dirname, "../../..");
-}
-
 function serverEntry(): string {
-  if (isDev || process.env.DETACHES_DESKTOP_DEV === "1") {
+  if (isDesktopDevMode()) {
     return path.join(repoRoot(), "apps", "server", "dist", "index.js");
   }
   return path.join(process.resourcesPath, "app", "server", "dist", "index.js");
 }
 
 function serverRuntimeRoot(): string {
-  if (isDev || process.env.DETACHES_DESKTOP_DEV === "1") {
+  if (isDesktopDevMode()) {
     return path.join(repoRoot(), "apps", "server");
   }
   return path.join(process.resourcesPath, "app", "server");
@@ -47,8 +63,21 @@ function serverOrigin(): string {
   return `http://${host === "0.0.0.0" ? "127.0.0.1" : host}:${port}`;
 }
 
+async function isServerReady(timeoutMs = 800): Promise<boolean> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${serverOrigin()}/api/health`, { signal: controller.signal });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function webEntry(): string {
-  if (isDev || process.env.DETACHES_DESKTOP_DEV === "1") {
+  if (isDesktopDevMode()) {
     return process.env.DETACHES_WEB_URL || "http://127.0.0.1:5173";
   }
   const url = new URL(pathToFileURL(path.join(process.resourcesPath, "app", "web", "dist", "index.html")).toString());
@@ -64,14 +93,18 @@ function serverEnv(): NodeJS.ProcessEnv {
     ELECTRON_RUN_AS_NODE: "1",
     NODE_PATH: existingNodePath ? `${runtimeNodePath}${path.delimiter}${existingNodePath}` : runtimeNodePath
   };
-  if (!isDev && process.env.DETACHES_DESKTOP_DEV !== "1") {
+  if (!isDesktopDevMode()) {
     env.DETACHES_RESOURCES_DIR = process.resourcesPath;
   }
   return env;
 }
 
-function startServer(): void {
+async function startServer(): Promise<void> {
   if (serverProcess) return;
+  if (await isServerReady()) {
+    log(`server already running ${serverOrigin()}/api/health; reusing existing server`);
+    return;
+  }
   const entry = serverEntry();
   const env = serverEnv();
   log(`starting server entry=${entry} resourcesPath=${process.resourcesPath} nodePath=${env.NODE_PATH ?? ""}`);
@@ -155,7 +188,7 @@ async function createWindow(): Promise<void> {
 }
 
 app.on("ready", async () => {
-  startServer();
+  await startServer();
   await waitForServerReady();
   await createWindow();
 });

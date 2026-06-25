@@ -20,6 +20,13 @@ const terminalLeaseServiceSource = fs.readFileSync(path.join(repoRoot, "apps/ser
 const terminalRunStoreSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/agentTerminal/terminalRunStore.ts"), "utf8");
 const terminalStreamHubSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/agentTerminal/terminalStreamHub.ts"), "utf8");
 const commandGuardServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/tools/commandGuardService.ts"), "utf8");
+const toolBrokerServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/tools/toolBrokerService.ts"), "utf8");
+const adminTerminalServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/terminal/adminTerminalService.ts"), "utf8");
+const adminTerminalHelperSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/terminal/adminTerminalHelper.ts"), "utf8");
+const terminalSocketSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/ws/terminalSocket.ts"), "utf8");
+const terminalTypesSource = fs.readFileSync(path.join(repoRoot, "packages/shared/src/terminalTypes.ts"), "utf8");
+const detachesContextTypesSource = fs.readFileSync(path.join(repoRoot, "packages/shared/src/detachesContextTypes.ts"), "utf8");
+const terminalPanelSource = fs.readFileSync(path.join(repoRoot, "apps/web/src/features/terminal/TerminalPanel.tsx"), "utf8");
 
 assert.match(
   appConfigSource,
@@ -283,6 +290,126 @@ assert.match(
   commandGuardServiceSource,
   /decision:\s*"require-confirmation"/,
   "Command Guard should require confirmation for elevated commands"
+);
+
+assert.match(
+  terminalTypesSource,
+  /export type TerminalPrivilege = "user" \| "administrator"/,
+  "terminal info should distinguish user and administrator privilege"
+);
+
+assert.match(
+  adminTerminalServiceSource,
+  /\(this\.options\.platform \|\| platformService\.currentNodePlatform\(\)\) === "win32"/,
+  "administrator terminal service should be Windows-only"
+);
+
+assert.match(
+  adminTerminalServiceSource,
+  /\$psi\.Verb = 'runas'/,
+  "administrator terminal should launch through UAC with ShellExecute runas"
+);
+
+assert.match(
+  adminTerminalServiceSource,
+  /-EncodedCommand/,
+  "administrator terminal UAC launcher should use an encoded elevated PowerShell script"
+);
+
+assert.match(
+  adminTerminalServiceSource,
+  /crypto\.randomBytes\(32\)\.toString\("base64url"\)/,
+  "administrator helper handshake should use an opaque one-time token"
+);
+
+assert.match(
+  adminTerminalServiceSource,
+  /GLOBAL_ADMIN_SESSION_KEY = "local-admin-terminal"/,
+  "administrator terminal should be one local-global helper, not one helper per chat session"
+);
+
+assert.match(
+  apiRoutesSource,
+  /\/terminal\/admin\/:sessionKey\/debug-launch/,
+  "administrator terminal diagnostics should expose a local debug-launch endpoint"
+);
+
+assert.match(
+  apiRoutesSource,
+  /Administrator terminal diagnostics are only available from the local Detach Agent UI/,
+  "administrator terminal diagnostics should remain loopback-only"
+);
+
+assert.match(
+  adminTerminalHelperSource,
+  /process\.platform !== "win32"/,
+  "administrator helper should refuse non-Windows platforms"
+);
+
+assert.match(
+  adminTerminalHelperSource,
+  /spawn\(powerShellExe\(\)/,
+  "administrator helper should own the elevated PowerShell PTY"
+);
+
+assert.match(
+  terminalSocketSource,
+  /privilege"\) === "administrator"/,
+  "terminal websocket should route by privilege query parameter"
+);
+
+assert.match(
+  terminalSocketSource,
+  /adminTerminalService\.attachHelper\(socket, token, sessionKey\)/,
+  "terminal websocket should accept elevated helper callbacks through token attach"
+);
+
+assert.match(
+  terminalSocketSource,
+  /管理员 terminal 是 UAC helper 维护的独立 session，不是把普通 terminal 原地升级/,
+  "terminal websocket should document the admin/user routing boundary"
+);
+
+assert.match(
+  toolBrokerServiceSource,
+  /adminTerminalService\.isActive\(request\.sessionKey\)/,
+  "Tool Broker should select the administrator backend only when the local UI enabled it"
+);
+
+assert.match(
+  toolBrokerServiceSource,
+  /Command Guard 和 Tool Queue 审批/,
+  "Tool Broker should document that administrator terminal does not bypass approval"
+);
+
+assert.match(
+  detachesContextTypesSource,
+  /adminTerminal\?:/,
+  "structured detaches context should expose administrator terminal state"
+);
+
+assert.match(
+  clientContextSource,
+  /Main Agent cannot enable it directly/,
+  "readable context should tell Main Agent administrator terminal is controlled by local UI"
+);
+
+assert.match(
+  terminalPanelSource,
+  /ShieldCheck/,
+  "terminal UI should show a distinct administrator shield icon"
+);
+
+assert.match(
+  terminalPanelSource,
+  /privilege/,
+  "terminal UI websocket should request user or administrator privilege explicitly"
+);
+
+assert.match(
+  terminalPanelSource,
+  /灰色表示普通权限；蓝色表示管理员 helper 已连接/,
+  "terminal UI should document gray versus blue administrator button state"
 );
 
 assert.match(

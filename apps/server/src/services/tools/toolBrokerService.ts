@@ -31,6 +31,7 @@ import { fileTransferService } from "../files/fileTransferService.js";
 import { mainAgentFileTransferService } from "../files/mainAgentFileTransferService.js";
 import { gatewayClient } from "../gateway/gatewayClient.js";
 import { terminalService } from "../terminal/terminalService.js";
+import { adminTerminalService } from "../terminal/adminTerminalService.js";
 import { openclawDetachesAdapterService } from "../adapters/openclawDetachesAdapterService.js";
 import { platformService } from "../platform/platformService.js";
 import { commandGuardService } from "./commandGuardService.js";
@@ -67,6 +68,7 @@ interface ToolExecutionRecord {
   wrappedCommand: string;
   createdAt: string;
   mode?: "terminal" | "direct";
+  privilege?: "user" | "administrator";
   completedAt?: string;
   exitCode?: number;
   output?: string;
@@ -463,7 +465,9 @@ class ToolBrokerService {
         result
       };
     }
-    const snapshot = await terminalService.snapshot(execution.sessionKey);
+    const snapshot = execution.privilege === "administrator"
+      ? adminTerminalService.snapshot(execution.sessionKey)
+      : await terminalService.snapshot(execution.sessionKey);
     const parsed = parseExecutionOutput(snapshot.replay, execution);
     const result = this.buildExecutionResult(request, execution, parsed);
     return {
@@ -565,9 +569,15 @@ class ToolBrokerService {
 
   private async runInTerminal(request: ToolRequestRecord, command: string, options: { requireInteractive?: boolean } = {}): Promise<ToolExecutionRecord> {
     const executionId = nanoid();
-    const before = await terminalService.snapshot(request.sessionKey, { requireInteractive: options.requireInteractive });
     const wrappedCommand = wrapCommandForCompletion(command, executionId);
-    const terminal = await terminalService.runCommand(request.sessionKey, wrappedCommand, { requireInteractive: options.requireInteractive });
+    const useAdminTerminal = adminTerminalService.isActive(request.sessionKey);
+    // 管理员 terminal 只由用户在本机 UI 显式开启；即使 active，每条命令仍然先经过 Command Guard 和 Tool Queue 审批。
+    const before = useAdminTerminal
+      ? adminTerminalService.snapshot(request.sessionKey)
+      : await terminalService.snapshot(request.sessionKey, { requireInteractive: options.requireInteractive });
+    const terminal = useAdminTerminal
+      ? await adminTerminalService.runCommand(request.sessionKey, wrappedCommand)
+      : await terminalService.runCommand(request.sessionKey, wrappedCommand, { requireInteractive: options.requireInteractive });
     const execution: ToolExecutionRecord = {
       executionId,
       requestId: request.id,
@@ -578,6 +588,7 @@ class ToolBrokerService {
       wrappedCommand,
       createdAt: new Date().toISOString(),
       mode: "terminal",
+      privilege: useAdminTerminal ? "administrator" : "user",
       forwardStatus: "not-started"
     };
     this.executions.set(execution.executionId, execution);

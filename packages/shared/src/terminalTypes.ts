@@ -1,9 +1,11 @@
 export type TerminalStatus = "starting" | "connected" | "exited" | "error";
+export type TerminalPrivilege = "user" | "administrator";
 
 export interface TerminalInfo {
   terminalId: string;
   sessionKey: string;
   status: TerminalStatus;
+  privilege: TerminalPrivilege;
   createdAt: string;
   lastActiveAt: string;
   command: string;
@@ -25,6 +27,15 @@ export interface LocalTerminalOpenResponse {
   ok: boolean;
   app: LocalTerminalApp;
   message: string;
+}
+
+export interface AdminTerminalStatusResponse {
+  ok: boolean;
+  supported: boolean;
+  active: boolean;
+  sessionKey?: string;
+  terminal?: TerminalInfo;
+  message?: string;
 }
 
 export type TerminalSocketServerEvent =

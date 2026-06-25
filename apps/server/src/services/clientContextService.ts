@@ -8,6 +8,7 @@ import { brokerTokenService } from "./tools/brokerTokenService.js";
 import { contextExportService } from "./context/contextExportService.js";
 import { buildLocalMachineContext } from "./platform/localMachineContext.js";
 import { sshTunnelService } from "./tunnel/sshTunnelService.js";
+import { adminTerminalService } from "./terminal/adminTerminalService.js";
 
 function deviceShortId(deviceId: string): string {
   return deviceId.replace(/[^a-z0-9]/gi, "").slice(0, 12).toLowerCase() || "local";
@@ -118,6 +119,7 @@ export async function buildDetachesSessionContext(
   const terminalChannels = buildTerminalChannels(config, reverseBridgeStatus);
   const preferredHttp = selectedHttpChannel(terminalChannels);
   const baseUrl = preferredHttp?.baseUrl || "";
+  const adminTerminalStatus = adminTerminalService.status(sessionKey);
   const contextExportRecord = options.createContextExport
     ? contextExportService.create({ sessionKey, sessionMode, attachments })
     : null;
@@ -199,6 +201,14 @@ export async function buildDetachesSessionContext(
         reverseBrokerUrl: reverseBridgeStatus.reverseBrokerUrl,
         pid: reverseBridgeStatus.pid
       },
+      adminTerminal: {
+        supported: adminTerminalStatus.supported,
+        active: adminTerminalStatus.active,
+        controlledBy: "local-ui",
+        note: adminTerminalStatus.active
+          ? "User-enabled Windows administrator terminal is active for this session; command routing still goes through Tool Queue approval."
+          : "Administrator terminal can only be enabled or disabled by the user's local UI shield button."
+      },
       note: localControlNote(terminalChannels)
     },
     contextExport: {
@@ -254,6 +264,9 @@ export async function buildDetachesSessionContext(
       "This conversation is mediated by detaches_agent, not plain webchat.",
       `The user's local machine is ${localMachine.os}; local-user-machine terminal commands must use ${localMachine.commandDialect} syntax and ${localMachine.pathStyle} paths.`,
       "The bound terminal runs on the user's local machine and is hidden unless the user opens it.",
+      adminTerminalStatus.active
+        ? "Windows administrator terminal is active for this detaches_agent session; local-user-machine terminal commands will run in the user-enabled administrator terminal after Tool Queue approval."
+        : "Windows administrator terminal is not active unless the user explicitly enables it in the Detach Agent UI.",
       "Tools are never executed by assistant text alone; every tool request must use an approved fenced request block.",
       "Do not claim a file was read, transferred, downloaded, archived, or modified until the approved tool execution output proves it.",
       remoteAdapter?.state === "ready"
@@ -306,6 +319,7 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
   const remoteAdapter = context.adapterStatus?.remoteAgentHost;
   const consumeUrl = context.contextExport?.consumeUrl;
   const localMachine = context.localMachine;
+  const adminTerminalActive = adminTerminalService.status(context.sessionKey).active;
   const terminalChannelLines = renderTerminalChannelLines(context);
   return [
     "[detaches_agent context]",
@@ -318,6 +332,7 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
     `localMachine.shell: ${localMachine?.shell || "unknown"}`,
     `localMachine.commandDialect: ${localMachine?.commandDialect || "unknown"}`,
     `localMachine.pathStyle: ${localMachine?.pathStyle || "unknown"}`,
+    `localMachine.adminTerminalActive: ${adminTerminalActive}`,
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}`,
     ...terminalChannelLines,
     consumeUrl ? `contextExport.consumeUrl: ${consumeUrl}` : "contextExport.consumeUrl: unavailable",
@@ -332,6 +347,9 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
     localMachineCommandRule(localMachine),
     callbackEndpointRule(context),
     "Local terminal control does not use SSH. Do not ask for the user's local SSH username/password/port. The user only approves the tool request; ordinary local terminal commands must not trigger an SSH password dialog.",
+    adminTerminalActive
+      ? "Windows administrator terminal is currently active because the user enabled it in the local UI. It still requires Tool Queue approval for each command."
+      : "Windows administrator terminal is not active. The Main Agent cannot enable it directly; the user must use the local UI shield button first.",
     "SSH is used only for reverse bridge reachability, saving staged files to the Main Agent machine, or a user-approved SSH credential/login request.",
     "Do not ask for broker tokens or endpoint names for terminal commands. Use terminal-run --host; contextExport remains a compatibility/bootstrap path only.",
     "Every tool request must be approved through detaches_agent. Do not claim that a command, file read, transfer, download, archive, or modification is complete until approved tool output proves it.",
@@ -343,6 +361,7 @@ export function renderDetachesClientContextFallback(context: DetachesSessionCont
   const consumeUrl = context.contextExport?.consumeUrl;
   const remoteAdapter = context.adapterStatus?.remoteAgentHost;
   const localMachine = context.localMachine;
+  const adminTerminalActive = adminTerminalService.status(context.sessionKey).active;
   const terminalChannelLines = renderTerminalChannelLines(context);
   return [
     "[detaches_agent compatibility context]",
@@ -355,6 +374,7 @@ export function renderDetachesClientContextFallback(context: DetachesSessionCont
     `localMachine.shell: ${localMachine?.shell || "unknown"}`,
     `localMachine.commandDialect: ${localMachine?.commandDialect || "unknown"}`,
     `localMachine.pathStyle: ${localMachine?.pathStyle || "unknown"}`,
+    `localMachine.adminTerminalActive: ${adminTerminalActive}`,
     `remoteAdapter: state=${remoteAdapter?.state || "unknown"}`,
     ...terminalChannelLines,
     consumeUrl ? `contextExport.consumeUrl: ${consumeUrl}` : "contextExport.consumeUrl: unavailable",
@@ -368,6 +388,9 @@ export function renderDetachesClientContextFallback(context: DetachesSessionCont
     "Terminal source mapping: terminal-run is the primary gateway-terminal runtime; source=text-extract is chat-terminal compatibility fallback.",
     localMachineCommandRule(localMachine),
     "The local terminal path does not use SSH. Do not ask for the user's local SSH username/password/port, and do not ask the user to manually run ssh -R, scp, copy broker tokens, or find a local IP.",
+    adminTerminalActive
+      ? "Windows administrator terminal is currently active because the user enabled it in the local UI. It still requires Tool Queue approval for each command."
+      : "Windows administrator terminal is not active. The Main Agent cannot enable it directly; the user must use the local UI shield button first.",
     "Do not ask for broker tokens or endpoint names for terminal commands. Use terminal-run --host; contextExport remains a compatibility/bootstrap path only.",
     "Tool requests still require detaches_agent UI approval. Do not claim that a command, file read, transfer, download, archive, or modification is complete until approved tool output proves it."
   ].join("\n");

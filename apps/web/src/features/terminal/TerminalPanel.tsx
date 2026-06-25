@@ -1,10 +1,10 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { Copy, Eraser, Minimize2, TerminalSquare, X } from "lucide-react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { Copy, Eraser, Minimize2, Shield, ShieldCheck, TerminalSquare, X } from "lucide-react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import type { TerminalInfo, TerminalSocketServerEvent } from "@detaches/shared";
-import { wsUrl } from "../../lib/api.js";
+import type { AdminTerminalStatusResponse, TerminalInfo, TerminalPrivilege, TerminalSocketServerEvent } from "@detaches/shared";
+import { disableAdminTerminal, enableAdminTerminal, fetchAdminTerminalStatus, wsUrl } from "../../lib/api.js";
 
 interface Props {
   sessionKey: string | null;
@@ -14,6 +14,9 @@ interface Props {
   autoOpenKey?: string | null;
   onClose?: () => void;
 }
+
+const ADMIN_STATUS_POLL_MS = 1500;
+const ADMIN_ENABLE_WAIT_MS = 60_000;
 
 export interface TerminalPanelHandle {
   reveal: () => void;
@@ -31,11 +34,16 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
   const [minimized, setMinimized] = useState(false);
   const [status, setStatus] = useState<TerminalInfo | null>(null);
   const [socketState, setSocketState] = useState("idle");
+  const [privilege, setPrivilege] = useState<TerminalPrivilege>("user");
+  const [adminStatus, setAdminStatus] = useState<AdminTerminalStatusResponse | null>(null);
+  const [adminBusy, setAdminBusy] = useState(false);
+  const [adminError, setAdminError] = useState<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const outputRef = useRef("");
+  const mountedRef = useRef(true);
 
   useImperativeHandle(ref, () => ({
     reveal() {
@@ -43,6 +51,49 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
       setMinimized(false);
     }
   }), []);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const refreshAdminStatus = useCallback(async (): Promise<AdminTerminalStatusResponse | null> => {
+    if (!sessionKey) return null;
+    try {
+      const next = await fetchAdminTerminalStatus(sessionKey);
+      if (!mountedRef.current) return next;
+      setAdminStatus(next);
+      if (next.supported && next.active && privilege !== "administrator") {
+        setPrivilege("administrator");
+      } else if (next.supported && !next.active && privilege === "administrator") {
+        setPrivilege("user");
+      }
+      if (next.ok || !next.message) setAdminError(null);
+      return next;
+    } catch (error) {
+      if (mountedRef.current) setAdminError(error instanceof Error ? error.message : String(error));
+      return null;
+    }
+  }, [privilege, sessionKey]);
+
+  useEffect(() => {
+    if (!sessionKey) {
+      setAdminStatus(null);
+      setAdminError(null);
+      setPrivilege("user");
+      return;
+    }
+    let cancelled = false;
+    void refreshAdminStatus();
+    const timer = window.setInterval(() => {
+      if (!cancelled) void refreshAdminStatus();
+    }, ADMIN_STATUS_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [refreshAdminStatus, sessionKey]);
 
   useEffect(() => {
     socketRef.current?.close();
@@ -55,14 +106,21 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
       return;
     }
 
-    const params = new URLSearchParams({ cols: "120", rows: "32" });
+    const params = new URLSearchParams({ cols: "120", rows: "32", privilege });
     const ws = new WebSocket(wsUrl(`/api/terminal/${encodeURIComponent(sessionKey)}?${params}`));
     socketRef.current = ws;
     setSocketState("connecting");
-    ws.onopen = () => setSocketState("connected");
-    ws.onclose = () => setSocketState("closed");
-    ws.onerror = () => setSocketState("error");
+    ws.onopen = () => {
+      if (socketRef.current === ws) setSocketState("connected");
+    };
+    ws.onclose = () => {
+      if (socketRef.current === ws) setSocketState("closed");
+    };
+    ws.onerror = () => {
+      if (socketRef.current === ws) setSocketState("error");
+    };
     ws.onmessage = (event) => {
+      if (socketRef.current !== ws) return;
       const data = JSON.parse(event.data) as TerminalSocketServerEvent;
       if (data.type === "ready") {
         setStatus(data.terminal);
@@ -81,7 +139,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
       }
     };
     return () => ws.close();
-  }, [emptyText, sessionKey]);
+  }, [privilege, sessionKey]);
 
   useEffect(() => {
     if (!open || minimized || !terminalHostRef.current || terminalRef.current) return;
@@ -149,52 +207,137 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
     terminalRef.current?.clear();
   }
 
+  async function waitForAdminActive(): Promise<AdminTerminalStatusResponse | null> {
+    const deadline = Date.now() + ADMIN_ENABLE_WAIT_MS;
+    let latest: AdminTerminalStatusResponse | null = null;
+    while (mountedRef.current && Date.now() < deadline) {
+      latest = await refreshAdminStatus();
+      if (latest?.active) return latest;
+      if (latest && !latest.ok && latest.message) return latest;
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    }
+    return latest;
+  }
+
+  async function toggleAdminTerminal() {
+    if (!sessionKey || adminBusy) return;
+    setAdminBusy(true);
+    setAdminError(null);
+    try {
+      if (adminStatus?.active) {
+        const next = await disableAdminTerminal(sessionKey);
+        setAdminStatus(next);
+        setPrivilege("user");
+        return;
+      }
+
+      const launched = await enableAdminTerminal(sessionKey);
+      setAdminStatus(launched);
+      if (!launched.supported) {
+        setAdminError(launched.message || "Administrator terminal is only supported on Windows.");
+        return;
+      }
+      if (!launched.ok && launched.message) {
+        setAdminError(launched.message);
+        return;
+      }
+      const active = launched.active ? launched : await waitForAdminActive();
+      if (active?.active) {
+        setAdminStatus(active);
+        setPrivilege("administrator");
+      } else {
+        setAdminError(active?.message || "Administrator terminal helper did not connect before the timeout.");
+      }
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (mountedRef.current) setAdminBusy(false);
+    }
+  }
+
+  const adminActive = adminStatus?.active === true;
+  const adminSupported = adminStatus?.supported !== false;
+  const terminalLabel = `${status?.privilege === "administrator" ? "admin " : ""}${status?.status ?? socketState}`;
+  const adminTitle = adminActive
+    ? "Close administrator terminal"
+    : adminBusy
+      ? "Waiting for Windows UAC confirmation"
+      : adminSupported
+        ? "Request administrator terminal"
+        : "Administrator terminal is Windows-only";
+  const AdminIcon = adminActive ? ShieldCheck : Shield;
+
+  function renderAdminButton(variant: "toggle" | "mini" | "toolbar") {
+    return (
+      <button
+        type="button"
+        className={`admin-terminal-button ${variant} ${adminActive ? "active" : ""}`}
+        title={adminTitle}
+        aria-label={adminTitle}
+        aria-pressed={adminActive}
+        onClick={() => void toggleAdminTerminal()}
+        disabled={!sessionKey || adminBusy || !adminSupported}
+      >
+        <AdminIcon size={variant === "toolbar" ? 15 : 16} />
+      </button>
+    );
+  }
+
   return (
     <section className={`terminal-panel ${className} ${open ? "open" : ""} ${minimized ? "minimized" : ""}`}>
-      <button type="button" className="terminal-toggle" onClick={() => setOpen((value) => !value)} disabled={!sessionKey}>
-        <TerminalSquare size={16} />
-        <span>{title}</span>
-        <small>{status?.status ?? socketState}</small>
-      </button>
-      {open && minimized ? (
-        <button type="button" className="terminal-mini" onClick={() => setMinimized(false)} disabled={!sessionKey}>
-          <TerminalSquare size={15} />
+      <div className="terminal-toggle-row">
+        {/* 灰色表示普通权限；蓝色表示管理员 helper 已连接，但每条命令仍然需要 Tool Queue 审批。 */}
+        {renderAdminButton("toggle")}
+        <button type="button" className="terminal-toggle" onClick={() => setOpen((value) => !value)} disabled={!sessionKey}>
+          <TerminalSquare size={16} />
           <span>{title}</span>
-          <small>{status?.status ?? socketState}</small>
+          <small>{terminalLabel}</small>
         </button>
+      </div>
+      {open && minimized ? (
+        <div className="terminal-mini-row">
+          {renderAdminButton("mini")}
+          <button type="button" className="terminal-mini" onClick={() => setMinimized(false)} disabled={!sessionKey}>
+            <TerminalSquare size={15} />
+            <span>{title}</span>
+            <small>{terminalLabel}</small>
+          </button>
+        </div>
       ) : null}
       {open && !minimized ? (
         <div className="terminal-popover" role="dialog" aria-label="Local terminal">
           <div className="terminal-body">
-          <div className="terminal-toolbar">
-            <div>
-              <strong>{title}</strong>
-              <small>{sessionKey}</small>
+            <div className="terminal-toolbar">
+              <div>
+                <strong>{title}</strong>
+                <small>{sessionKey}</small>
+              </div>
+              <div className="terminal-actions">
+                {renderAdminButton("toolbar")}
+                <button type="button" className="icon-button" title="Copy terminal output" onClick={() => void copyOutput()}>
+                  <Copy size={15} />
+                </button>
+                <button type="button" className="icon-button" title="Clear view" onClick={clearOutput}>
+                  <Eraser size={15} />
+                </button>
+                <button type="button" className="icon-button" title="Minimize terminal" onClick={() => setMinimized(true)}>
+                  <Minimize2 size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  title="Close terminal"
+                  onClick={() => {
+                    setOpen(false);
+                    onClose?.();
+                  }}
+                >
+                  <X size={15} />
+                </button>
+              </div>
             </div>
-            <div className="terminal-actions">
-              <button type="button" className="icon-button" title="Copy terminal output" onClick={() => void copyOutput()}>
-                <Copy size={15} />
-              </button>
-              <button type="button" className="icon-button" title="Clear view" onClick={clearOutput}>
-                <Eraser size={15} />
-              </button>
-              <button type="button" className="icon-button" title="缩小 terminal" onClick={() => setMinimized(true)}>
-                <Minimize2 size={15} />
-              </button>
-              <button
-                type="button"
-                className="icon-button"
-                title="关闭 terminal"
-                onClick={() => {
-                  setOpen(false);
-                  onClose?.();
-                }}
-              >
-                <X size={15} />
-              </button>
-            </div>
-          </div>
-          <div className="terminal-output" ref={terminalHostRef} data-empty-text={emptyText} />
+            {adminError ? <div className="terminal-admin-error">{adminError}</div> : null}
+            <div className="terminal-output" ref={terminalHostRef} data-empty-text={emptyText} />
           </div>
         </div>
       ) : null}
