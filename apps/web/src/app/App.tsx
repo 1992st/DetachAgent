@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, FileText, KeyRound, Wifi, X } from "lucide-react";
-import type { AgentSummary, AppHealth, ChatSessionMode, ClientIdentity, InteractionRecord, LocalTerminalApp, RelationshipSkillStatus, SshCredentialSessionSnapshot, ToolBrokerSocketEvent, UploadedFileRef } from "@detaches/shared";
-import { dismissSshSessionPassword, fetchAgents, fetchClientIdentity, fetchDiagnostics, fetchHealth, fetchLocalTerminalApps, fetchSettings, openLocalTerminalApp, rejectInteraction, resolveInteraction, submitSshSessionPassword, uploadFile, wsUrl } from "../lib/api.js";
+import type { AgentSummary, AgentTerminalSession, AppHealth, ChatSessionMode, ClientIdentity, InteractionRecord, LocalTerminalApp, RelationshipSkillStatus, SshCredentialSessionSnapshot, ToolBrokerSocketEvent, ToolRequestRecord, UploadedFileRef } from "@detaches/shared";
+import { approveToolRequest, authorizeAgentTerminalSession, dismissSshSessionPassword, fetchAgents, fetchAgentTerminalSessions, fetchClientIdentity, fetchDiagnostics, fetchHealth, fetchLocalTerminalApps, fetchSettings, fetchToolRequests, openLocalTerminalApp, rejectInteraction, rejectToolRequest, resolveInteraction, submitSshSessionPassword, uploadFile, wsUrl } from "../lib/api.js";
 import { ConnectionBar } from "../features/connection/ConnectionBar.js";
 import { AgentList } from "../features/agents/AgentList.js";
 import { ChatPanel, type ChatPanelHandle } from "../features/chat/ChatPanel.js";
@@ -43,6 +43,12 @@ export function App() {
   const [relationshipSkillRequiredVersion, setRelationshipSkillRequiredVersion] = useState<string | undefined>(undefined);
   const [relationshipSkillCheckNonce, setRelationshipSkillCheckNonce] = useState(0);
   const [relationshipSkillPromptOpen, setRelationshipSkillPromptOpen] = useState(false);
+  const [agentTerminalSession, setAgentTerminalSession] = useState<AgentTerminalSession | null>(null);
+  const [agentTerminalBusy, setAgentTerminalBusy] = useState(false);
+  const [agentTerminalError, setAgentTerminalError] = useState<string | null>(null);
+  const [agentTerminalToolRequest, setAgentTerminalToolRequest] = useState<ToolRequestRecord | null>(null);
+  const [agentTerminalToolBusy, setAgentTerminalToolBusy] = useState(false);
+  const [agentTerminalToolError, setAgentTerminalToolError] = useState<string | null>(null);
   const chatPanelRef = useRef<ChatPanelHandle | null>(null);
 
   const refreshHealth = useCallback(async () => {
@@ -131,6 +137,46 @@ export function App() {
     ws.onerror = () => ws.close();
     return () => ws.close();
   }, []);
+
+  const refreshAgentTerminalAuthorization = useCallback(async () => {
+    try {
+      const response = await fetchAgentTerminalSessions();
+      setAgentTerminalSession((current) => {
+        const currentStillPending = current
+          ? response.sessions.find((session) => session.terminalSessionId === current.terminalSessionId && session.state === "pending_authorization")
+          : null;
+        if (currentStillPending) return currentStillPending;
+        return response.sessions.find((session) => session.state === "pending_authorization") ?? null;
+      });
+    } catch {
+      // Agent Terminal authorization is opportunistic UI state; connection errors are shown by health/status surfaces.
+    }
+  }, []);
+
+  const refreshAgentTerminalToolApproval = useCallback(async () => {
+    try {
+      const response = await fetchToolRequests({ status: "pending", limit: 100 });
+      setAgentTerminalToolRequest((current) => {
+        const currentStillPending = current
+          ? response.requests.find((request) => request.id === current.id && isGatewayTerminalRequest(request))
+          : null;
+        if (currentStillPending) return currentStillPending;
+        return response.requests.find(isGatewayTerminalRequest) ?? null;
+      });
+    } catch {
+      // Tool Queue page and connection status surfaces own request-list errors.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAgentTerminalAuthorization();
+    void refreshAgentTerminalToolApproval();
+    const interval = window.setInterval(() => {
+      void refreshAgentTerminalAuthorization();
+      void refreshAgentTerminalToolApproval();
+    }, 2000);
+    return () => window.clearInterval(interval);
+  }, [refreshAgentTerminalAuthorization, refreshAgentTerminalToolApproval]);
 
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
   const selectedSessionScope = selectedAgent ? sessionScopeKey(selectedAgent.id, sessionMode) : null;
@@ -249,6 +295,55 @@ export function App() {
     }
   }
 
+  async function handleAuthorizeAgentTerminalSession() {
+    if (!agentTerminalSession) return;
+    setAgentTerminalBusy(true);
+    setAgentTerminalError(null);
+    try {
+      await authorizeAgentTerminalSession(agentTerminalSession.terminalSessionId);
+      setAgentTerminalSession(null);
+      void refreshHealth();
+      void refreshAgentTerminalAuthorization();
+    } catch (error) {
+      setAgentTerminalError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAgentTerminalBusy(false);
+    }
+  }
+
+  async function handleApproveAgentTerminalToolRequest() {
+    if (!agentTerminalToolRequest) return;
+    setAgentTerminalToolBusy(true);
+    setAgentTerminalToolError(null);
+    try {
+      await approveToolRequest(agentTerminalToolRequest.id, {
+        riskAccepted: agentTerminalToolRequest.risk?.level === "elevated",
+        actor: decisionActor(clientIdentity)
+      });
+      setAgentTerminalToolRequest(null);
+      void refreshAgentTerminalToolApproval();
+    } catch (error) {
+      setAgentTerminalToolError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAgentTerminalToolBusy(false);
+    }
+  }
+
+  async function handleRejectAgentTerminalToolRequest() {
+    if (!agentTerminalToolRequest) return;
+    setAgentTerminalToolBusy(true);
+    setAgentTerminalToolError(null);
+    try {
+      await rejectToolRequest(agentTerminalToolRequest.id, { actor: decisionActor(clientIdentity) });
+      setAgentTerminalToolRequest(null);
+      void refreshAgentTerminalToolApproval();
+    } catch (error) {
+      setAgentTerminalToolError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAgentTerminalToolBusy(false);
+    }
+  }
+
   const handleRelationshipSkillStatusChange = useCallback((status: RelationshipSkillStatus, message?: string, installedVersion?: string, requiredVersion?: string) => {
     setRelationshipSkillStatus(status);
     setRelationshipSkillMessage(message);
@@ -290,6 +385,25 @@ export function App() {
           onSecretChange={setInteractionSecret}
           onResolve={(mode) => void handleResolveCredentialInteraction(mode)}
           onDismiss={() => void handleRejectCredentialInteraction()}
+        />
+      ) : null}
+      {agentTerminalSession ? (
+        <AgentTerminalAuthorizationDialog
+          session={agentTerminalSession}
+          busy={agentTerminalBusy}
+          error={agentTerminalError}
+          onAuthorize={() => void handleAuthorizeAgentTerminalSession()}
+          onDismiss={() => setAgentTerminalSession(null)}
+        />
+      ) : null}
+      {!agentTerminalSession && agentTerminalToolRequest ? (
+        <AgentTerminalToolApprovalDialog
+          request={agentTerminalToolRequest}
+          busy={agentTerminalToolBusy}
+          error={agentTerminalToolError}
+          onApprove={() => void handleApproveAgentTerminalToolRequest()}
+          onReject={() => void handleRejectAgentTerminalToolRequest()}
+          onDismiss={() => setAgentTerminalToolRequest(null)}
         />
       ) : null}
       {relationshipSkillPromptOpen ? (
@@ -387,6 +501,129 @@ export function App() {
       )}
     </div>
   );
+}
+
+function AgentTerminalAuthorizationDialog({
+  session,
+  busy,
+  error,
+  onAuthorize,
+  onDismiss
+}: {
+  session: AgentTerminalSession;
+  busy: boolean;
+  error: string | null;
+  onAuthorize: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="save-password-backdrop" role="presentation">
+      <div className="save-password-dialog" role="dialog" aria-modal="true" aria-label="Gateway terminal authorization request">
+        <header className="save-password-header">
+          <KeyRound size={20} />
+          <div>
+            <strong>Gateway terminal 授权请求</strong>
+            <small>{session.remoteAddress} · {session.agentId || "main-agent"}</small>
+          </div>
+          <button type="button" className="icon-button small" title="Dismiss" onClick={onDismiss}>
+            <X size={15} />
+          </button>
+        </header>
+        <div className="save-password-content">
+          <section>
+            <h3>Agent Terminal Session</h3>
+            <div className="save-password-grid">
+              <span>Remote</span><strong>{session.remoteAddress}</strong>
+              <span>Agent</span><strong>{session.agentId || "main-agent"}</strong>
+              <span>Session</span><strong>{session.sessionKey}</strong>
+              <span>Created</span><strong>{session.createdAt}</strong>
+            </div>
+          </section>
+          <section>
+            <h3>Approval</h3>
+            <p className="save-password-note">批准后，Main Agent 可以通过 gateway-terminal 提交命令请求。每条命令仍会进入 Tool Queue，并经过 Command Guard 和用户审批。</p>
+            {error ? <p className="save-password-warning">{error}</p> : null}
+          </section>
+        </div>
+        <footer className="save-password-actions">
+          <button type="button" className="secondary-button" onClick={onDismiss} disabled={busy}>稍后</button>
+          <button type="button" className="primary-button" onClick={onAuthorize} disabled={busy}>授权 gateway-terminal</button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function AgentTerminalToolApprovalDialog({
+  request,
+  busy,
+  error,
+  onApprove,
+  onReject,
+  onDismiss
+}: {
+  request: ToolRequestRecord;
+  busy: boolean;
+  error: string | null;
+  onApprove: () => void;
+  onReject: () => void;
+  onDismiss: () => void;
+}) {
+  const command = typeof request.payload.command === "string" ? request.payload.command : "";
+  return (
+    <div className="save-password-backdrop" role="presentation">
+      <div className="save-password-dialog" role="dialog" aria-modal="true" aria-label="Gateway terminal command approval">
+        <header className="save-password-header">
+          <KeyRound size={20} />
+          <div>
+            <strong>Gateway terminal 命令审批</strong>
+            <small>{request.agentId || "main-agent"} · {request.status}</small>
+          </div>
+          <button type="button" className="icon-button small" title="Dismiss" onClick={onDismiss}>
+            <X size={15} />
+          </button>
+        </header>
+        <div className="save-password-content">
+          <section>
+            <h3>Command</h3>
+            {request.reason ? <p className="save-password-note">{request.reason}</p> : null}
+            <code className="agent-terminal-command">{command}</code>
+          </section>
+          <section>
+            <h3>Safety</h3>
+            <div className="save-password-grid">
+              <span>Channel</span><strong>{request.metadata?.terminalChannel || "gateway-terminal"}</strong>
+              <span>Risk</span><strong>{request.risk?.level || "safe"}</strong>
+              <span>Guard</span><strong>{request.guard?.decision || "allow"}</strong>
+            </div>
+            {request.risk?.reasons.length ? <p className="save-password-warning">{request.risk.reasons.join("; ")}</p> : null}
+            {error ? <p className="save-password-warning">{error}</p> : null}
+          </section>
+        </div>
+        <footer className="save-password-actions">
+          <button type="button" className="secondary-button" onClick={onDismiss} disabled={busy}>稍后</button>
+          <button type="button" className="secondary-button danger" onClick={onReject} disabled={busy}>拒绝</button>
+          <button type="button" className="primary-button" onClick={onApprove} disabled={busy || request.status !== "pending"}>批准执行</button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function isGatewayTerminalRequest(request: ToolRequestRecord): boolean {
+  return request.kind === "terminal"
+    && request.status === "pending"
+    && request.source === "gateway-event"
+    && request.metadata?.terminalChannel === "gateway-terminal";
+}
+
+function decisionActor(identity: ClientIdentity | null) {
+  return {
+    deviceId: identity?.deviceId,
+    deviceIdShort: identity?.deviceIdShort,
+    displayName: identity?.displayName,
+    source: "detaches-ui" as const
+  };
 }
 
 function RelationshipSkillPromptDialog({

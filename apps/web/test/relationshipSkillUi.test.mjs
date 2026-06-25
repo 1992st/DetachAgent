@@ -43,6 +43,14 @@ assert.match(app, /relationshipSkillRequiredVersion/, "App should keep the requi
 assert.match(app, /relationshipSkillCheckNonce/, "New session should explicitly trigger the relationship skill check");
 assert.match(app, /relationshipSkillPromptOpen/, "skill action should open the copyable prompt dialog");
 assert.match(app, /RelationshipSkillPromptDialog/, "App should render a relationship skill prompt dialog");
+assert.match(app, /fetchAgentTerminalSessions/, "App should poll Agent Terminal sessions for pending authorization");
+assert.match(app, /AgentTerminalAuthorizationDialog/, "App should render a global Agent Terminal authorization dialog");
+assert.match(app, /授权 gateway-terminal/, "Agent Terminal authorization dialog should expose an obvious approval action");
+assert.match(app, /authorizeAgentTerminalSession/, "global Agent Terminal dialog should authorize pending sessions");
+assert.match(app, /AgentTerminalToolApprovalDialog/, "App should render a global gateway-terminal command approval dialog");
+assert.match(app, /isGatewayTerminalRequest/, "App should detect pending gateway-terminal tool requests globally");
+assert.match(app, /批准执行/, "gateway-terminal command approval dialog should expose an obvious approve action");
+assert.match(app, /approveToolRequest/, "global gateway-terminal dialog should approve pending tool requests");
 assert.match(app, /navigator\.clipboard\.writeText\(prompt\)/, "prompt dialog should copy the generated install/update prompt");
 assert.match(app, /callbackHost/, "prompt dialog should include the current Detach Agent callback host when available");
 assert.match(skillInstallPanel, /DETACH_AGENT_RELATIONSHIP_SKILL_VERSION/, "Skill install panel should use the shared required skill version");
