@@ -37,6 +37,17 @@ import type {
 } from "@detaches/shared";
 
 const DEFAULT_DESKTOP_API_ORIGIN = "http://127.0.0.1:38888";
+export const LOCAL_SERVER_DISCONNECTED_MESSAGE = "local server disconnected";
+
+export class LocalServerDisconnectedError extends Error {
+  code = "LOCAL_SERVER_DISCONNECTED";
+
+  constructor(cause?: unknown) {
+    super(LOCAL_SERVER_DISCONNECTED_MESSAGE);
+    this.name = "LocalServerDisconnectedError";
+    if (cause) (this as Error & { cause?: unknown }).cause = cause;
+  }
+}
 
 function apiOrigin(): string {
   if (window.location.protocol === "file:") {
@@ -63,8 +74,27 @@ export function wsUrl(path: string): string {
   return `${protocol}://${window.location.host}${path}`;
 }
 
+export function isLocalServerDisconnected(error: unknown): boolean {
+  if (error instanceof LocalServerDisconnectedError) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes(LOCAL_SERVER_DISCONNECTED_MESSAGE) || looksLikeLocalServerDisconnect(message);
+}
+
+async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(apiUrl(path), init);
+  } catch (error) {
+    throw new LocalServerDisconnectedError(error);
+  }
+}
+
+function looksLikeLocalServerDisconnect(text: string): boolean {
+  return /ECONNREFUSED\s+127\.0\.0\.1:38888|connect ECONNREFUSED|http proxy error/i.test(text);
+}
+
 async function errorMessage(res: Response): Promise<string> {
   const text = await res.text();
+  if (looksLikeLocalServerDisconnect(text)) return LOCAL_SERVER_DISCONNECTED_MESSAGE;
   try {
     const parsed = JSON.parse(text) as { error?: string; message?: string };
     return parsed.error || parsed.message || text;
@@ -74,7 +104,7 @@ async function errorMessage(res: Response): Promise<string> {
 }
 
 export async function fetchHealth(): Promise<AppHealth> {
-  const res = await fetch(apiUrl("/api/health"));
+  const res = await apiFetch("/api/health");
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }
@@ -124,7 +154,7 @@ export async function createDetachesContextExport(input: { sessionKey: string; s
 }
 
 export async function fetchDiagnostics(): Promise<DiagnosticsResponse> {
-  const res = await fetch(apiUrl("/api/diagnostics"));
+  const res = await apiFetch("/api/diagnostics");
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }
@@ -162,7 +192,7 @@ export async function testCallback(publicBaseUrl: string): Promise<{ ok: boolean
 }
 
 export async function fetchAgentTerminalSessions(): Promise<AgentTerminalSessionsResponse> {
-  const res = await fetch(apiUrl("/api/agent-terminal/sessions"));
+  const res = await apiFetch("/api/agent-terminal/sessions");
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }
@@ -230,7 +260,7 @@ export async function fetchToolRequests(input: { sessionKey?: string | null; age
   if (input.status) params.set("status", input.status);
   if (input.limit) params.set("limit", String(input.limit));
   const query = params.toString();
-  const res = await fetch(apiUrl(`/api/tools/requests${query ? `?${query}` : ""}`));
+  const res = await apiFetch(`/api/tools/requests${query ? `?${query}` : ""}`);
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }
@@ -400,7 +430,7 @@ export async function fetchLocalTerminalApps(): Promise<LocalTerminalAppsRespons
 }
 
 export async function fetchAdminTerminalStatus(sessionKey: string): Promise<AdminTerminalStatusResponse> {
-  const res = await fetch(apiUrl(`/api/terminal/admin/${encodeURIComponent(sessionKey)}/status`));
+  const res = await apiFetch(`/api/terminal/admin/${encodeURIComponent(sessionKey)}/status`);
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }

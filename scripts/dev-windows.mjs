@@ -2,6 +2,15 @@ import { spawn, spawnSync } from "node:child_process";
 
 const children = new Set();
 
+function configureWindowsConsoleEncoding() {
+  if (process.platform !== "win32") return;
+  spawnSync("cmd.exe", ["/d", "/s", "/c", "chcp 65001 > nul"], { stdio: "ignore" });
+  process.env.LANG ||= "C.UTF-8";
+  process.env.PYTHONIOENCODING ||= "utf-8";
+}
+
+configureWindowsConsoleEncoding();
+
 function pnpmCommand() {
   return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 }

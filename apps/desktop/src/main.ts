@@ -11,6 +11,10 @@ const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
 let serverProcess: ChildProcessWithoutNullStreams | null = null;
+let serverStartPromise: Promise<void> | null = null;
+let serverMonitor: NodeJS.Timeout | null = null;
+let serverHealthFailures = 0;
+let expectedServerStop = false;
 
 function isDesktopDevMode(): boolean {
   return isDev || process.env.DETACHES_DESKTOP_DEV === "1";
@@ -122,9 +126,11 @@ async function startServer(): Promise<void> {
     log(`[server spawn error] ${error.message}`);
   });
   serverProcess.on("exit", (code, signal) => {
+    const expectedStop = expectedServerStop;
+    expectedServerStop = false;
     log(`[server exit] code=${code ?? ""} signal=${signal ?? ""}`);
     serverProcess = null;
-    if (mainWindow && code !== 0) {
+    if (mainWindow && code !== 0 && !expectedStop) {
       void dialog.showMessageBox(mainWindow, {
         type: "error",
         title: "Detaches Agent server stopped",
@@ -132,6 +138,42 @@ async function startServer(): Promise<void> {
       });
     }
   });
+}
+
+async function ensureServerStarted(): Promise<void> {
+  if (!serverStartPromise) {
+    serverStartPromise = startServer().finally(() => {
+      serverStartPromise = null;
+    });
+  }
+  return serverStartPromise;
+}
+
+function startServerMonitor(): void {
+  if (serverMonitor || !isDesktopDevMode()) return;
+  serverMonitor = setInterval(() => {
+    void (async () => {
+      if (await isServerReady()) {
+        serverHealthFailures = 0;
+        return;
+      }
+      serverHealthFailures += 1;
+      if (serverHealthFailures < 2) return;
+      log(`server health check failed ${serverHealthFailures} times; attempting local restart`);
+      if (serverProcess) stopServer({ expected: true });
+      await ensureServerStarted();
+      await waitForServerReady(5000);
+    })().catch((error) => {
+      log(`server monitor error: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, 3000);
+  serverMonitor.unref?.();
+}
+
+function stopServerMonitor(): void {
+  if (!serverMonitor) return;
+  clearInterval(serverMonitor);
+  serverMonitor = null;
 }
 
 function delay(ms: number): Promise<void> {
@@ -159,8 +201,9 @@ async function waitForServerReady(timeoutMs = 15_000): Promise<boolean> {
   return false;
 }
 
-function stopServer(): void {
+function stopServer(options: { expected?: boolean } = {}): void {
   if (!serverProcess) return;
+  expectedServerStop = Boolean(options.expected);
   serverProcess.kill();
   serverProcess = null;
 }
@@ -188,9 +231,10 @@ async function createWindow(): Promise<void> {
 }
 
 app.on("ready", async () => {
-  await startServer();
+  await ensureServerStarted();
   await waitForServerReady();
   await createWindow();
+  startServerMonitor();
 });
 
 app.on("window-all-closed", () => {
@@ -204,5 +248,6 @@ app.on("activate", async () => {
 });
 
 app.on("before-quit", () => {
-  stopServer();
+  stopServerMonitor();
+  stopServer({ expected: true });
 });

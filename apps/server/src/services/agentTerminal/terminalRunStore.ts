@@ -14,7 +14,7 @@ class TerminalRunStore {
 
   create(run: AgentTerminalRun): AgentTerminalRun {
     this.runs.set(run.runId, run);
-    terminalStreamHub.emit(run.status === "blocked" ? "blocked" : "approval_waiting", run);
+    terminalStreamHub.emit(eventTypeForStatus(run.status), run);
     return run;
   }
 

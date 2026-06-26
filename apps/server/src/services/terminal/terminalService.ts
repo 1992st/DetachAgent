@@ -147,6 +147,17 @@ class TerminalService {
     return true;
   }
 
+  reset(sessionKey: string, reason: string): boolean {
+    const terminal = this.terminals.get(sessionKey);
+    if (!terminal || terminal.status === "exited") return false;
+    terminal.lastActiveAt = new Date().toISOString();
+    this.disposeTerminal(terminal, reason);
+    terminal.status = "exited";
+    terminal.emitter.emit("status", this.info(terminal));
+    this.terminals.delete(sessionKey);
+    return true;
+  }
+
   resize(terminal: ManagedTerminal, cols: number, rows: number): void {
     const safeCols = Math.min(Math.max(Math.floor(cols), 40), 240);
     const safeRows = Math.min(Math.max(Math.floor(rows), 10), 80);

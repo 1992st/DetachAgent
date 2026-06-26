@@ -21,12 +21,17 @@ const terminalRunStoreSource = fs.readFileSync(path.join(repoRoot, "apps/server/
 const terminalStreamHubSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/agentTerminal/terminalStreamHub.ts"), "utf8");
 const commandGuardServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/tools/commandGuardService.ts"), "utf8");
 const toolBrokerServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/tools/toolBrokerService.ts"), "utf8");
+const terminalServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/terminal/terminalService.ts"), "utf8");
 const adminTerminalServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/terminal/adminTerminalService.ts"), "utf8");
 const adminTerminalHelperSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/terminal/adminTerminalHelper.ts"), "utf8");
 const terminalSocketSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/ws/terminalSocket.ts"), "utf8");
 const terminalTypesSource = fs.readFileSync(path.join(repoRoot, "packages/shared/src/terminalTypes.ts"), "utf8");
 const detachesContextTypesSource = fs.readFileSync(path.join(repoRoot, "packages/shared/src/detachesContextTypes.ts"), "utf8");
 const terminalPanelSource = fs.readFileSync(path.join(repoRoot, "apps/web/src/features/terminal/TerminalPanel.tsx"), "utf8");
+const webApiSource = fs.readFileSync(path.join(repoRoot, "apps/web/src/lib/api.ts"), "utf8");
+const desktopMainSource = fs.readFileSync(path.join(repoRoot, "apps/desktop/src/main.ts"), "utf8");
+const desktopDevScriptSource = fs.readFileSync(path.join(repoRoot, "apps/desktop/scripts/dev.mjs"), "utf8");
+const windowsDevScriptSource = fs.readFileSync(path.join(repoRoot, "scripts/dev-windows.mjs"), "utf8");
 
 assert.match(
   appConfigSource,
@@ -263,9 +268,39 @@ assert.match(
 );
 
 assert.match(
+  agentTerminalServiceSource,
+  /activeRunLocks/,
+  "Agent Terminal should hold an active-run lock per terminal session"
+);
+
+assert.match(
+  agentTerminalServiceSource,
+  /syncActiveRunsForSession/,
+  "Agent Terminal should sync stale run state before accepting another command for the same session"
+);
+
+assert.match(
+  agentTerminalServiceSource,
+  /toolBrokerService\.failRequest/,
+  "Agent Terminal timeout and cancel should mark the Tool Queue request failed"
+);
+
+assert.match(
+  agentTerminalServiceSource,
+  /terminalService\.reset/,
+  "Agent Terminal timeout and cancel should recreate the user terminal when a command was already written"
+);
+
+assert.match(
   terminalRunStoreSource,
   /class TerminalRunStore/,
   "Agent Terminal should have a dedicated TerminalRunStore"
+);
+
+assert.match(
+  terminalRunStoreSource,
+  /eventTypeForStatus\(run\.status\)/,
+  "Agent Terminal run creation should emit the real created status"
 );
 
 assert.match(
@@ -378,6 +413,12 @@ assert.match(
 
 assert.match(
   toolBrokerServiceSource,
+  /async failRequest\(requestId: string, error: string\)/,
+  "Tool Broker should expose an explicit failure path for timed-out gateway terminal requests"
+);
+
+assert.match(
+  toolBrokerServiceSource,
   /Command Guard 和 Tool Queue 审批/,
   "Tool Broker should document that administrator terminal does not bypass approval"
 );
@@ -410,6 +451,36 @@ assert.match(
   terminalPanelSource,
   /灰色表示普通权限；蓝色表示管理员 helper 已连接/,
   "terminal UI should document gray versus blue administrator button state"
+);
+
+assert.match(
+  terminalServiceSource,
+  /reset\(sessionKey: string, reason: string\)/,
+  "terminal service should be able to dispose a stuck PTY so the next command gets a new one"
+);
+
+assert.match(
+  webApiSource,
+  /LOCAL_SERVER_DISCONNECTED_MESSAGE = "local server disconnected"/,
+  "web API should normalize Vite proxy/local server failures into a user-visible message"
+);
+
+assert.match(
+  desktopMainSource,
+  /startServerMonitor/,
+  "desktop dev mode should monitor and restart the local server when a reused server disappears"
+);
+
+assert.match(
+  desktopDevScriptSource,
+  /chcp 65001 > nul/,
+  "desktop dev script should switch Windows consoles to UTF-8 before logging"
+);
+
+assert.match(
+  windowsDevScriptSource,
+  /chcp 65001 > nul/,
+  "Windows dev helper should switch consoles to UTF-8 before logging"
 );
 
 assert.match(

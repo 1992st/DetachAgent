@@ -10,6 +10,15 @@ const env = { ...process.env, DETACHES_DESKTOP_DEV: "1" };
 const args = ["."];
 const children = new Set();
 
+function configureWindowsConsoleEncoding() {
+  if (process.platform !== "win32") return;
+  spawnSync("cmd.exe", ["/d", "/s", "/c", "chcp 65001 > nul"], { stdio: "ignore" });
+  env.LANG = env.LANG || "C.UTF-8";
+  env.PYTHONIOENCODING = env.PYTHONIOENCODING || "utf-8";
+}
+
+configureWindowsConsoleEncoding();
+
 if (process.platform === "win32") {
   args.unshift("--disable-gpu", "--disable-software-rasterizer");
 }

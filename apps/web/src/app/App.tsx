@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, FileText, KeyRound, Wifi, X } from "lucide-react";
 import type { AgentSummary, AgentTerminalSession, AppHealth, ChatSessionMode, ClientIdentity, InteractionRecord, LocalTerminalApp, RelationshipSkillStatus, SshCredentialSessionSnapshot, ToolBrokerSocketEvent, ToolRequestRecord, UploadedFileRef } from "@detaches/shared";
-import { approveToolRequest, authorizeAgentTerminalSession, dismissSshSessionPassword, fetchAgents, fetchAgentTerminalSessions, fetchClientIdentity, fetchDiagnostics, fetchHealth, fetchLocalTerminalApps, fetchSettings, fetchToolRequests, openLocalTerminalApp, rejectInteraction, rejectToolRequest, resolveInteraction, submitSshSessionPassword, uploadFile, wsUrl } from "../lib/api.js";
+import { LOCAL_SERVER_DISCONNECTED_MESSAGE, approveToolRequest, authorizeAgentTerminalSession, dismissSshSessionPassword, fetchAgents, fetchAgentTerminalSessions, fetchClientIdentity, fetchDiagnostics, fetchHealth, fetchLocalTerminalApps, fetchSettings, fetchToolRequests, isLocalServerDisconnected, openLocalTerminalApp, rejectInteraction, rejectToolRequest, resolveInteraction, submitSshSessionPassword, uploadFile, wsUrl } from "../lib/api.js";
 import { ConnectionBar } from "../features/connection/ConnectionBar.js";
 import { AgentList } from "../features/agents/AgentList.js";
 import { ChatPanel, type ChatPanelHandle } from "../features/chat/ChatPanel.js";
@@ -100,6 +100,7 @@ export function App() {
     try {
       const response = await fetchDiagnostics();
       setHealth(response.health);
+      setHealthError(null);
     } catch (error) {
       setHealthError(error instanceof Error ? error.message : String(error));
     }
@@ -111,6 +112,13 @@ export function App() {
     void refreshDiagnostics();
     void refreshNetworkGuide();
   }, [refreshClientIdentity, refreshAgents, refreshDiagnostics, refreshNetworkGuide]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void refreshDiagnostics();
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [refreshDiagnostics]);
 
   useEffect(() => {
     const ws = new WebSocket(wsUrl("/api/tools/stream"));
@@ -139,6 +147,7 @@ export function App() {
   }, []);
 
   const refreshAgentTerminalAuthorization = useCallback(async () => {
+    if (healthError === LOCAL_SERVER_DISCONNECTED_MESSAGE) return;
     try {
       const response = await fetchAgentTerminalSessions();
       setAgentTerminalSession((current) => {
@@ -148,12 +157,14 @@ export function App() {
         if (currentStillPending) return currentStillPending;
         return response.sessions.find((session) => session.state === "pending_authorization") ?? null;
       });
-    } catch {
+    } catch (error) {
+      if (isLocalServerDisconnected(error)) setHealthError(LOCAL_SERVER_DISCONNECTED_MESSAGE);
       // Agent Terminal authorization is opportunistic UI state; connection errors are shown by health/status surfaces.
     }
-  }, []);
+  }, [healthError]);
 
   const refreshAgentTerminalToolApproval = useCallback(async () => {
+    if (healthError === LOCAL_SERVER_DISCONNECTED_MESSAGE) return;
     try {
       const response = await fetchToolRequests({ status: "pending", limit: 100 });
       setAgentTerminalToolRequest((current) => {
@@ -163,10 +174,11 @@ export function App() {
         if (currentStillPending) return currentStillPending;
         return response.requests.find(isGatewayTerminalRequest) ?? null;
       });
-    } catch {
+    } catch (error) {
+      if (isLocalServerDisconnected(error)) setHealthError(LOCAL_SERVER_DISCONNECTED_MESSAGE);
       // Tool Queue page and connection status surfaces own request-list errors.
     }
-  }, []);
+  }, [healthError]);
 
   useEffect(() => {
     void refreshAgentTerminalAuthorization();

@@ -465,6 +465,17 @@ class ToolBrokerService {
         result
       };
     }
+    if (execution.completedAt && typeof execution.exitCode === "number" && typeof execution.output === "string") {
+      const result = this.buildExecutionResult(request, execution, {
+        output: execution.output,
+        completed: true,
+        exitCode: execution.exitCode
+      });
+      return {
+        request,
+        result
+      };
+    }
     const snapshot = execution.privilege === "administrator"
       ? adminTerminalService.snapshot(execution.sessionKey)
       : await terminalService.snapshot(execution.sessionKey);
@@ -482,6 +493,20 @@ class ToolBrokerService {
     const updated = this.update(request, "rejected", undefined, decision("rejected", input));
     await this.save();
     await this.audit({ type: "tool.reject", requestId, status: updated.status, actor: input.actor });
+    return updated;
+  }
+
+  async failRequest(requestId: string, error: string): Promise<ToolRequestRecord> {
+    await this.load();
+    const request = this.requireRequest(requestId);
+    if (request.status === "succeeded" || request.status === "rejected" || request.status === "blocked" || request.status === "failed") {
+      return request;
+    }
+    this.markExecutionFailed(request.id, error);
+    const updated = this.update(request, "failed", error);
+    await this.save();
+    await this.audit({ type: "tool.approve", requestId: request.id, status: "failed", error });
+    void this.forwardResultToAgent(updated.id, { delayMs: 0, force: true });
     return updated;
   }
 
@@ -565,6 +590,21 @@ class ToolBrokerService {
     await this.save();
     await this.audit({ type: "tool.approve", requestId: request.id, status: "failed", error });
     return { request: updated, message: error };
+  }
+
+  private markExecutionFailed(requestId: string, error: string): void {
+    const execution = [...this.executions.values()].find((item) => item.requestId === requestId);
+    if (!execution || execution.completedAt) return;
+    const output = [
+      execution.output?.trimEnd() || "",
+      `[detaches_agent] ${error}`
+    ].filter(Boolean).join("\n");
+    this.executions.set(execution.executionId, {
+      ...execution,
+      completedAt: new Date().toISOString(),
+      exitCode: typeof execution.exitCode === "number" ? execution.exitCode : 1,
+      output
+    });
   }
 
   private async runInTerminal(request: ToolRequestRecord, command: string, options: { requireInteractive?: boolean } = {}): Promise<ToolExecutionRecord> {

@@ -26,6 +26,7 @@ function nowIso(): string {
 class AgentTerminalService {
   private loaded = false;
   private saveChain = Promise.resolve();
+  private activeRunLocks = new Map<string, string>();
 
   async bootstrap(input: { remoteAddress: string; sessionKey?: string; agentId?: string; displayName?: string }): Promise<AgentTerminalBootstrapResponse> {
     await this.load();
@@ -69,48 +70,68 @@ class AgentTerminalService {
     const session = terminalLeaseService.requireByLease(input.leaseToken);
     const command = input.request.command.trim();
     if (!command) throw codedError("DETACHES_TERMINAL_INTERNAL_ERROR", "command is required.");
+    await this.syncActiveRunsForSession(session.terminalSessionId);
     const runId = nanoid();
-    const sourceEventId = input.request.sourceEventId?.trim() || `agent-terminal:${runId}`;
-    const request = await toolBrokerService.create({
-      kind: "terminal",
-      target: "local-user-machine",
-      sessionKey: session.sessionKey,
-      agentId: session.agentId,
-      reason: input.request.reason,
-      source: "gateway-event",
-      sourceEventId,
-      metadata: {
-        terminalChannel: "gateway-terminal",
-        preferredChannel: "gateway-terminal",
-        callbackBaseUrl: appConfig.publicBaseUrl,
-        agentTerminalRunId: runId
-      },
-      payload: {
+    const activeRun = this.findActiveRunForSession(session.terminalSessionId);
+    const activeLockRunId = this.activeRunLocks.get(session.terminalSessionId);
+    if (activeRun || activeLockRunId) {
+      return this.createBusyRun({
+        terminalSessionId: session.terminalSessionId,
         command,
-        workingDirectory: input.request.workingDirectory ?? undefined
+        reason: input.request.reason,
+        activeRunId: activeRun?.runId ?? activeLockRunId ?? "unknown"
+      });
+    }
+    this.activeRunLocks.set(session.terminalSessionId, runId);
+    const sourceEventId = input.request.sourceEventId?.trim() || `agent-terminal:${runId}`;
+    try {
+      const request = await toolBrokerService.create({
+        kind: "terminal",
+        target: "local-user-machine",
+        sessionKey: session.sessionKey,
+        agentId: session.agentId,
+        reason: input.request.reason,
+        source: "gateway-event",
+        sourceEventId,
+        metadata: {
+          terminalChannel: "gateway-terminal",
+          preferredChannel: "gateway-terminal",
+          callbackBaseUrl: appConfig.publicBaseUrl,
+          agentTerminalRunId: runId
+        },
+        payload: {
+          command,
+          workingDirectory: input.request.workingDirectory ?? undefined
+        }
+      });
+      const run: AgentTerminalRun = {
+        runId,
+        terminalSessionId: session.terminalSessionId,
+        requestId: request.id,
+        command,
+        reason: input.request.reason,
+        status: request.status === "blocked" ? "blocked" : "waiting_for_approval",
+        approvalStatus: "pending",
+        guard: request.guard ?? {
+          decision: "allow",
+          riskLevel: request.risk?.level ?? "safe",
+          matchedRules: request.risk?.reasons ?? [],
+          normalizedCommand: command
+        },
+        createdAt: nowIso(),
+        error: request.error
+      };
+      terminalRunStore.create(run);
+      terminalLeaseService.touch(session.terminalSessionId, run.status);
+      if (isTerminalRunDone(run.status)) this.releaseRunLock(run);
+      await this.save();
+      return this.waitOrRespond(runId, input.waitMs);
+    } catch (error) {
+      if (this.activeRunLocks.get(session.terminalSessionId) === runId) {
+        this.activeRunLocks.delete(session.terminalSessionId);
       }
-    });
-    const run: AgentTerminalRun = {
-      runId,
-      terminalSessionId: session.terminalSessionId,
-      requestId: request.id,
-      command,
-      reason: input.request.reason,
-      status: request.status === "blocked" ? "blocked" : "waiting_for_approval",
-      approvalStatus: "pending",
-      guard: request.guard ?? {
-        decision: "allow",
-        riskLevel: request.risk?.level ?? "safe",
-        matchedRules: request.risk?.reasons ?? [],
-        normalizedCommand: command
-      },
-      createdAt: nowIso(),
-      error: request.error
-    };
-    terminalRunStore.create(run);
-    terminalLeaseService.touch(session.terminalSessionId, run.status);
-    await this.save();
-    return this.waitOrRespond(runId, input.waitMs);
+      throw error;
+    }
   }
 
   async run(runId: string): Promise<AgentTerminalRunResponse> {
@@ -129,21 +150,24 @@ class AgentTerminalService {
 
   async cancel(runId: string): Promise<AgentTerminalRunResponse> {
     await this.load();
-    const run = terminalRunStore.require(runId);
+    const run = await this.syncRun(runId);
     if (["completed", "rejected", "blocked", "failed", "timeout", "cancelled"].includes(run.status)) {
       return this.responseFor(run);
     }
+    const error = "Cancelled by agent-terminal request.";
     if (run.status === "waiting_for_approval" && run.requestId) {
       await toolBrokerService.reject(run.requestId, {
         actor: { displayName: "Agent Terminal Runtime", source: "api" }
       }).catch(() => undefined);
+    } else if (run.requestId) {
+      await toolBrokerService.failRequest(run.requestId, error).catch(() => undefined);
     }
     const session = terminalLeaseService.list().find((item) => item.terminalSessionId === run.terminalSessionId);
     if (session && (run.status === "running" || run.status === "approved")) {
       terminalService.interrupt(session.sessionKey);
+      terminalService.reset(session.sessionKey, `gateway terminal run ${run.runId} was cancelled; recreating the PTY for the next command`);
     }
-    const updated = this.updateRun(run, { status: "cancelled", cancelledAt: nowIso(), error: "Cancelled by agent-terminal request." });
-    terminalStreamHub.emit("cancelled", updated);
+    const updated = this.updateRun(run, { status: "cancelled", cancelledAt: nowIso(), error });
     await this.save();
     return this.responseFor(updated);
   }
@@ -168,13 +192,7 @@ class AgentTerminalService {
       latest = await this.syncRun(runId);
     }
     if (!isTerminalRunDone(latest.status) && waitMs > 0 && Date.now() - started >= waitMs) {
-      if (latest.status === "running" || latest.status === "approved") {
-        const session = terminalLeaseService.list().find((item) => item.terminalSessionId === latest.terminalSessionId);
-        if (session) terminalService.interrupt(session.sessionKey);
-      }
-      latest = this.updateRun(latest, { status: "timeout", error: `Timed out after ${waitMs}ms.` });
-      terminalStreamHub.emit("timeout", latest);
-      await this.save();
+      latest = await this.timeoutRun(latest, waitMs);
     }
     return this.responseFor(latest);
   }
@@ -218,10 +236,75 @@ class AgentTerminalService {
     return updated;
   }
 
+  private async timeoutRun(run: AgentTerminalRun, waitMs: number): Promise<AgentTerminalRun> {
+    const error = `Timed out after ${waitMs}ms.`;
+    if (run.requestId) {
+      await toolBrokerService.failRequest(run.requestId, error).catch(() => undefined);
+    }
+    if (run.status === "running" || run.status === "approved") {
+      const session = terminalLeaseService.list().find((item) => item.terminalSessionId === run.terminalSessionId);
+      if (session) {
+        terminalService.interrupt(session.sessionKey);
+        terminalService.reset(session.sessionKey, `gateway terminal run ${run.runId} timed out; recreating the PTY for the next command`);
+      }
+    }
+    const updated = this.updateRun(run, { status: "timeout", completedAt: nowIso(), error });
+    await this.save();
+    return updated;
+  }
+
+  private async syncActiveRunsForSession(terminalSessionId: string): Promise<void> {
+    const activeRuns = terminalRunStore.list().filter((run) => run.terminalSessionId === terminalSessionId && !isTerminalRunDone(run.status));
+    for (const run of activeRuns) {
+      await this.syncRun(run.runId).catch(() => undefined);
+    }
+  }
+
+  private findActiveRunForSession(terminalSessionId: string): AgentTerminalRun | null {
+    const lockedRunId = this.activeRunLocks.get(terminalSessionId);
+    if (lockedRunId) {
+      const lockedRun = terminalRunStore.list().find((run) => run.runId === lockedRunId);
+      if (!lockedRun || !isTerminalRunDone(lockedRun.status)) return lockedRun ?? null;
+      this.activeRunLocks.delete(terminalSessionId);
+    }
+    return terminalRunStore.list()
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .find((run) => run.terminalSessionId === terminalSessionId && !isTerminalRunDone(run.status)) ?? null;
+  }
+
+  private async createBusyRun(input: { terminalSessionId: string; command: string; reason?: string; activeRunId: string }): Promise<AgentTerminalRunResponse> {
+    const run: AgentTerminalRun = {
+      runId: nanoid(),
+      terminalSessionId: input.terminalSessionId,
+      command: input.command,
+      reason: input.reason,
+      status: "failed",
+      guard: {
+        decision: "block",
+        riskLevel: "safe",
+        matchedRules: ["gateway-terminal-active-run"],
+        normalizedCommand: input.command
+      },
+      createdAt: nowIso(),
+      error: `Gateway terminal is busy. Active run ${input.activeRunId} has not reached a terminal state yet.`
+    };
+    terminalRunStore.create(run);
+    terminalLeaseService.touch(input.terminalSessionId, run.status);
+    await this.save();
+    return this.responseFor(run);
+  }
+
   private updateRun(run: AgentTerminalRun, patch: Partial<AgentTerminalRun>): AgentTerminalRun {
     const updated = terminalRunStore.update(run, patch);
     terminalLeaseService.touch(run.terminalSessionId, updated.status);
+    if (isTerminalRunDone(updated.status)) this.releaseRunLock(updated);
     return updated;
+  }
+
+  private releaseRunLock(run: AgentTerminalRun): void {
+    if (this.activeRunLocks.get(run.terminalSessionId) === run.runId) {
+      this.activeRunLocks.delete(run.terminalSessionId);
+    }
   }
 
   private responseFor(run: AgentTerminalRun): AgentTerminalRunResponse {
@@ -235,7 +318,7 @@ class AgentTerminalService {
       outputTail: run.outputTail,
       outputTruncated: run.outputTruncated,
       exitCode: run.exitCode,
-      code: codeForStatus(run.status),
+      code: codeForRun(run),
       message: run.error
     };
   }
@@ -262,7 +345,9 @@ class AgentTerminalService {
 
 export const agentTerminalService = new AgentTerminalService();
 
-function codeForStatus(status: AgentTerminalRunStatus): string | undefined {
+function codeForRun(run: AgentTerminalRun): string | undefined {
+  const status = run.status;
+  if (status === "failed" && run.error?.startsWith("Gateway terminal is busy.")) return "DETACHES_TERMINAL_BUSY";
   if (status === "blocked") return "DETACHES_COMMAND_BLOCKED";
   if (status === "rejected") return "DETACHES_APPROVAL_REJECTED";
   if (status === "timeout") return "DETACHES_TERMINAL_TIMEOUT";
