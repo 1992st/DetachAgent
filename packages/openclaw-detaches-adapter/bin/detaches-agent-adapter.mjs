@@ -247,6 +247,8 @@ function doctorContext(context) {
   const cli = adapterCliPathHint();
   const nextActions = [
     "Treat this as a detaches_agent mediated session, not plain webchat.",
+    "Detach Agent context describes request targets and approval routing; it does not redefine your Host/Main Agent identity.",
+    "Use your own Host/Main Agent tools for Host/Main Agent work; use detaches_agent only for the user's local machine or staged local files.",
     "Use the supported target list from this context; do not invent or fallback targets.",
     `The user's local machine is ${localMachine?.os || "unknown"}; local-user-machine commands must use ${commandDialect} syntax and ${pathStyle} paths.`,
     localMachineCommandRule(localMachine),

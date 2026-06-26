@@ -12,15 +12,26 @@ interface Props {
   clientIdentity: ClientIdentity | null;
   attachments: UploadedFileRef[];
   relationshipSkillCheckNonce?: number;
+  localControlConsent?: boolean;
+  localControlRuntime?: "idle" | "checking" | "install_required" | "installing" | "ready" | "error";
+  localControlScope?: string;
+  relationshipSkillStatus?: RelationshipSkillStatus;
+  relationshipSkillMessage?: string;
   onSessionModeChange: (mode: ChatSessionMode) => void;
   onNewSession: () => void;
   onClearAttachments: () => void;
   onNeedUpload: (files: FileList) => void;
   onRelationshipSkillStatusChange: (status: RelationshipSkillStatus, message?: string, installedVersion?: string, requiredVersion?: string) => void;
+  onEnableLocalControl: () => void;
+  onDisableLocalControl: () => void;
+  onRelationshipSkillInstallRequired: () => void;
 }
 
 export interface ChatPanelHandle {
   revealTerminal: () => void;
+  requestRelationshipSkillCheck: (reason?: "user-click" | "new-session-inherited" | "file-transfer") => void;
+  sendRelationshipSkillInstallPrompt: (prompt: string) => void;
+  promptEnableLocalControl: () => void;
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
@@ -30,11 +41,19 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   clientIdentity,
   attachments,
   relationshipSkillCheckNonce = 0,
+  localControlConsent = false,
+  localControlRuntime = "idle",
+  localControlScope,
+  relationshipSkillStatus = "unknown",
+  relationshipSkillMessage,
   onSessionModeChange,
   onNewSession,
   onClearAttachments,
   onNeedUpload,
-  onRelationshipSkillStatusChange
+  onRelationshipSkillStatusChange,
+  onEnableLocalControl,
+  onDisableLocalControl,
+  onRelationshipSkillInstallRequired
 }: Props, ref) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -43,6 +62,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [attachmentContext, setAttachmentContext] = useState("");
   const [attachmentContextOpen, setAttachmentContextOpen] = useState(false);
+  const [fileGateOpen, setFileGateOpen] = useState(false);
+  const [pendingFileSend, setPendingFileSend] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logFilter, setLogFilter] = useState<LogFilterLevel>(DEFAULT_LOG_FILTER);
@@ -58,12 +79,21 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   const reconnectTimerRef = useRef<number | null>(null);
   const cloudPromptLogIdsRef = useRef<Set<string>>(new Set());
   const relationshipSkillCheckSeqRef = useRef(0);
+  const lastRelationshipSkillCheckNonceRef = useRef(0);
+  const runtimeCheckSessionRef = useRef<string | null>(null);
+  const pendingInstallCheckRef = useRef(false);
 
   useImperativeHandle(ref, () => ({
-    revealTerminal: () => terminalRef.current?.reveal()
-  }), []);
+    revealTerminal: () => terminalRef.current?.reveal(),
+    requestRelationshipSkillCheck: (reason = "user-click") => sendRelationshipSkillCheck(reason),
+    sendRelationshipSkillInstallPrompt: (prompt: string) => {
+      pendingInstallCheckRef.current = true;
+      sendSystemPrompt(prompt, "relationship-skill-install");
+    },
+    promptEnableLocalControl: () => setFileGateOpen(true)
+  }));
 
-  function sendRelationshipSkillCheck(reason: "socket-open" | "new-session") {
+  function sendRelationshipSkillCheck(reason: "user-click" | "new-session-inherited" | "file-transfer") {
     const socket = socketRef.current;
     if (!sessionKey || socket?.readyState !== WebSocket.OPEN) return;
     relationshipSkillCheckSeqRef.current += 1;
@@ -73,6 +103,22 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     socket.send(JSON.stringify({
       type: "bootstrap-relationship-skill-check",
       idempotencyKey
+    }));
+  }
+
+  function sendSystemPrompt(prompt: string, label: string) {
+    const socket = socketRef.current;
+    if (!sessionKey || socket?.readyState !== WebSocket.OPEN) return;
+    const idempotencyKey = `${label}:${sessionKey}:${Date.now().toString(36)}:${crypto.randomUUID()}`;
+    appendLog("info", "prompt", label, { sessionKey, idempotencyKey });
+    socket.send(JSON.stringify({
+      type: "send",
+      message: prompt,
+      idempotencyKey,
+      // 安装/检查类 prompt 不能携带 detaches context，否则会在启用前污染普通会话。
+      includeLocalControlContext: false,
+      includeStagedFileContext: false,
+      localControlScope
     }));
   }
 
@@ -97,7 +143,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     ws.onopen = () => {
       setSocketState("connected");
       appendLog("debug", "socket", "socket-connected", { sessionKey, sessionMode });
-      sendRelationshipSkillCheck("socket-open");
     };
     ws.onclose = (event) => {
       setSocketState("closed");
@@ -131,6 +176,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
       } else if (data.type === "sent") {
         setLastRunId(data.payload.runId ?? null);
         appendLog("info", "prompt", "message-sent-ack", data.payload);
+        if (pendingInstallCheckRef.current) {
+          // 安装 prompt 只代表请求已发出；真正 ready 必须由独立 check prompt 证明。
+          pendingInstallCheckRef.current = false;
+          sendRelationshipSkillCheck("user-click");
+        }
         void refreshCloudPromptLogs();
       } else if (data.type === "relationship-skill-status") {
         onRelationshipSkillStatusChange(data.status, data.message, data.installedVersion, data.requiredVersion);
@@ -160,8 +210,28 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   }, [sessionKey, sessionMode, socketReconnectNonce, onRelationshipSkillStatusChange]);
 
   useEffect(() => {
-    if (relationshipSkillCheckNonce > 0) sendRelationshipSkillCheck("new-session");
-  }, [relationshipSkillCheckNonce]);
+    // New session 可能先更新 nonce、后建立 socket；必须等 connected 后再发送检查 prompt。
+    if (socketState !== "connected") return;
+    if (relationshipSkillCheckNonce <= lastRelationshipSkillCheckNonceRef.current) return;
+    lastRelationshipSkillCheckNonceRef.current = relationshipSkillCheckNonce;
+    sendRelationshipSkillCheck("new-session-inherited");
+  }, [relationshipSkillCheckNonce, socketState]);
+
+  useEffect(() => {
+    // 兜底：只要当前 session 处于 checking 且用户已授权，就确保本 session 至少检查一次。
+    if (!sessionKey || socketState !== "connected") return;
+    if (!localControlConsent || localControlRuntime !== "checking") return;
+    if (runtimeCheckSessionRef.current === sessionKey) return;
+    runtimeCheckSessionRef.current = sessionKey;
+    sendRelationshipSkillCheck("user-click");
+  }, [localControlConsent, localControlRuntime, sessionKey, socketState]);
+
+  useEffect(() => {
+    if (!pendingFileSend || localControlRuntime !== "ready") return;
+    setPendingFileSend(false);
+    setFileGateOpen(false);
+    sendCurrentMessage({ includeLocalControlContext: true, includeStagedFileContext: true, activationReason: "file-transfer" });
+  }, [pendingFileSend, localControlRuntime]);
 
   useEffect(() => {
     const el = messagesRef.current;
@@ -230,20 +300,50 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!canSend) return;
+    if (attachments.length && localControlRuntime !== "ready") {
+      // 本机暂存文件默认只在 Detach Agent 机器上；未启用文件 gate 前不能暴露 transfer 指令。
+      setFileGateOpen(true);
+      return;
+    }
+    sendCurrentMessage({
+      includeLocalControlContext: localControlRuntime === "ready",
+      includeStagedFileContext: attachments.length > 0 && localControlRuntime === "ready",
+      activationReason: localControlRuntime === "ready" ? "user-click" : undefined
+    });
+  }
+
+  function sendCurrentMessage(options: {
+    includeLocalControlContext: boolean;
+    includeStagedFileContext: boolean;
+    activationReason?: "user-click" | "new-session-inherited" | "file-transfer";
+    fileDescriptionOnly?: boolean;
+  }) {
+    if (!canSend && !options.fileDescriptionOnly) return;
+    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
     const text = draft.trim();
+    const messageTextToSend = options.fileDescriptionOnly
+      ? `${text}\n\n${buildFileDescriptionOnlyContext(attachments)}`.trim()
+      : text;
     const idempotencyKey = crypto.randomUUID();
     appendLog("info", "prompt", "chat-send", {
       sessionKey,
       sessionMode,
       idempotencyKey,
-      messageLength: text.length,
-      attachmentCount: attachments.length
+      messageLength: messageTextToSend.length,
+      attachmentCount: options.includeStagedFileContext ? attachments.length : 0,
+      includeLocalControlContext: options.includeLocalControlContext,
+      includeStagedFileContext: options.includeStagedFileContext,
+      activationReason: options.activationReason
     });
     socketRef.current?.send(JSON.stringify({
       type: "send",
-      message: text,
-      attachments,
-      attachmentContextOverride: attachments.length ? attachmentContext : undefined,
+      message: messageTextToSend,
+      attachments: options.fileDescriptionOnly ? [] : attachments,
+      attachmentContextOverride: options.includeStagedFileContext && attachments.length ? attachmentContext : undefined,
+      includeLocalControlContext: options.includeLocalControlContext,
+      includeStagedFileContext: options.includeStagedFileContext,
+      activationReason: options.activationReason,
+      localControlScope,
       idempotencyKey
     }));
     setMessages((current) => [
@@ -251,7 +351,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
       {
         id: crypto.randomUUID(),
         role: "user",
-        text,
+        text: messageTextToSend,
         timestamp: new Date().toISOString(),
         attachments: attachments.map((file) => ({ name: file.name, remotePath: file.remotePath, size: file.size, mimeType: file.mimeType }))
       }
@@ -390,7 +490,33 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
         sessionKey={sessionKey}
         title="Agent Control Terminal"
         emptyText="这个终端用于观察 Cloud Agent 在本机执行的审批后操作。"
+        localControlRuntime={localControlRuntime}
+        localControlConsent={localControlConsent}
+        relationshipSkillStatus={relationshipSkillStatus}
+        relationshipSkillMessage={relationshipSkillMessage}
+        onEnableLocalControl={onEnableLocalControl}
+        onDisableLocalControl={onDisableLocalControl}
+        onInstallRelationshipSkill={onRelationshipSkillInstallRequired}
       />
+      {fileGateOpen ? (
+        <FileSendGateDialog
+          runtime={localControlRuntime}
+          consent={localControlConsent}
+          onEnable={() => {
+            setPendingFileSend(true);
+            onEnableLocalControl();
+          }}
+          onDescriptionOnly={() => {
+            setPendingFileSend(false);
+            setFileGateOpen(false);
+            sendCurrentMessage({ includeLocalControlContext: false, includeStagedFileContext: false, fileDescriptionOnly: true });
+          }}
+          onCancel={() => {
+            setPendingFileSend(false);
+            setFileGateOpen(false);
+          }}
+        />
+      ) : null}
       <form className="composer" onSubmit={submit}>
         {attachments.length ? (
           <div className="attachment-context-panel">
@@ -454,6 +580,49 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     </main>
   );
 });
+
+function FileSendGateDialog({
+  runtime,
+  consent,
+  onEnable,
+  onDescriptionOnly,
+  onCancel
+}: {
+  runtime: "idle" | "checking" | "install_required" | "installing" | "ready" | "error";
+  consent: boolean;
+  onEnable: () => void;
+  onDescriptionOnly: () => void;
+  onCancel: () => void;
+}) {
+  const busy = runtime === "checking" || runtime === "installing";
+  return (
+    <div className="save-password-backdrop" role="presentation">
+      <section className="save-password-dialog" role="dialog" aria-modal="true" aria-label="本机文件发送方式">
+        <header className="save-password-header">
+          <FileText size={20} />
+          <div>
+            <strong>本机暂存文件</strong>
+            <small>{consent ? "当前会话正在准备本机文件传输能力。" : "选择本次消息如何描述这些文件。"}</small>
+          </div>
+          <button type="button" className="icon-button small" title="关闭" onClick={onCancel}>
+            <X size={15} />
+          </button>
+        </header>
+        <div className="save-password-content">
+          <section>
+            <h3>发送方式</h3>
+            <p className="save-password-note">启用本机文件传输后，Agent 才会收到 staged file transfer 上下文。只发送文件说明不会让 Agent 误以为可以读取文件内容。</p>
+          </section>
+        </div>
+        <footer className="save-password-actions">
+          <button type="button" className="secondary-button" onClick={onCancel}>取消</button>
+          <button type="button" className="secondary-button" onClick={onDescriptionOnly} disabled={busy}>只发送文件说明</button>
+          <button type="button" className="primary-button" onClick={onEnable} disabled={busy}>{busy ? "准备中..." : "启用本机文件传输"}</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
 
 const targetLabels: Record<ToolTarget, string> = {
   "local-user-machine": "用户本机",
@@ -928,6 +1097,20 @@ function buildDefaultAttachmentContext(attachments: UploadedFileRef[]): string {
 
 function displayFileName(file: UploadedFileRef): string {
   return file.displayName || file.name;
+}
+
+function buildFileDescriptionOnlyContext(attachments: UploadedFileRef[]): string {
+  if (!attachments.length) return "";
+  return [
+    "[本机暂存文件说明]",
+    "这些文件只在 Detach Agent 用户本机暂存。本次消息没有启用本机文件传输上下文；不要假设你可以读取文件内容、访问 sourceLocalPath，或生成 main-agent-save-file 请求。",
+    "",
+    ...attachments.map((file, index) => [
+      `${index + 1}. ${displayFileName(file)}`,
+      `   size: ${formatFileSize(file.size)}`,
+      `   mimeType: ${file.mimeType || "application/octet-stream"}`
+    ].join("\n"))
+  ].join("\n");
 }
 
 function isRelationshipSkillCheckMessage(text: string): boolean {

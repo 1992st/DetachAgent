@@ -142,7 +142,7 @@ export const relationshipSkillVerifyCommand = [
   `test -f ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs`
 ].join(" && ");
 
-export const relationshipSkillInstallPrompt = `请在 Main Agent 机器上安装或更新 OpenClaw relationship skill 到当前要求版本。
+export const relationshipSkillInstallPrompt = `任务：在 Main Agent 机器上安装或更新 OpenClaw relationship skill 到当前要求版本，并返回固定状态行。
 
 目标 skill: ${relationshipSkillName}
 目标版本: ${relationshipSkillVersion}
@@ -151,7 +151,7 @@ GitHub 仓库: ${relationshipSkillRepositoryUrl}
 安装路径: ${relationshipSkillTargetDir}/${relationshipSkillName}
 Adapter CLI 路径: ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs
 
-请在 Main Agent 机器执行以下步骤：
+执行步骤：
 1. 从 GitHub clone 仓库。
 2. 将 ${relationshipSkillSourcePath} 复制到 ${relationshipSkillTargetDir}/${relationshipSkillName}。
 3. 确认安装目录包含 SKILL.md、README.md、VERSION、CHANGELOG.md。
@@ -160,8 +160,11 @@ Adapter CLI 路径: ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs
 6. 同步安装 adapter CLI 到 ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs，并设置可执行权限。
 7. 安装后刷新或重启 Main Agent / OpenClaw skill 索引，让新 skill 生效。
 
-更新后，对 Detach Agent 本机命令使用：
-node ${relationshipSkillAdapterBinDir}/detaches-agent-adapter.mjs terminal-run --host <Detach Agent callback address> --command 'pwd' --reason 'check gateway-terminal'
+完成后只返回下面固定状态行，可以附加一行 ERROR_DETAIL：
+DETACH_AGENT_SKILL_INSTALL_STATUS: succeeded|failed
+DETACH_AGENT_SKILL_STATUS: ready|missing|outdated
+DETACH_AGENT_SKILL_VERSION: <version|none>
+DETACH_AGENT_ADAPTER_CLI_STATUS: ready|missing|failed
 
 不要把这个 skill 安装到 Detach Agent 机器，除非这台机器同时也是 Main Agent 机器。`;
 

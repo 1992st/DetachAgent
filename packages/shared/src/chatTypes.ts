@@ -30,6 +30,9 @@ export interface ChatSendRequest {
   thinking?: string;
   attachments?: UploadedFileRef[];
   attachmentContextOverride?: string;
+  includeLocalControlContext?: boolean;
+  includeStagedFileContext?: boolean;
+  activationReason?: LocalControlActivationReason;
 }
 
 export interface ChatSendResponse {
@@ -38,6 +41,7 @@ export interface ChatSendResponse {
 }
 
 export type RelationshipSkillStatus = "unknown" | "checking" | "ready" | "missing" | "outdated" | "error";
+export type LocalControlActivationReason = "user-click" | "new-session-inherited" | "file-transfer";
 
 export type ChatSocketServerEvent =
   | { type: "ready"; sessionKey: string }
@@ -57,7 +61,18 @@ export type ChatSocketServerEvent =
   | { type: "error"; message: string; details?: unknown };
 
 export type ChatSocketClientEvent =
-  | { type: "send"; message: string; thinking?: string; attachments?: UploadedFileRef[]; attachmentContextOverride?: string; idempotencyKey?: string }
+  | {
+      type: "send";
+      message: string;
+      thinking?: string;
+      attachments?: UploadedFileRef[];
+      attachmentContextOverride?: string;
+      includeLocalControlContext?: boolean;
+      includeStagedFileContext?: boolean;
+      activationReason?: LocalControlActivationReason;
+      localControlScope?: string;
+      idempotencyKey?: string;
+    }
   | { type: "bootstrap-relationship-skill-check"; idempotencyKey?: string }
   | { type: "history" }
   | { type: "abort"; runId: string };

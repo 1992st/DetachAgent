@@ -506,16 +506,39 @@ async function main() {
 
     chat.send(JSON.stringify({
       type: "send",
+      message: "hello clean smoke",
+      attachments: [upload.file],
+      idempotencyKey: "smoke-default-clean"
+    }));
+
+    while (!observed.chatSends.some((item) => item.idempotencyKey === "smoke-default-clean")) {
+      if (Date.now() - started > 8000) throw new Error("Timed out waiting for default clean chat send.");
+      await wait(50);
+    }
+    const defaultCleanSend = observed.chatSends.find((item) => item.idempotencyKey === "smoke-default-clean");
+    assert.equal(defaultCleanSend.sessionKey, chatSessionKey);
+    assert.match(defaultCleanSend.message, /^hello clean smoke/);
+    assert.doesNotMatch(defaultCleanSend.message, /\[\[DETACH_AGENT_FILE_STAGED\]\]/);
+    assert.doesNotMatch(defaultCleanSend.message, /\[detaches_agent context\]/);
+    assert.equal(defaultCleanSend.clientContext, undefined);
+    assert.equal(defaultCleanSend.attachments, undefined);
+
+    chat.send(JSON.stringify({
+      type: "send",
       message: "hello smoke",
       attachments: [upload.file],
+      includeLocalControlContext: true,
+      includeStagedFileContext: true,
+      activationReason: "file-transfer",
+      localControlScope: "agent-alpha:device:smoke",
       idempotencyKey: "smoke-idempotency"
     }));
 
-    while (!messages.some((message) => message.type === "sent") || !messages.some((message) => message.type === "chat")) {
+    while (!observed.chatSends.some((item) => item.idempotencyKey === "smoke-idempotency") || !messages.some((message) => message.type === "chat")) {
       if (Date.now() - started > 8000) throw new Error("Timed out waiting for chat send response.");
       await wait(50);
     }
-    const userChatSend = observed.chatSend;
+    const userChatSend = observed.chatSends.find((item) => item.idempotencyKey === "smoke-idempotency");
     assert.equal(userChatSend.sessionKey, chatSessionKey);
     assert.match(userChatSend.message, /^hello smoke/);
     assert.match(userChatSend.message, /\[\[DETACH_AGENT_FILE_STAGED\]\]/);
@@ -572,6 +595,10 @@ async function main() {
     assert.equal(userPromptEvent.method, "chat.send");
     assert.equal(userPromptEvent.sessionKey, chatSessionKey);
     assert.equal(userPromptEvent.includeClientContext, true);
+    assert.equal(userPromptEvent.includeLocalControlContext, true);
+    assert.equal(userPromptEvent.includeStagedFileContext, true);
+    assert.equal(userPromptEvent.localControlScope, "agent-alpha:device:smoke");
+    assert.equal(userPromptEvent.activationReason, "file-transfer");
     assert.match(userPromptEvent.payload.message, /^hello smoke/);
     assert.match(userPromptEvent.payload.message, /\[\[DETACH_AGENT_FILE_STAGED\]\]/);
     assert.match(userPromptEvent.payload.message, /\[detaches_agent context\]/);
@@ -1047,6 +1074,10 @@ async function main() {
     chat.send(JSON.stringify({
       type: "send",
       message: "client-context-compat smoke",
+      includeLocalControlContext: true,
+      includeStagedFileContext: false,
+      activationReason: "user-click",
+      localControlScope: "agent-alpha:device:smoke",
       idempotencyKey: "smoke-client-context-compat"
     }));
     while (

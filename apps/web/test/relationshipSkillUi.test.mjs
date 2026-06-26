@@ -28,9 +28,13 @@ assert.match(settingsPanel, /保存配置并重启 Detach Agent 后生效/, "set
 assert.match(settingsPanel, /启用 ssh-terminal \/ reverse bridge/, "advanced settings should include the ssh-terminal bridge checkbox");
 assert.match(settingsPanel, /localSshBridgeEnabled:\s*false/, "quick direct setup should disable local SSH bridge");
 
-assert.match(chatPanel, /bootstrap-relationship-skill-check/, "ChatPanel should send the relationship skill bootstrap check");
+assert.match(chatPanel, /bootstrap-relationship-skill-check/, "ChatPanel should still support explicit relationship skill checks");
 assert.match(chatPanel, /sendRelationshipSkillCheck/, "ChatPanel should centralize relationship skill check sending");
 assert.match(chatPanel, /relationshipSkillCheckNonce/, "ChatPanel should allow New session to explicitly trigger skill checking");
+assert.doesNotMatch(chatPanel, /sendRelationshipSkillCheck\("socket-open"\)/, "ChatPanel should not auto-check relationship skill on socket open");
+assert.match(chatPanel, /includeLocalControlContext/, "ChatPanel should gate local-control prompt injection per message");
+assert.match(chatPanel, /includeStagedFileContext/, "ChatPanel should gate staged-file prompt injection per message");
+assert.match(chatPanel, /只发送文件说明/, "ChatPanel should support sending local staged files as description only");
 assert.match(chatPanel, /Date\.now\(\)\.toString\(36\)/, "relationship skill checks should use unique idempotency keys");
 assert.match(chatPanel, /isRelationshipSkillCheckMessage/, "ChatPanel should hide bootstrap skill check messages from visible chat");
 assert.match(connectionBar, /relationship-skill-alert/, "ConnectionBar should render the relationship skill alert");
@@ -40,7 +44,9 @@ assert.match(connectionBar, /更新 relationship skill/, "ConnectionBar should e
 assert.match(app, /relationshipSkillStatus/, "App should own relationship skill status state");
 assert.match(app, /relationshipSkillInstalledVersion/, "App should keep the installed relationship skill version");
 assert.match(app, /relationshipSkillRequiredVersion/, "App should keep the required relationship skill version");
-assert.match(app, /relationshipSkillCheckNonce/, "New session should explicitly trigger the relationship skill check");
+assert.match(app, /localControlConsentByScope/, "App should track local-control consent per agent scope");
+assert.match(app, /localControlRuntimeBySession/, "App should track local-control runtime per session");
+assert.match(app, /relationshipSkillCheckNonce/, "New session should explicitly trigger the relationship skill check only when consent is enabled");
 assert.match(app, /relationshipSkillPromptOpen/, "skill action should open the copyable prompt dialog");
 assert.match(app, /RelationshipSkillPromptDialog/, "App should render a relationship skill prompt dialog");
 assert.match(app, /fetchAgentTerminalSessions/, "App should poll Agent Terminal sessions for pending authorization");
@@ -55,12 +61,12 @@ assert.match(app, /navigator\.clipboard\.writeText\(prompt\)/, "prompt dialog sh
 assert.match(app, /callbackHost/, "prompt dialog should include the current Detach Agent callback host when available");
 assert.match(skillInstallPanel, /DETACH_AGENT_RELATIONSHIP_SKILL_VERSION/, "Skill install panel should use the shared required skill version");
 assert.match(skillInstallPanel, /export const relationshipSkillInstallPrompt/, "Skill install panel should export the shared install/update prompt");
-assert.match(skillInstallPanel, /安装或更新 OpenClaw relationship skill 到当前要求版本/, "Skill install panel should give Main Agent an update prompt");
+assert.match(skillInstallPanel, /DETACH_AGENT_SKILL_INSTALL_STATUS/, "Skill install panel should request parseable install status");
 assert.match(skillInstallPanel, /detaches-agent-adapter\.mjs/, "Skill install prompt should also install the adapter CLI helper");
-assert.match(skillInstallPanel, /terminal-run --host/, "Skill install prompt should show the new Agent Terminal Runtime command");
 
 assert.match(css, /@keyframes skill-alert-pulse/, "CSS should include the orange breathing alert animation");
 assert.match(css, /relationship-skill-prompt-dialog/, "CSS should style the relationship skill prompt dialog");
+assert.match(css, /local-control-card/, "CSS should style the control-local enable panel");
 assert.match(preview, /Main Agent 高级配置预览/, "static HTML preview should exist");
 assert.match(preview, /Relationship skill 未安装/, "static HTML preview should show the missing skill reminder");
 

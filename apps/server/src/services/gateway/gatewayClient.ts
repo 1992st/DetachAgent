@@ -90,6 +90,12 @@ export class GatewayClient extends EventEmitter {
     idempotencyKey?: string;
     clientContext?: Record<string, unknown>;
     clientContextFallbackMessage?: string;
+    promptGate?: {
+      includeLocalControlContext?: boolean;
+      includeStagedFileContext?: boolean;
+      localControlScope?: string;
+      activationReason?: string;
+    };
   }): Promise<unknown> {
     await this.connect();
     const attachments = params.attachments
@@ -122,6 +128,10 @@ export class GatewayClient extends EventEmitter {
         sessionKey: params.sessionKey,
         idempotencyKey: payload.idempotencyKey,
         includeClientContext,
+        includeLocalControlContext: params.promptGate?.includeLocalControlContext,
+        includeStagedFileContext: params.promptGate?.includeStagedFileContext,
+        localControlScope: params.promptGate?.localControlScope,
+        activationReason: params.promptGate?.activationReason,
         payload
       });
       return this.request("chat.send", payload, 35000);

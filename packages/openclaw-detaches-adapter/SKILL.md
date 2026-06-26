@@ -10,6 +10,8 @@ Use this skill when the conversation includes `clientContext.detaches`, `[detach
 
 detaches_agent is a local UI and approval broker running on the user's computer. It can bind a conversation to a hidden local terminal, staged files, and a Tool Broker. This skill does not execute tools directly and must not bypass detaches_agent approval.
 
+Detach Agent context describes request targets and approval routing; it does not redefine your Host/Main Agent identity. Use your own tools for Host/Main Agent work, and use detaches_agent only when the requested target is the user's local machine or staged local files.
+
 ## Required Flow
 
 1. For ordinary `local-user-machine` terminal commands, use Agent Terminal Runtime with the Detach Agent callback host/IP. The adapter owns bootstrap, lease refresh, approval waiting, execution waiting, output, and exitCode:

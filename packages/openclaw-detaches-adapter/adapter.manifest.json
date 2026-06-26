@@ -83,6 +83,8 @@
     "contextExport.doctorCommand"
   ],
   "hardRules": [
+    "Detach Agent context describes request targets and approval routing; it does not redefine Host/Main Agent identity.",
+    "Use Host/Main Agent tools for Host/Main Agent work; use detaches_agent only for the user's local machine or staged local files.",
     "Never claim a command, file read, file transfer, download, archive, or modification has happened until approved tool output proves it.",
     "Never change a target from remote-agent-host, gateway-managed, or main-agent-machine to local-user-machine as a fallback.",
     "Use terminal-run --host for ordinary local-user-machine terminal commands; fenced blocks and broker-event requests are compatibility fallbacks.",

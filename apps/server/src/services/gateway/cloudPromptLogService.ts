@@ -10,6 +10,10 @@ export interface CloudPromptLogEntry {
   sessionKey: string;
   idempotencyKey?: string;
   includeClientContext: boolean;
+  includeLocalControlContext?: boolean;
+  includeStagedFileContext?: boolean;
+  localControlScope?: string;
+  activationReason?: string;
   payload: unknown;
 }
 

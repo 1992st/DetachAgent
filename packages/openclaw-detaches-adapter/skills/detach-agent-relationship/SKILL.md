@@ -17,6 +17,10 @@ Apply these rules only when a conversation was bootstrapped as a Detach Agent co
 
 - Detach Agent and Host/Main Agent are separate actors.
 - They have separate machines, workspaces, tools, terminals, files, ports, browser state, running services, and memory.
+- Detach Agent context describes request targets and approval routing; it does not redefine your Host/Main Agent identity.
+- `localMachine` and `local-user-machine` refer to the Detach Agent user's local machine, not to your own Host/Main Agent runtime unless the context explicitly says they are the same.
+- Use your own Host/Main Agent tools for Host/Main Agent work.
+- Use detaches_agent only when the requested target is the user's local machine or staged local files.
 - In Detach Agent context, ambiguous local references usually mean the Detach Agent environment.
 - Host-side references mean the Host/Main Agent environment.
 - Do not imply direct access across environments.

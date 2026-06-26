@@ -12,6 +12,13 @@ interface Props {
   emptyText?: string;
   className?: string;
   autoOpenKey?: string | null;
+  localControlRuntime?: "idle" | "checking" | "install_required" | "installing" | "ready" | "error";
+  localControlConsent?: boolean;
+  relationshipSkillStatus?: string;
+  relationshipSkillMessage?: string;
+  onEnableLocalControl?: () => void;
+  onDisableLocalControl?: () => void;
+  onInstallRelationshipSkill?: () => void;
   onClose?: () => void;
 }
 
@@ -28,6 +35,13 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
   emptyText = "Local control terminal is connected for this conversation. Commands approved from cloud agent messages will run here.",
   className = "",
   autoOpenKey = null,
+  localControlRuntime = "ready",
+  localControlConsent = true,
+  relationshipSkillStatus = "unknown",
+  relationshipSkillMessage,
+  onEnableLocalControl,
+  onDisableLocalControl,
+  onInstallRelationshipSkill,
   onClose
 }, ref) {
   const [open, setOpen] = useState(false);
@@ -44,6 +58,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
   const fitAddonRef = useRef<FitAddon | null>(null);
   const outputRef = useRef("");
   const mountedRef = useRef(true);
+  const localControlReady = localControlRuntime === "ready";
 
   useImperativeHandle(ref, () => ({
     reveal() {
@@ -101,7 +116,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
     outputRef.current = "";
     terminalRef.current?.clear();
     setStatus(null);
-    if (!sessionKey) {
+    if (!sessionKey || !localControlReady) {
       setSocketState("idle");
       return;
     }
@@ -139,7 +154,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
       }
     };
     return () => ws.close();
-  }, [privilege, sessionKey]);
+  }, [localControlReady, privilege, sessionKey]);
 
   useEffect(() => {
     if (!open || minimized || !terminalHostRef.current || terminalRef.current) return;
@@ -267,6 +282,40 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
         : "Administrator terminal is Windows-only";
   const AdminIcon = adminActive ? ShieldCheck : Shield;
 
+  if (!localControlReady) {
+    const busy = localControlRuntime === "checking" || localControlRuntime === "installing";
+    const needsInstall = localControlRuntime === "install_required" || relationshipSkillStatus === "missing" || relationshipSkillStatus === "outdated";
+    return (
+      <section className={`terminal-panel local-control-panel ${className}`}>
+        <div className="local-control-card">
+          <div>
+            <div className="local-control-heading">
+              <strong>控制本机</strong>
+              <div className="local-control-actions">
+                {needsInstall ? (
+                  <button type="button" className="secondary-button compact" onClick={onInstallRelationshipSkill} disabled={!sessionKey || busy}>
+                    安装 skill
+                  </button>
+                ) : null}
+                <button type="button" className="secondary-button compact" onClick={onEnableLocalControl} disabled={!sessionKey || busy}>
+                  {busy ? "准备中..." : localControlConsent ? "重试" : "启用"}
+                </button>
+              </div>
+            </div>
+            <small>
+              {relationshipSkillMessage
+                || (busy
+                  ? "正在准备当前 Agent 的本机控制能力..."
+                  : localControlConsent
+                    ? "当前 Agent 已请求启用，等待 relationship skill 检查。"
+                    : "启用后，当前 Agent 可通过审批队列请求操作这台电脑。")}
+            </small>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   function renderAdminButton(variant: "toggle" | "mini" | "toolbar") {
     return (
       <button
@@ -313,6 +362,9 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
                 <small>{sessionKey}</small>
               </div>
               <div className="terminal-actions">
+                <button type="button" className="secondary-button compact" title="停止控制本机" onClick={onDisableLocalControl}>
+                  停止控制本机
+                </button>
                 {renderAdminButton("toolbar")}
                 <button type="button" className="icon-button" title="Copy terminal output" onClick={() => void copyOutput()}>
                   <Copy size={15} />

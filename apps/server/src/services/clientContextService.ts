@@ -323,11 +323,12 @@ export function renderDetachesSessionContext(context: DetachesSessionContext): s
   const terminalChannelLines = renderTerminalChannelLines(context);
   return [
     "[detaches_agent context]",
-    "You are talking to the user through the detaches_agent local UI, not plain webchat.",
+    "You are talking to the user through the detaches_agent local UI, but this context describes request targets and approval routing; it does not redefine your Host/Main Agent identity.",
+    "Use your own Main Agent tools for Host/Main Agent work. Use detaches_agent only when the requested target is the user's local machine or staged local files.",
     `sessionKey: ${context.sessionKey}`,
     context.agentId ? `agentId: ${context.agentId}` : "agentId: unknown",
     `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
-    `localMachine.os: ${localMachine?.os || "unknown"}`,
+    `localMachine.os: ${localMachine?.os || "unknown"} (Detach Agent user's local machine, not the Host/Main Agent host identity)`,
     `localMachine.nodePlatform: ${localMachine?.nodePlatform || "unknown"}`,
     `localMachine.shell: ${localMachine?.shell || "unknown"}`,
     `localMachine.commandDialect: ${localMachine?.commandDialect || "unknown"}`,
@@ -366,10 +367,12 @@ export function renderDetachesClientContextFallback(context: DetachesSessionCont
   return [
     "[detaches_agent compatibility context]",
     "Structured clientContext.detaches was not accepted by the current host/Gateway, so detaches_agent included this readable fallback context. Treat it as authoritative for detaches_agent routing.",
+    "This context describes request targets and approval routing; it does not redefine your Host/Main Agent identity.",
+    "Use your own Main Agent tools for Host/Main Agent work. Use detaches_agent only when the requested target is the user's local machine or staged local files.",
     `sessionKey: ${context.sessionKey}`,
     context.agentId ? `agentId: ${context.agentId}` : "agentId: unknown",
     `userDevice: ${context.userDevice.displayName} (${context.userDevice.deviceIdShort})`,
-    `localMachine.os: ${localMachine?.os || "unknown"}`,
+    `localMachine.os: ${localMachine?.os || "unknown"} (Detach Agent user's local machine, not the Host/Main Agent host identity)`,
     `localMachine.nodePlatform: ${localMachine?.nodePlatform || "unknown"}`,
     `localMachine.shell: ${localMachine?.shell || "unknown"}`,
     `localMachine.commandDialect: ${localMachine?.commandDialect || "unknown"}`,

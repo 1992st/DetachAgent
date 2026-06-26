@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1
+
+- Clarify that Detach Agent context describes request targets and does not redefine Host/Main Agent identity.
+- Prefer the Host/Main Agent's own tools for Host/Main Agent work; use detaches_agent only for the user's local machine or staged local files.
+- Align with explicit local-control consent so ordinary conversations are not treated as local-control sessions.
+
 ## 1.2.0
 
 - Make `terminal-run --host <Detach Agent callback address>` the primary gateway-terminal path.

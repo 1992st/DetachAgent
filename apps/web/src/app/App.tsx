@@ -11,6 +11,14 @@ import { relationshipSkillInstallPrompt, relationshipSkillVersion } from "../fea
 import { FileBrowserPage } from "../features/files/FileBrowserPage.js";
 
 type ViewMode = "chat" | "network" | "tool-queue" | "file-browser";
+type LocalControlRuntimeState = "idle" | "checking" | "install_required" | "installing" | "ready" | "error";
+
+interface RelationshipSkillState {
+  status: RelationshipSkillStatus;
+  message?: string;
+  installedVersion?: string;
+  requiredVersion?: string;
+}
 
 export function App() {
   const [view, setView] = useState<ViewMode>("chat");
@@ -44,6 +52,10 @@ export function App() {
   const [relationshipSkillRequiredVersion, setRelationshipSkillRequiredVersion] = useState<string | undefined>(undefined);
   const [relationshipSkillCheckNonce, setRelationshipSkillCheckNonce] = useState(0);
   const [relationshipSkillPromptOpen, setRelationshipSkillPromptOpen] = useState(false);
+  // Consent 是用户对某个 Agent 窗口/模式的长期意图；runtime 是某个 session 的临时检查结果，二者不能合并。
+  const [localControlConsentByScope, setLocalControlConsentByScope] = useState<Record<string, boolean>>({});
+  const [localControlRuntimeBySession, setLocalControlRuntimeBySession] = useState<Record<string, LocalControlRuntimeState>>({});
+  const [relationshipSkillByScope, setRelationshipSkillByScope] = useState<Record<string, RelationshipSkillState>>({});
   const [agentTerminalSession, setAgentTerminalSession] = useState<AgentTerminalSession | null>(null);
   const [agentTerminalBusy, setAgentTerminalBusy] = useState(false);
   const [agentTerminalError, setAgentTerminalError] = useState<string | null>(null);
@@ -192,11 +204,14 @@ export function App() {
   }, [refreshAgentTerminalAuthorization, refreshAgentTerminalToolApproval]);
 
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
-  const selectedSessionScope = selectedAgent ? sessionScopeKey(selectedAgent.id, sessionMode) : null;
+  const selectedSessionScope = selectedAgent ? sessionScopeKey(selectedAgent.id, sessionMode, clientIdentity) : null;
   const selectedSession = selectedAgent && selectedSessionScope
     ? sessionOverrides[selectedSessionScope] ?? sessionKeyForAgent(selectedAgent, sessionMode, clientIdentity)
     : null;
   const attachments = selectedSession ? attachmentsBySession[selectedSession] ?? [] : [];
+  const selectedLocalControlConsent = selectedSessionScope ? localControlConsentByScope[selectedSessionScope] === true : false;
+  const selectedLocalControlRuntime = selectedSession ? localControlRuntimeBySession[selectedSession] ?? "idle" : "idle";
+  const selectedRelationshipSkill = selectedSessionScope ? relationshipSkillByScope[selectedSessionScope] : undefined;
 
   const loadTerminalApps = useCallback(async () => {
     setTerminalAppsLoading(true);
@@ -358,22 +373,72 @@ export function App() {
   }
 
   const handleRelationshipSkillStatusChange = useCallback((status: RelationshipSkillStatus, message?: string, installedVersion?: string, requiredVersion?: string) => {
+    const scope = selectedSessionScope;
+    const session = selectedSession;
+    if (scope) {
+      setRelationshipSkillByScope((current) => ({
+        ...current,
+        [scope]: { status, message, installedVersion, requiredVersion }
+      }));
+    }
+    if (session) {
+      setLocalControlRuntimeBySession((current) => {
+        const nextState: LocalControlRuntimeState = status === "ready"
+          ? "ready"
+          : status === "missing" || status === "outdated"
+            ? "install_required"
+            : status === "checking"
+              ? "checking"
+              : status === "error"
+                ? "error"
+                : current[session] ?? "idle";
+        return { ...current, [session]: nextState };
+      });
+    }
     setRelationshipSkillStatus(status);
     setRelationshipSkillMessage(message);
     setRelationshipSkillInstalledVersion(installedVersion);
     setRelationshipSkillRequiredVersion(requiredVersion);
-  }, []);
+  }, [selectedSession, selectedSessionScope]);
 
   function handleNewSession() {
     if (!selectedAgent || !selectedSessionScope) return;
     const nextSession = newSessionKeyForAgent(selectedAgent, sessionMode, clientIdentity);
     setSessionOverrides((current) => ({ ...current, [selectedSessionScope]: nextSession }));
     setAttachmentsBySession((current) => ({ ...current, [nextSession]: [] }));
+    setLocalControlRuntimeBySession((current) => ({ ...current, [nextSession]: "idle" }));
+    if (localControlConsentByScope[selectedSessionScope]) {
+      setLocalControlRuntimeBySession((current) => ({ ...current, [nextSession]: "checking" }));
+      setRelationshipSkillStatus("checking");
+      setRelationshipSkillMessage("Checking detach-agent-relationship skill...");
+      setRelationshipSkillInstalledVersion(undefined);
+      setRelationshipSkillRequiredVersion(undefined);
+      setRelationshipSkillCheckNonce((current) => current + 1);
+    }
+  }
+
+  function handleEnableLocalControl() {
+    if (!selectedSession || !selectedSessionScope) return;
+    setLocalControlConsentByScope((current) => ({ ...current, [selectedSessionScope]: true }));
+    setLocalControlRuntimeBySession((current) => ({ ...current, [selectedSession]: "checking" }));
     setRelationshipSkillStatus("checking");
     setRelationshipSkillMessage("Checking detach-agent-relationship skill...");
     setRelationshipSkillInstalledVersion(undefined);
     setRelationshipSkillRequiredVersion(undefined);
-    setRelationshipSkillCheckNonce((current) => current + 1);
+    chatPanelRef.current?.requestRelationshipSkillCheck("user-click");
+  }
+
+  function handleDisableLocalControl() {
+    if (!selectedSessionScope || !selectedSession) return;
+    setLocalControlConsentByScope((current) => ({ ...current, [selectedSessionScope]: false }));
+    setLocalControlRuntimeBySession((current) => ({ ...current, [selectedSession]: "idle" }));
+  }
+
+  function handleInstallRelationshipSkill() {
+    if (!selectedSession || !selectedSessionScope) return;
+    setLocalControlRuntimeBySession((current) => ({ ...current, [selectedSession]: "installing" }));
+    setRelationshipSkillPromptOpen(false);
+    chatPanelRef.current?.sendRelationshipSkillInstallPrompt(relationshipSkillInstallPrompt);
   }
 
   return (
@@ -421,11 +486,12 @@ export function App() {
       ) : null}
       {relationshipSkillPromptOpen ? (
         <RelationshipSkillPromptDialog
-          status={relationshipSkillStatus}
-          message={relationshipSkillMessage}
-          installedVersion={relationshipSkillInstalledVersion}
-          requiredVersion={relationshipSkillRequiredVersion}
+          status={selectedRelationshipSkill?.status ?? relationshipSkillStatus}
+          message={selectedRelationshipSkill?.message ?? relationshipSkillMessage}
+          installedVersion={selectedRelationshipSkill?.installedVersion ?? relationshipSkillInstalledVersion}
+          requiredVersion={selectedRelationshipSkill?.requiredVersion ?? relationshipSkillRequiredVersion}
           callbackHost={health?.config.publicBaseUrl}
+          onInstall={() => handleInstallRelationshipSkill()}
           onDismiss={() => setRelationshipSkillPromptOpen(false)}
         />
       ) : null}
@@ -439,10 +505,10 @@ export function App() {
         terminalAppsError={terminalAppsError}
         onLoadTerminalApps={loadTerminalApps}
         onOpenTerminalApp={(appId) => void openTerminalApp(appId)}
-        relationshipSkillStatus={relationshipSkillStatus}
-        relationshipSkillMessage={relationshipSkillMessage}
-        relationshipSkillInstalledVersion={relationshipSkillInstalledVersion}
-        relationshipSkillRequiredVersion={relationshipSkillRequiredVersion}
+        relationshipSkillStatus={selectedRelationshipSkill?.status ?? relationshipSkillStatus}
+        relationshipSkillMessage={selectedRelationshipSkill?.message ?? relationshipSkillMessage}
+        relationshipSkillInstalledVersion={selectedRelationshipSkill?.installedVersion ?? relationshipSkillInstalledVersion}
+        relationshipSkillRequiredVersion={selectedRelationshipSkill?.requiredVersion ?? relationshipSkillRequiredVersion}
         onRelationshipSkillAction={() => {
           setRelationshipSkillPromptOpen(true);
         }}
@@ -483,6 +549,11 @@ export function App() {
             clientIdentity={clientIdentity}
             attachments={attachments}
             relationshipSkillCheckNonce={relationshipSkillCheckNonce}
+            localControlConsent={selectedLocalControlConsent}
+            localControlRuntime={selectedLocalControlRuntime}
+            localControlScope={selectedSessionScope ?? undefined}
+            relationshipSkillStatus={selectedRelationshipSkill?.status ?? relationshipSkillStatus}
+            relationshipSkillMessage={selectedRelationshipSkill?.message ?? relationshipSkillMessage}
             onSessionModeChange={setSessionMode}
             onNewSession={handleNewSession}
             onClearAttachments={() => {
@@ -491,6 +562,9 @@ export function App() {
             }}
             onNeedUpload={handleUpload}
             onRelationshipSkillStatusChange={handleRelationshipSkillStatusChange}
+            onEnableLocalControl={handleEnableLocalControl}
+            onDisableLocalControl={handleDisableLocalControl}
+            onRelationshipSkillInstallRequired={() => setRelationshipSkillPromptOpen(true)}
           />
         </div>
       ) : view === "network" ? (
@@ -510,6 +584,11 @@ export function App() {
             agentId={selectedAgent?.id ?? null}
             clientIdentity={clientIdentity}
             onRevealTerminal={() => {
+              if (selectedLocalControlRuntime !== "ready") {
+                setView("chat");
+                window.setTimeout(() => chatPanelRef.current?.promptEnableLocalControl(), 50);
+                return;
+              }
               setView("chat");
               window.setTimeout(() => chatPanelRef.current?.revealTerminal(), 50);
             }}
@@ -651,6 +730,7 @@ function RelationshipSkillPromptDialog({
   installedVersion,
   requiredVersion,
   callbackHost,
+  onInstall,
   onDismiss
 }: {
   status: RelationshipSkillStatus;
@@ -658,6 +738,7 @@ function RelationshipSkillPromptDialog({
   installedVersion?: string;
   requiredVersion?: string;
   callbackHost?: string;
+  onInstall: () => void;
   onDismiss: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -701,6 +782,10 @@ function RelationshipSkillPromptDialog({
           <pre>{prompt}</pre>
           {copied ? <small>已复制</small> : null}
         </div>
+        <footer className="save-password-actions">
+          <button type="button" className="secondary-button" onClick={onDismiss}>稍后</button>
+          <button type="button" className="primary-button" onClick={onInstall}>安装并启用</button>
+        </footer>
       </section>
     </div>
   );
@@ -868,6 +953,7 @@ function newSessionKeyForAgent(agent: AgentSummary, sessionMode: ChatSessionMode
   return `${base}:new:${suffix}`;
 }
 
-function sessionScopeKey(agentId: string, sessionMode: ChatSessionMode): string {
-  return `${normalizeAgentId(agentId)}:${sessionMode}`;
+function sessionScopeKey(agentId: string, sessionMode: ChatSessionMode, identity: ClientIdentity | null): string {
+  const deviceScope = sessionMode === "device" ? identity?.deviceIdShort || "local" : "main";
+  return `${normalizeAgentId(agentId)}:${sessionMode}:${deviceScope}`;
 }

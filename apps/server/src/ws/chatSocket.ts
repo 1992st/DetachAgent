@@ -86,16 +86,33 @@ export function attachChatSocket(server: HttpServer): void {
         if (event.type === "history") {
           await sendHistory();
         } else if (event.type === "send") {
-          const detachesContext = await buildDetachesSessionContext(sessionMode, sessionKey, event.attachments, { createContextExport: true });
-          const clientContext = await buildChatClientContext(sessionMode, sessionKey, event.attachments, { detachesContext });
+          const includeLocalControlContext = event.includeLocalControlContext === true;
+          const includeStagedFileContext = includeLocalControlContext && event.includeStagedFileContext === true;
+          const detachesContext = includeLocalControlContext
+            ? await buildDetachesSessionContext(sessionMode, sessionKey, includeStagedFileContext ? event.attachments : [], { createContextExport: true })
+            : null;
+          const clientContext = detachesContext
+            ? await buildChatClientContext(sessionMode, sessionKey, includeStagedFileContext ? event.attachments : [], { detachesContext })
+            : undefined;
           const response = await gatewayClient.sendChat({
             sessionKey,
-            message: await buildOutboundMessage(event.message, detachesContext, event.attachments, event.attachmentContextOverride),
+            message: await buildOutboundMessage(
+              event.message,
+              detachesContext,
+              includeStagedFileContext ? event.attachments : [],
+              includeStagedFileContext ? event.attachmentContextOverride : undefined
+            ),
             thinking: event.thinking,
-            attachments: event.attachments,
+            attachments: includeStagedFileContext ? undefined : event.attachments,
             idempotencyKey: event.idempotencyKey,
             clientContext,
-            clientContextFallbackMessage: renderDetachesClientContextFallback(detachesContext)
+            clientContextFallbackMessage: detachesContext ? renderDetachesClientContextFallback(detachesContext) : undefined,
+            promptGate: {
+              includeLocalControlContext,
+              includeStagedFileContext,
+              localControlScope: event.localControlScope,
+              activationReason: event.activationReason
+            }
           });
           const runId = typeof (response as any)?.runId === "string" ? (response as any).runId : "";
           if (runId) activeRunIds.add(runId);
@@ -131,8 +148,10 @@ export function attachChatSocket(server: HttpServer): void {
 function buildRelationshipSkillCheckPrompt(): string {
   return [
     "[[DETACH_AGENT_RELATIONSHIP_SKILL_CHECK]]",
+    "Purpose: enable Detach Agent local-control context for this current session only after user consent.",
     `请用最短方式检查 Main Agent 是否已安装并可见 detach-agent-relationship skill，且 VERSION 为 ${DETACH_AGENT_RELATIONSHIP_SKILL_VERSION} 或更高兼容版本。`,
-    "如果能读取 VERSION，请读取后判断；不要执行安装。",
+    "Check only. Do not install. Do not run terminal commands. Do not request tools. Do not reinterpret Main Agent identity.",
+    "如果能读取 VERSION，请读取后判断。",
     "只返回下面两行固定参数，不要解释：",
     "DETACH_AGENT_SKILL_STATUS: ready",
     `DETACH_AGENT_SKILL_VERSION: ${DETACH_AGENT_RELATIONSHIP_SKILL_VERSION}`,
@@ -159,7 +178,7 @@ function parseRelationshipSkillStatus(response: unknown): {
     if (!installedVersion || installedVersion === "unknown") {
       return {
         status: "outdated",
-        message: `detach-agent-relationship skill version was not reported; update to ${requiredVersion}.`,
+        message: `detach-agent-relationship skill version is unknown. Please update to ${requiredVersion}.`,
         installedVersion: installedVersion || "unknown",
         requiredVersion
       };
@@ -167,7 +186,7 @@ function parseRelationshipSkillStatus(response: unknown): {
     if (compareSemver(installedVersion, requiredVersion) < 0) {
       return {
         status: "outdated",
-        message: `detach-agent-relationship skill is ${installedVersion}; update to ${requiredVersion}.`,
+        message: `detach-agent-relationship skill is ${installedVersion}. Please update to ${requiredVersion}.`,
         installedVersion,
         requiredVersion
       };
@@ -182,7 +201,7 @@ function parseRelationshipSkillStatus(response: unknown): {
   if (/\bdetaches?_agent_skill_status\s*:\s*missing\b/.test(lowerText) || /\bdetach_agent_skill_status\s*:\s*missing\b/.test(lowerText)) {
     return {
       status: "missing",
-      message: `detach-agent-relationship skill is missing; install ${requiredVersion}.`,
+      message: `detach-agent-relationship skill is not installed. Please install ${requiredVersion}.`,
       installedVersion: installedVersion && installedVersion !== "none" ? installedVersion : undefined,
       requiredVersion
     };
@@ -190,7 +209,7 @@ function parseRelationshipSkillStatus(response: unknown): {
   if (/\bdetaches?_agent_skill_status\s*:\s*outdated\b/.test(lowerText) || /\bdetach_agent_skill_status\s*:\s*outdated\b/.test(lowerText)) {
     return {
       status: "outdated",
-      message: `detach-agent-relationship skill is ${installedVersion || "outdated"}; update to ${requiredVersion}.`,
+      message: `detach-agent-relationship skill is ${installedVersion || "outdated"}. Please update to ${requiredVersion}.`,
       installedVersion: installedVersion || "unknown",
       requiredVersion
     };
@@ -239,14 +258,14 @@ function collectText(value: unknown, output: string[] = [], depth = 0): string[]
 
 async function buildOutboundMessage(
   message: string,
-  detachesContext: DetachesSessionContext,
+  detachesContext: DetachesSessionContext | null,
   attachments?: UploadedFileRef[],
   attachmentContextOverride?: string
 ): Promise<string> {
   const blocks = [message];
   const attachmentContext = await buildCleanAttachmentContext(attachments, attachmentContextOverride);
   if (attachmentContext) blocks.push("", attachmentContext);
-  blocks.push("", renderDetachesSessionContext(detachesContext));
+  if (detachesContext) blocks.push("", renderDetachesSessionContext(detachesContext));
   return blocks.join("\n");
 }
 
