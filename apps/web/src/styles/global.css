@@ -1540,6 +1540,12 @@ h3 { font-size: 14px; }
   background: var(--panel);
 }
 
+.composer.drag-over {
+  outline: 2px dashed rgba(37, 99, 235, 0.58);
+  outline-offset: -8px;
+  background: #eff6ff;
+}
+
 .prompt-preset-rail {
   position: fixed;
   top: 184px;

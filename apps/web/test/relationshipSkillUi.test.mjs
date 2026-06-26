@@ -44,6 +44,8 @@ assert.match(chatPanel, /PromptPresetRail/, "ChatPanel should render the prompt 
 assert.match(chatPanel, /onDoubleClick/, "prompt floating balls should support double-click editing");
 assert.match(chatPanel, /prompt-preset-mobile-toggle/, "prompt floating balls should expose a compact mobile toggle");
 assert.match(chatPanel, /setDraft\(\(current\) => current\.trim\(\) \? `\$\{trimmed\}\\n\\n\$\{current\}` : trimmed\)/, "prompt presets should prepend without replacing the draft");
+assert.match(chatPanel, /handleComposerDrop/, "ChatPanel should support dropping files onto the composer");
+assert.match(chatPanel, /onNeedUpload\(event\.dataTransfer\.files\)/, "dropped files should use the existing upload flow");
 assert.match(chatPanel, /onTerminalActivityChange\("running"\)/, "ChatPanel inline tool approvals should mark terminal commands as running");
 assert.match(connectionBar, /relationship-skill-alert/, "ConnectionBar should render the relationship skill alert");
 assert.match(connectionBar, /Relationship skill 未安装/, "ConnectionBar should show missing skill copy");
@@ -84,6 +86,7 @@ assert.match(css, /prompt-preset-rail/, "CSS should style the prompt floating ba
 assert.match(css, /prompt-preset-list[\s\S]*overflow-y: auto/, "prompt floating ball list should support vertical scrolling");
 assert.match(css, /prompt-preset-rail:not\(\.mobile-open\) \.prompt-preset-list/, "prompt floating ball rail should collapse on small screens");
 assert.match(css, /prompt-preset-editor/, "CSS should style the prompt preset editor drawer");
+assert.match(css, /composer\.drag-over/, "CSS should highlight the composer while dragging files");
 assert.match(preview, /Main Agent 高级配置预览/, "static HTML preview should exist");
 assert.match(preview, /Relationship skill 未安装/, "static HTML preview should show the missing skill reminder");
 

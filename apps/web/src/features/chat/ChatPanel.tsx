@@ -1,4 +1,4 @@
-import { type CSSProperties, FormEvent, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type DragEvent, FormEvent, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, FileText, List, Minus, Paperclip, Plus, Send, Square, Trash2, X } from "lucide-react";
 import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, MainAgentFileTransferSnapshot, RelationshipSkillStatus, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
 import { approveToolRequest, extractToolRequests, fetchCloudPromptLogs, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward, submitMainAgentTransferPassword, wsUrl } from "../../lib/api.js";
@@ -78,6 +78,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [attachmentContext, setAttachmentContext] = useState("");
   const [attachmentContextOpen, setAttachmentContextOpen] = useState(false);
+  const [composerDragActive, setComposerDragActive] = useState(false);
   const [fileGateOpen, setFileGateOpen] = useState(false);
   const [pendingFileSend, setPendingFileSend] = useState(false);
   // Prompt 浮动球只保存在当前浏览器，避免把个人常用 prompt 同步到远端或其他设备。
@@ -96,6 +97,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<TerminalPanelHandle | null>(null);
   const logStreamRef = useRef<HTMLDivElement | null>(null);
+  const composerDragDepthRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
   const cloudPromptLogIdsRef = useRef<Set<string>>(new Set());
   const relationshipSkillCheckSeqRef = useRef(0);
@@ -419,6 +421,34 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     onClearAttachments();
   }
 
+  function handleComposerDragEnter(event: DragEvent<HTMLFormElement>) {
+    if (!hasDraggedFiles(event) || !sessionKey) return;
+    event.preventDefault();
+    composerDragDepthRef.current += 1;
+    setComposerDragActive(true);
+  }
+
+  function handleComposerDragOver(event: DragEvent<HTMLFormElement>) {
+    if (!hasDraggedFiles(event) || !sessionKey) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleComposerDragLeave(event: DragEvent<HTMLFormElement>) {
+    if (!hasDraggedFiles(event) || !sessionKey) return;
+    event.preventDefault();
+    composerDragDepthRef.current = Math.max(0, composerDragDepthRef.current - 1);
+    if (composerDragDepthRef.current === 0) setComposerDragActive(false);
+  }
+
+  function handleComposerDrop(event: DragEvent<HTMLFormElement>) {
+    if (!hasDraggedFiles(event) || !sessionKey) return;
+    event.preventDefault();
+    composerDragDepthRef.current = 0;
+    setComposerDragActive(false);
+    if (event.dataTransfer.files.length) onNeedUpload(event.dataTransfer.files);
+  }
+
   function abort() {
     if (!lastRunId) return;
     appendLog("info", "prompt", "abort-run", { runId: lastRunId });
@@ -595,7 +625,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
           }}
         />
       ) : null}
-      <form className="composer" onSubmit={submit}>
+      <form
+        className={`composer ${composerDragActive ? "drag-over" : ""}`}
+        onSubmit={submit}
+        onDragEnter={handleComposerDragEnter}
+        onDragOver={handleComposerDragOver}
+        onDragLeave={handleComposerDragLeave}
+        onDrop={handleComposerDrop}
+      >
         {attachments.length ? (
           <div className="attachment-context-panel">
             <div className="attachment-tray">
@@ -1361,6 +1398,10 @@ function presetLabel(name: string): string {
   if (!trimmed) return "+";
   const chars = Array.from(trimmed.replace(/\s+/g, ""));
   return chars.slice(0, 2).join("");
+}
+
+function hasDraggedFiles(event: DragEvent): boolean {
+  return Array.from(event.dataTransfer.types).includes("Files");
 }
 
 function isRelationshipSkillCheckMessage(text: string): boolean {
