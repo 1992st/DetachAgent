@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Copy, FileText, KeyRound, Wifi, X } from "lucide-react";
+import { Copy, FileText, FolderOpen, KeyRound, Wifi, X } from "lucide-react";
 import type { AgentSummary, AgentTerminalSession, AppHealth, ChatSessionMode, ClientIdentity, InteractionRecord, LocalTerminalApp, RelationshipSkillStatus, SshCredentialSessionSnapshot, ToolBrokerSocketEvent, ToolRequestRecord, UploadedFileRef } from "@detaches/shared";
 import { LOCAL_SERVER_DISCONNECTED_MESSAGE, approveToolRequest, authorizeAgentTerminalSession, dismissSshSessionPassword, fetchAgents, fetchAgentTerminalSessions, fetchClientIdentity, fetchDiagnostics, fetchHealth, fetchLocalTerminalApps, fetchSettings, fetchToolRequests, isLocalServerDisconnected, openLocalTerminalApp, rejectInteraction, rejectToolRequest, resolveInteraction, submitSshSessionPassword, uploadFile, wsUrl } from "../lib/api.js";
 import { ConnectionBar } from "../features/connection/ConnectionBar.js";
@@ -8,8 +8,9 @@ import { ChatPanel, type ChatPanelHandle } from "../features/chat/ChatPanel.js";
 import { SettingsPanel } from "../features/settings/SettingsPanel.js";
 import { ToolQueuePanel } from "../features/tools/ToolQueuePanel.js";
 import { relationshipSkillInstallPrompt, relationshipSkillVersion } from "../features/skills/SkillInstallPanel.js";
+import { FileBrowserPage } from "../features/files/FileBrowserPage.js";
 
-type ViewMode = "chat" | "network" | "tool-queue";
+type ViewMode = "chat" | "network" | "tool-queue" | "file-browser";
 
 export function App() {
   const [view, setView] = useState<ViewMode>("chat");
@@ -457,6 +458,10 @@ export function App() {
             连接设置
           </button>
           <button className={view === "tool-queue" ? "active" : ""} onClick={() => setView("tool-queue")}>工具队列</button>
+          <button className={view === "file-browser" ? "active" : ""} onClick={() => setView("file-browser")}>
+            <FolderOpen size={15} />
+            文件浏览
+          </button>
         </div>
         <div className="top-debug-terminal-slot" />
       </nav>
@@ -498,7 +503,7 @@ export function App() {
             }}
           />
         </div>
-      ) : (
+      ) : view === "tool-queue" ? (
         <div className="tool-queue-workspace">
           <ToolQueuePanel
             sessionKey={selectedSession}
@@ -510,6 +515,8 @@ export function App() {
             }}
           />
         </div>
+      ) : (
+        <FileBrowserPage />
       )}
     </div>
   );

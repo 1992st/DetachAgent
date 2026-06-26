@@ -40,6 +40,7 @@ const uploadSingleFile = upload.single("file");
 export const apiRoutes = express.Router();
 
 const execFileAsync = promisify(execFile);
+const DEFAULT_FILEBROWSER_PORT = 39999;
 
 apiRoutes.get("/terminal/apps", async (_req, res) => {
   try {
@@ -271,6 +272,65 @@ function parsePositiveInt(value: unknown, fallback: number, max: number): number
   const parsed = Number.parseInt(typeof raw === "string" ? raw : "", 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return Math.min(parsed, max);
+}
+
+function parsePort(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) return null;
+  return parsed;
+}
+
+function sanitizeFileServiceHost(value: string): string | null {
+  const host = value.trim();
+  if (!host || host.length > 253) return null;
+  if (/^https?:\/\//i.test(host) || host.includes("/") || host.includes("?") || host.includes("#")) return null;
+  if (host.includes("@") || host.includes(":")) return null;
+  return host;
+}
+
+function describeFileServiceFetchError(error: unknown, host: string, port: number): string {
+  if (error instanceof Error && error.name === "AbortError") {
+    return `File Browser connection timed out after 5000ms: ${host}:${port}.`;
+  }
+  const anyError = error as Error & {
+    code?: string;
+    cause?: {
+      code?: string;
+      errno?: number;
+      address?: string;
+      port?: number;
+      message?: string;
+    };
+  };
+  const code = anyError.cause?.code || anyError.code;
+  const address = anyError.cause?.address || host;
+  const causePort = anyError.cause?.port || port;
+  if (code === "ECONNREFUSED") return `Connection refused: ${address}:${causePort}. 请确认 File Browser 已启动并监听该端口。`;
+  if (code === "ETIMEDOUT") return `Connection timed out: ${address}:${causePort}. 请确认服务器 IP、端口和防火墙规则。`;
+  if (code === "ENOTFOUND") return `Host not found: ${host}. 请确认 IP 或域名。`;
+  if (code === "EHOSTUNREACH" || code === "ENETUNREACH") return `Host unreachable: ${address}:${causePort}. 请确认当前机器能访问 Main Agent 所在网络。`;
+  const causeMessage = anyError.cause?.message;
+  if (code || causeMessage) return `${code ? `${code}: ` : ""}${causeMessage || anyError.message}`;
+  return anyError.message || String(error);
+}
+
+async function markFileServiceTested(input: {
+  type: "filebrowser";
+  host: string;
+  port: number;
+  status: "ok" | "error";
+  error: string;
+  checkedAt: string;
+}): Promise<void> {
+  const settings = await settingsStore.publicSettings();
+  await settingsStore.updateProfile(settings.activeProfileId, {
+    fileServiceType: input.type,
+    fileServiceHost: input.host,
+    fileServicePort: input.port,
+    fileServiceLastStatus: input.status,
+    fileServiceLastTestedAt: input.checkedAt,
+    fileServiceLastError: input.error
+  });
 }
 
 async function buildContextExportBody(
@@ -802,6 +862,49 @@ apiRoutes.post("/network/test", async (_req, res) => {
     // Network test results are still useful even if persisting the profile status fails.
   }
   res.json(result);
+});
+
+apiRoutes.post("/file-service/test", async (req, res) => {
+  const type = req.body?.type === "filebrowser" ? "filebrowser" : "";
+  const rawHost = typeof req.body?.host === "string" ? req.body.host.trim() : "";
+  const host = sanitizeFileServiceHost(rawHost);
+  const port = parsePort(req.body?.port);
+  const checkedAt = new Date().toISOString();
+
+  if (type !== "filebrowser") {
+    res.status(400).json({ ok: false, error: "Only filebrowser is supported.", checkedAt });
+    return;
+  }
+  if (!host) {
+    res.status(400).json({ ok: false, type, host: rawHost, port: port ?? DEFAULT_FILEBROWSER_PORT, error: "Host must be an IP address or hostname, without protocol, path, or port.", checkedAt });
+    return;
+  }
+  if (!port) {
+    res.status(400).json({ ok: false, type, host, port: DEFAULT_FILEBROWSER_PORT, error: "Port must be between 1 and 65535.", checkedAt });
+    return;
+  }
+
+  const baseUrl = `http://${host}:${port}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    // 这里只做“HTTP 可达性”检查，不代替 File Browser 登录；401/403/404 仍说明服务已响应。
+    const response = await fetch(baseUrl, {
+      headers: { Accept: "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8" },
+      redirect: "manual",
+      signal: controller.signal
+    });
+    if (response.status >= 500) throw new Error(`File Browser responded with HTTP ${response.status}.`);
+    await markFileServiceTested({ type, host, port, status: "ok", error: "", checkedAt });
+    res.json({ ok: true, type, host, port, baseUrl, checkedAt });
+  } catch (error) {
+    const message = describeFileServiceFetchError(error, host, port);
+    // 保存最近一次“有效地址”的测试结果，避免用户返回页面时丢失刚排查的连接错误。
+    await markFileServiceTested({ type, host, port, status: "error", error: message, checkedAt });
+    res.status(400).json({ ok: false, type, host, port, baseUrl, error: message, checkedAt });
+  } finally {
+    clearTimeout(timeout);
+  }
 });
 
 apiRoutes.get("/ssh/session-password", (_req, res) => {

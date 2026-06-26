@@ -423,6 +423,31 @@ export async function testNetwork(): Promise<NetworkTestResponse> {
   return res.json();
 }
 
+export interface FileServiceTestInput {
+  type: "filebrowser";
+  host: string;
+  port: number;
+}
+
+export interface FileServiceTestResponse {
+  ok: boolean;
+  type: "filebrowser";
+  host: string;
+  port: number;
+  baseUrl: string;
+  checkedAt: string;
+}
+
+export async function testFileService(input: FileServiceTestInput): Promise<FileServiceTestResponse> {
+  const res = await fetch(apiUrl("/api/file-service/test"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
 export async function fetchLocalTerminalApps(): Promise<LocalTerminalAppsResponse> {
   const res = await fetch(apiUrl("/api/terminal/apps"));
   if (!res.ok) throw new Error(await errorMessage(res));

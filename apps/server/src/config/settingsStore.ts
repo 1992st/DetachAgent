@@ -28,6 +28,12 @@ export interface RuntimeSettings {
   gatewayTerminalLastStatus?: "ok" | "error";
   gatewayTerminalLastTestedAt?: string;
   gatewayTerminalLastError?: string;
+  fileServiceType?: "filebrowser";
+  fileServiceHost?: string;
+  fileServicePort?: number;
+  fileServiceLastStatus?: "ok" | "error";
+  fileServiceLastTestedAt?: string;
+  fileServiceLastError?: string;
 }
 
 type PersistedProfile = RuntimeSettings & {
@@ -44,6 +50,7 @@ type PersistedSettings = Partial<RuntimeSettings> & {
 
 const settingsPath = path.join(appConfig.storageDir, "cache", "settings.json");
 const legacySettingsPath = path.join(repoRoot, "storage", "cache", "settings.json");
+const DEFAULT_FILEBROWSER_PORT = 39999;
 
 function sanitizeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -94,7 +101,10 @@ function defaultProfile(): PersistedProfile {
     authToken: appConfig.authToken,
     authPassword: appConfig.authPassword,
     remoteWorkspaceRoot: appConfig.remoteWorkspaceRoot,
-    publicBaseUrl: appConfig.publicBaseUrl
+    publicBaseUrl: appConfig.publicBaseUrl,
+    fileServiceType: undefined,
+    fileServiceHost: "",
+    fileServicePort: DEFAULT_FILEBROWSER_PORT
   };
 }
 
@@ -294,6 +304,17 @@ export class SettingsStore {
     if (gatewayTerminalLastTestedAt !== undefined) output.gatewayTerminalLastTestedAt = gatewayTerminalLastTestedAt;
     const gatewayTerminalLastError = sanitizeString(input.gatewayTerminalLastError);
     if (gatewayTerminalLastError !== undefined) output.gatewayTerminalLastError = gatewayTerminalLastError;
+    // 文件服务配置跟随远端 profile 保存；不同 Main Agent 可以有不同的 File Browser 地址。
+    if (input.fileServiceType === "filebrowser") output.fileServiceType = input.fileServiceType;
+    const fileServiceHost = sanitizeString(input.fileServiceHost);
+    if (fileServiceHost !== undefined) output.fileServiceHost = fileServiceHost;
+    const fileServicePort = sanitizePort(input.fileServicePort);
+    if (fileServicePort !== undefined) output.fileServicePort = fileServicePort;
+    if (input.fileServiceLastStatus === "ok" || input.fileServiceLastStatus === "error") output.fileServiceLastStatus = input.fileServiceLastStatus;
+    const fileServiceLastTestedAt = sanitizeString(input.fileServiceLastTestedAt);
+    if (fileServiceLastTestedAt !== undefined) output.fileServiceLastTestedAt = fileServiceLastTestedAt;
+    const fileServiceLastError = sanitizeString(input.fileServiceLastError);
+    if (fileServiceLastError !== undefined) output.fileServiceLastError = fileServiceLastError;
     const authToken = sanitizeString(input.authToken);
     if (authToken !== undefined) output.authToken = authToken;
     const authPassword = sanitizeString(input.authPassword);

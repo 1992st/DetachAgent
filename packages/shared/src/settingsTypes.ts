@@ -22,6 +22,12 @@ export interface RemoteProfile {
   gatewayTerminalLastStatus?: "ok" | "error";
   gatewayTerminalLastTestedAt?: string;
   gatewayTerminalLastError?: string;
+  fileServiceType?: "filebrowser";
+  fileServiceHost?: string;
+  fileServicePort?: number;
+  fileServiceLastStatus?: "ok" | "error";
+  fileServiceLastTestedAt?: string;
+  fileServiceLastError?: string;
   hasAuthToken: boolean;
   hasAuthPassword: boolean;
   lastTestedAt?: string;
@@ -63,6 +69,12 @@ export interface RemoteProfileUpdate {
   gatewayTerminalLastStatus?: "ok" | "error";
   gatewayTerminalLastTestedAt?: string;
   gatewayTerminalLastError?: string;
+  fileServiceType?: "filebrowser";
+  fileServiceHost?: string;
+  fileServicePort?: number;
+  fileServiceLastStatus?: "ok" | "error";
+  fileServiceLastTestedAt?: string;
+  fileServiceLastError?: string;
 }
 
 export interface SettingsUpdate extends RemoteProfileUpdate {
