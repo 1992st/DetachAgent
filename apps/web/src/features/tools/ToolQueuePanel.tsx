@@ -12,10 +12,11 @@ interface Props {
   sessionKey: string | null;
   agentId: string | null;
   clientIdentity: ClientIdentity | null;
+  onTerminalActivityChange?: (state: "connected" | "running") => void;
   onRevealTerminal: () => void;
 }
 
-export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTerminal }: Props) {
+export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onTerminalActivityChange, onRevealTerminal }: Props) {
   const [requests, setRequests] = useState<ToolRequestRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,9 +107,10 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
     setError(null);
     try {
       suppressApprovalRequest(surfacedRequestIds.current, request);
+      // terminal 现在由用户手动展开；执行中只通过右下角 toggle 暴露运行态。
+      if (request.kind === "terminal") onTerminalActivityChange?.("running");
       const response = await approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated", actor: decisionActor(clientIdentity) });
       if (!response.execution?.wroteToTerminal && request.kind !== "main-agent-save-file") throw new Error(response.message || "Broker did not execute the request.");
-      if (request.kind !== "file-transfer" && request.kind !== "main-agent-save-file") onRevealTerminal();
       setAttentionRequest((current) => current?.id === request.id ? null : current);
       const result = await fetchToolRequestResult(request.id);
       setSummaries((current) => ({ ...current, [request.id]: toolResultSummary(result) }));
@@ -123,6 +125,7 @@ export function ToolQueuePanel({ sessionKey, agentId, clientIdentity, onRevealTe
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : String(runError));
     } finally {
+      if (request.kind === "terminal") onTerminalActivityChange?.("connected");
       setBusy((current) => ({ ...current, [request.id]: false }));
     }
   }

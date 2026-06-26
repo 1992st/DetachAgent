@@ -1,9 +1,21 @@
 import { type CSSProperties, FormEvent, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { Check, Copy, Eye, FileText, List, Minus, Paperclip, Plus, Send, Square, X } from "lucide-react";
+import { Check, Copy, Eye, FileText, List, Minus, Paperclip, Plus, Send, Square, Trash2, X } from "lucide-react";
 import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, MainAgentFileTransferSnapshot, RelationshipSkillStatus, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
 import { approveToolRequest, extractToolRequests, fetchCloudPromptLogs, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward, submitMainAgentTransferPassword, wsUrl } from "../../lib/api.js";
 import { DEFAULT_LOG_FILTER, LOG_FILTER_LEVELS, appendRealtimeLog, createLogInput, filterRealtimeLogs, formatLogDetail, type LogEntry, type LogFilterLevel, type LogWriter } from "../logs/realtimeLog.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
+
+const PROMPT_PRESETS_STORAGE_KEY = "detaches.promptPresets.v1";
+const PRESET_COLORS = ["#2563eb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#475569", "#db2777"];
+const PRESET_CLICK_DELAY_MS = 180;
+
+interface PromptPreset {
+  id: string;
+  name: string;
+  color: string;
+  prompt: string;
+  updatedAt: string;
+}
 
 interface Props {
   sessionKey: string | null;
@@ -17,6 +29,7 @@ interface Props {
   localControlScope?: string;
   relationshipSkillStatus?: RelationshipSkillStatus;
   relationshipSkillMessage?: string;
+  terminalActivity?: "connected" | "running";
   onSessionModeChange: (mode: ChatSessionMode) => void;
   onNewSession: () => void;
   onClearAttachments: () => void;
@@ -25,6 +38,7 @@ interface Props {
   onEnableLocalControl: () => void;
   onDisableLocalControl: () => void;
   onRelationshipSkillInstallRequired: () => void;
+  onTerminalActivityChange: (state: "connected" | "running") => void;
 }
 
 export interface ChatPanelHandle {
@@ -46,6 +60,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   localControlScope,
   relationshipSkillStatus = "unknown",
   relationshipSkillMessage,
+  terminalActivity = "connected",
   onSessionModeChange,
   onNewSession,
   onClearAttachments,
@@ -53,7 +68,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   onRelationshipSkillStatusChange,
   onEnableLocalControl,
   onDisableLocalControl,
-  onRelationshipSkillInstallRequired
+  onRelationshipSkillInstallRequired,
+  onTerminalActivityChange
 }: Props, ref) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -64,6 +80,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   const [attachmentContextOpen, setAttachmentContextOpen] = useState(false);
   const [fileGateOpen, setFileGateOpen] = useState(false);
   const [pendingFileSend, setPendingFileSend] = useState(false);
+  // Prompt 浮动球只保存在当前浏览器，避免把个人常用 prompt 同步到远端或其他设备。
+  const [promptPresets, setPromptPresets] = useState<PromptPreset[]>(() => loadPromptPresets());
+  const [editingPreset, setEditingPreset] = useState<PromptPreset | null>(null);
+  const [presetEditorOpen, setPresetEditorOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logFilter, setLogFilter] = useState<LogFilterLevel>(DEFAULT_LOG_FILTER);
@@ -276,6 +296,45 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
     setLogs((current) => appendRealtimeLog(current, createLogInput(...args)));
   }
 
+  function savePromptPresets(next: PromptPreset[]) {
+    setPromptPresets(next);
+    window.localStorage.setItem(PROMPT_PRESETS_STORAGE_KEY, JSON.stringify(next));
+  }
+
+  function openPresetEditor(preset?: PromptPreset) {
+    setEditingPreset(preset ?? null);
+    setPresetEditorOpen(true);
+  }
+
+  function savePromptPreset(input: { id?: string; name: string; color: string; prompt: string }) {
+    const now = new Date().toISOString();
+    const nextPreset: PromptPreset = {
+      id: input.id || crypto.randomUUID(),
+      name: input.name.trim().slice(0, 12) || "Prompt",
+      color: input.color || PRESET_COLORS[0],
+      prompt: input.prompt.trim(),
+      updatedAt: now
+    };
+    const next = input.id
+      ? promptPresets.map((preset) => preset.id === input.id ? nextPreset : preset)
+      : [...promptPresets, nextPreset];
+    savePromptPresets(next);
+    setPresetEditorOpen(false);
+    setEditingPreset(null);
+  }
+
+  function deletePromptPreset(id: string) {
+    savePromptPresets(promptPresets.filter((preset) => preset.id !== id));
+    setPresetEditorOpen(false);
+    setEditingPreset(null);
+  }
+
+  function prependPromptToDraft(prompt: string) {
+    const trimmed = prompt.trim();
+    if (!trimmed) return;
+    setDraft((current) => current.trim() ? `${trimmed}\n\n${current}` : trimmed);
+  }
+
   async function refreshCloudPromptLogs() {
     try {
       const response = await fetchCloudPromptLogs(100);
@@ -476,6 +535,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
               sourceRunId={message.runId}
               clientIdentity={clientIdentity}
               onReveal={() => terminalRef.current?.reveal()}
+              onTerminalActivityChange={onTerminalActivityChange}
               onLog={appendLog}
             />
             {message.attachments?.map((attachment) => (
@@ -485,6 +545,23 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
         ))}
         {!sessionKey ? <div className="empty-state large">左侧选择一个远端 Agent 后开始聊天。</div> : null}
       </div>
+      <PromptPresetRail
+        presets={promptPresets}
+        onInsert={prependPromptToDraft}
+        onEdit={openPresetEditor}
+        onCreate={() => openPresetEditor()}
+      />
+      {presetEditorOpen ? (
+        <PromptPresetEditor
+          preset={editingPreset}
+          onSave={savePromptPreset}
+          onDelete={editingPreset ? () => deletePromptPreset(editingPreset.id) : undefined}
+          onClose={() => {
+            setPresetEditorOpen(false);
+            setEditingPreset(null);
+          }}
+        />
+      ) : null}
       <TerminalPanel
         ref={terminalRef}
         sessionKey={sessionKey}
@@ -494,6 +571,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
         localControlConsent={localControlConsent}
         relationshipSkillStatus={relationshipSkillStatus}
         relationshipSkillMessage={relationshipSkillMessage}
+        activityState={terminalActivity}
         onEnableLocalControl={onEnableLocalControl}
         onDisableLocalControl={onDisableLocalControl}
         onInstallRelationshipSkill={onRelationshipSkillInstallRequired}
@@ -581,6 +659,148 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   );
 });
 
+function PromptPresetRail({
+  presets,
+  onInsert,
+  onEdit,
+  onCreate
+}: {
+  presets: PromptPreset[];
+  onInsert: (prompt: string) => void;
+  onEdit: (preset: PromptPreset) => void;
+  onCreate: () => void;
+}) {
+  const clickTimerRef = useRef<number | null>(null);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  function clearClickTimer() {
+    if (clickTimerRef.current) {
+      window.clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+  }
+
+  useEffect(() => () => clearClickTimer(), []);
+
+  return (
+    <aside className={`prompt-preset-rail ${mobileOpen ? "mobile-open" : ""}`} aria-label="Prompt presets">
+      <button
+        type="button"
+        className="prompt-preset-mobile-toggle"
+        title={mobileOpen ? "收起 prompt 浮动球" : "展开 prompt 浮动球"}
+        aria-label={mobileOpen ? "收起 prompt 浮动球" : "展开 prompt 浮动球"}
+        onClick={() => setMobileOpen((current) => !current)}
+      >
+        P
+      </button>
+      <div className="prompt-preset-list">
+        {presets.map((preset) => (
+          <button
+            type="button"
+            className="prompt-preset-ball"
+            style={{ "--preset-color": preset.color } as CSSProperties}
+            title={preset.name}
+            aria-label={`插入 ${preset.name}`}
+            key={preset.id}
+            onClick={() => {
+              // 用短延迟区分单击插入和双击编辑，避免双击时先把 prompt 塞进输入框。
+              clearClickTimer();
+              clickTimerRef.current = window.setTimeout(() => {
+                clickTimerRef.current = null;
+                onInsert(preset.prompt);
+              }, PRESET_CLICK_DELAY_MS);
+            }}
+            onDoubleClick={() => {
+              clearClickTimer();
+              onEdit(preset);
+            }}
+          >
+            {presetLabel(preset.name)}
+          </button>
+        ))}
+      </div>
+      <button type="button" className="prompt-preset-add" title="新增 prompt 浮动球" aria-label="新增 prompt 浮动球" onClick={onCreate}>
+        <Plus size={17} />
+      </button>
+    </aside>
+  );
+}
+
+function PromptPresetEditor({
+  preset,
+  onSave,
+  onDelete,
+  onClose
+}: {
+  preset: PromptPreset | null;
+  onSave: (input: { id?: string; name: string; color: string; prompt: string }) => void;
+  onDelete?: () => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(preset?.name ?? "");
+  const [color, setColor] = useState(preset?.color ?? PRESET_COLORS[0]);
+  const [prompt, setPrompt] = useState(preset?.prompt ?? "");
+  const canSave = prompt.trim().length > 0;
+
+  useEffect(() => {
+    setName(preset?.name ?? "");
+    setColor(preset?.color ?? PRESET_COLORS[0]);
+    setPrompt(preset?.prompt ?? "");
+  }, [preset]);
+
+  return (
+    <div className="prompt-preset-editor-backdrop" role="presentation">
+      <section className="prompt-preset-editor" role="dialog" aria-modal="true" aria-label={preset ? "编辑 prompt 浮动球" : "新增 prompt 浮动球"}>
+        <header>
+          <div>
+            <strong>{preset ? "编辑浮动球" : "新增浮动球"}</strong>
+            <small>单击插入，双击编辑</small>
+          </div>
+          <button type="button" className="icon-button small" title="关闭" onClick={onClose}>
+            <X size={15} />
+          </button>
+        </header>
+        <label>
+          <span>名称</span>
+          <input value={name} maxLength={12} onChange={(event) => setName(event.target.value)} placeholder="例如：复盘" />
+        </label>
+        <div className="prompt-preset-color-field">
+          <span>颜色</span>
+          <div className="prompt-preset-swatches">
+            {PRESET_COLORS.map((item) => (
+              <button
+                type="button"
+                className={item === color ? "active" : ""}
+                style={{ background: item }}
+                aria-label={`选择颜色 ${item}`}
+                key={item}
+                onClick={() => setColor(item)}
+              />
+            ))}
+            <input type="color" value={color} onChange={(event) => setColor(event.target.value)} aria-label="自定义颜色" />
+          </div>
+        </div>
+        <label className="prompt-preset-prompt-field">
+          <span>Prompt</span>
+          <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="输入要插入到消息开头的 prompt..." />
+        </label>
+        <footer>
+          {onDelete ? (
+            <button type="button" className="secondary-button danger" onClick={onDelete}>
+              <Trash2 size={14} />
+              删除
+            </button>
+          ) : <span />}
+          <div>
+            <button type="button" className="secondary-button" onClick={onClose}>取消</button>
+            <button type="button" className="primary-button" disabled={!canSave} onClick={() => onSave({ id: preset?.id, name, color, prompt })}>保存</button>
+          </div>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function FileSendGateDialog({
   runtime,
   consent,
@@ -654,6 +874,7 @@ function ToolRequests({
   sourceRunId,
   clientIdentity,
   onReveal,
+  onTerminalActivityChange,
   onLog
 }: {
   text: string;
@@ -663,6 +884,7 @@ function ToolRequests({
   sourceRunId?: string;
   clientIdentity: ClientIdentity | null;
   onReveal: () => void;
+  onTerminalActivityChange: (state: "connected" | "running") => void;
   onLog: LogWriter;
 }) {
   const [requests, setRequests] = useState<ToolRequestRecord[]>([]);
@@ -837,10 +1059,10 @@ function ToolRequests({
                   if (!confirmElevatedRisk(request)) return;
                   onLog("info", "tool", "tool-request-approve", { id: request.id, kind: request.kind, target: request.target });
                   setHandled((current) => ({ ...current, [index]: "running" }));
+                  if (request.kind === "terminal") onTerminalActivityChange("running");
                   approveToolRequest(request.id, { riskAccepted: request.risk?.level === "elevated", actor: decisionActor(clientIdentity) })
                     .then((response) => {
                       if (!response.execution?.wroteToTerminal && request.kind !== "main-agent-save-file") throw new Error(response.message || "Broker did not execute the request.");
-                      if (request.kind !== "file-transfer" && request.kind !== "main-agent-save-file") onReveal();
                       onLog("info", "terminal", "tool-request-approved", { id: request.id, execution: response.execution });
                       setHandled((current) => ({ ...current, [index]: request.kind === "main-agent-save-file" && !response.execution?.completed ? "running" : "approved" }));
                       return fetchToolRequestResult(request.id);
@@ -855,11 +1077,13 @@ function ToolRequests({
                       }));
                       if (transfer) setTransfers((current) => ({ ...current, [index]: transfer }));
                       if (request.kind === "main-agent-save-file") scheduleMainAgentTransferPoll(request, index);
+                      if (request.kind === "terminal") onTerminalActivityChange("connected");
                     })
                     .catch((error) => {
                       onLog("error", "tool", "tool-request-approve-failed", { id: request.id, error });
                       setErrors((current) => ({ ...current, [index]: error instanceof Error ? error.message : String(error) }));
                       setHandled((current) => ({ ...current, [index]: "error" }));
+                      if (request.kind === "terminal") onTerminalActivityChange("connected");
                     });
                 }}
               >
@@ -878,6 +1102,7 @@ function ToolRequests({
                   onLog("info", "tool", "tool-request-reject", { id: request.id, kind: request.kind, target: request.target });
                   void rejectToolRequest(request.id, { actor: decisionActor(clientIdentity) });
                   setHandled((current) => ({ ...current, [index]: "rejected" }));
+                  if (request.kind === "terminal") onTerminalActivityChange("connected");
                 }}
               >
                 <X size={15} />
@@ -1111,6 +1336,31 @@ function buildFileDescriptionOnlyContext(attachments: UploadedFileRef[]): string
       `   mimeType: ${file.mimeType || "application/octet-stream"}`
     ].join("\n"))
   ].join("\n");
+}
+
+function loadPromptPresets(): PromptPreset[] {
+  try {
+    const raw = window.localStorage.getItem(PROMPT_PRESETS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is PromptPreset => Boolean(item)
+        && typeof item.id === "string"
+        && typeof item.name === "string"
+        && typeof item.color === "string"
+        && typeof item.prompt === "string")
+      .map((item) => ({ ...item, updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : new Date().toISOString() }));
+  } catch {
+    return [];
+  }
+}
+
+function presetLabel(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "+";
+  const chars = Array.from(trimmed.replace(/\s+/g, ""));
+  return chars.slice(0, 2).join("");
 }
 
 function isRelationshipSkillCheckMessage(text: string): boolean {

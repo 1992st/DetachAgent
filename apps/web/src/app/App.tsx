@@ -12,6 +12,8 @@ import { FileBrowserPage } from "../features/files/FileBrowserPage.js";
 
 type ViewMode = "chat" | "network" | "tool-queue" | "file-browser";
 type LocalControlRuntimeState = "idle" | "checking" | "install_required" | "installing" | "ready" | "error";
+// 仅用于 terminal toggle 的轻量展示，不代表 terminal websocket 的真实连接生命周期。
+type TerminalActivityState = "connected" | "running";
 
 interface RelationshipSkillState {
   status: RelationshipSkillStatus;
@@ -56,6 +58,7 @@ export function App() {
   const [localControlConsentByScope, setLocalControlConsentByScope] = useState<Record<string, boolean>>({});
   const [localControlRuntimeBySession, setLocalControlRuntimeBySession] = useState<Record<string, LocalControlRuntimeState>>({});
   const [relationshipSkillByScope, setRelationshipSkillByScope] = useState<Record<string, RelationshipSkillState>>({});
+  const [terminalActivityBySession, setTerminalActivityBySession] = useState<Record<string, TerminalActivityState>>({});
   const [agentTerminalSession, setAgentTerminalSession] = useState<AgentTerminalSession | null>(null);
   const [agentTerminalBusy, setAgentTerminalBusy] = useState(false);
   const [agentTerminalError, setAgentTerminalError] = useState<string | null>(null);
@@ -211,6 +214,7 @@ export function App() {
   const attachments = selectedSession ? attachmentsBySession[selectedSession] ?? [] : [];
   const selectedLocalControlConsent = selectedSessionScope ? localControlConsentByScope[selectedSessionScope] === true : false;
   const selectedLocalControlRuntime = selectedSession ? localControlRuntimeBySession[selectedSession] ?? "idle" : "idle";
+  const selectedTerminalActivity = selectedSession ? terminalActivityBySession[selectedSession] ?? "connected" : "connected";
   const selectedRelationshipSkill = selectedSessionScope ? relationshipSkillByScope[selectedSessionScope] : undefined;
 
   const loadTerminalApps = useCallback(async () => {
@@ -341,9 +345,14 @@ export function App() {
 
   async function handleApproveAgentTerminalToolRequest() {
     if (!agentTerminalToolRequest) return;
+    // 全局 gateway-terminal 弹窗可能在非当前聊天视图出现，必须按 request.sessionKey 写回状态。
+    const activitySession = agentTerminalToolRequest.kind === "terminal" ? agentTerminalToolRequest.sessionKey : null;
     setAgentTerminalToolBusy(true);
     setAgentTerminalToolError(null);
     try {
+      if (activitySession) {
+        setTerminalActivityBySession((current) => ({ ...current, [activitySession]: "running" }));
+      }
       await approveToolRequest(agentTerminalToolRequest.id, {
         riskAccepted: agentTerminalToolRequest.risk?.level === "elevated",
         actor: decisionActor(clientIdentity)
@@ -353,6 +362,9 @@ export function App() {
     } catch (error) {
       setAgentTerminalToolError(error instanceof Error ? error.message : String(error));
     } finally {
+      if (activitySession) {
+        setTerminalActivityBySession((current) => ({ ...current, [activitySession]: "connected" }));
+      }
       setAgentTerminalToolBusy(false);
     }
   }
@@ -554,6 +566,7 @@ export function App() {
             localControlScope={selectedSessionScope ?? undefined}
             relationshipSkillStatus={selectedRelationshipSkill?.status ?? relationshipSkillStatus}
             relationshipSkillMessage={selectedRelationshipSkill?.message ?? relationshipSkillMessage}
+            terminalActivity={selectedTerminalActivity}
             onSessionModeChange={setSessionMode}
             onNewSession={handleNewSession}
             onClearAttachments={() => {
@@ -565,6 +578,10 @@ export function App() {
             onEnableLocalControl={handleEnableLocalControl}
             onDisableLocalControl={handleDisableLocalControl}
             onRelationshipSkillInstallRequired={() => setRelationshipSkillPromptOpen(true)}
+            onTerminalActivityChange={(state) => {
+              if (!selectedSession) return;
+              setTerminalActivityBySession((current) => ({ ...current, [selectedSession]: state }));
+            }}
           />
         </div>
       ) : view === "network" ? (
@@ -583,6 +600,10 @@ export function App() {
             sessionKey={selectedSession}
             agentId={selectedAgent?.id ?? null}
             clientIdentity={clientIdentity}
+            onTerminalActivityChange={(state) => {
+              if (!selectedSession) return;
+              setTerminalActivityBySession((current) => ({ ...current, [selectedSession]: state }));
+            }}
             onRevealTerminal={() => {
               if (selectedLocalControlRuntime !== "ready") {
                 setView("chat");

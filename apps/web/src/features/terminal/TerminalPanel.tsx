@@ -16,6 +16,7 @@ interface Props {
   localControlConsent?: boolean;
   relationshipSkillStatus?: string;
   relationshipSkillMessage?: string;
+  activityState?: "connected" | "running";
   onEnableLocalControl?: () => void;
   onDisableLocalControl?: () => void;
   onInstallRelationshipSkill?: () => void;
@@ -39,6 +40,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
   localControlConsent = true,
   relationshipSkillStatus = "unknown",
   relationshipSkillMessage,
+  activityState = "connected",
   onEnableLocalControl,
   onDisableLocalControl,
   onInstallRelationshipSkill,
@@ -272,7 +274,10 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, Props>(function Ter
 
   const adminActive = adminStatus?.active === true;
   const adminSupported = adminStatus?.supported !== false;
-  const terminalLabel = `${status?.privilege === "administrator" ? "admin " : ""}${status?.status ?? socketState}`;
+  // activityState 只覆盖折叠按钮的文案，不能反向改变 terminal websocket 的连接状态。
+  const terminalLabel = activityState === "running"
+    ? "运行中"
+    : `${status?.privilege === "administrator" ? "admin " : ""}${status?.status ?? socketState}`;
   const adminTitle = adminActive
     ? "Close administrator terminal"
     : adminBusy

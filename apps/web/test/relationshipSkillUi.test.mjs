@@ -11,6 +11,8 @@ const chatPanel = fs.readFileSync(path.join(repoRoot, "apps/web/src/features/cha
 const connectionBar = fs.readFileSync(path.join(repoRoot, "apps/web/src/features/connection/ConnectionBar.tsx"), "utf8");
 const app = fs.readFileSync(path.join(repoRoot, "apps/web/src/app/App.tsx"), "utf8");
 const skillInstallPanel = fs.readFileSync(path.join(repoRoot, "apps/web/src/features/skills/SkillInstallPanel.tsx"), "utf8");
+const terminalPanel = fs.readFileSync(path.join(repoRoot, "apps/web/src/features/terminal/TerminalPanel.tsx"), "utf8");
+const toolQueuePanel = fs.readFileSync(path.join(repoRoot, "apps/web/src/features/tools/ToolQueuePanel.tsx"), "utf8");
 const css = fs.readFileSync(path.join(repoRoot, "apps/web/src/styles/global.css"), "utf8");
 const preview = fs.readFileSync(path.join(repoRoot, "docs/main-agent-advanced-settings-preview.html"), "utf8");
 
@@ -37,6 +39,12 @@ assert.match(chatPanel, /includeStagedFileContext/, "ChatPanel should gate stage
 assert.match(chatPanel, /只发送文件说明/, "ChatPanel should support sending local staged files as description only");
 assert.match(chatPanel, /Date\.now\(\)\.toString\(36\)/, "relationship skill checks should use unique idempotency keys");
 assert.match(chatPanel, /isRelationshipSkillCheckMessage/, "ChatPanel should hide bootstrap skill check messages from visible chat");
+assert.match(chatPanel, /PROMPT_PRESETS_STORAGE_KEY = "detaches\.promptPresets\.v1"/, "ChatPanel should persist prompt floating balls in localStorage");
+assert.match(chatPanel, /PromptPresetRail/, "ChatPanel should render the prompt floating ball rail");
+assert.match(chatPanel, /onDoubleClick/, "prompt floating balls should support double-click editing");
+assert.match(chatPanel, /prompt-preset-mobile-toggle/, "prompt floating balls should expose a compact mobile toggle");
+assert.match(chatPanel, /setDraft\(\(current\) => current\.trim\(\) \? `\$\{trimmed\}\\n\\n\$\{current\}` : trimmed\)/, "prompt presets should prepend without replacing the draft");
+assert.match(chatPanel, /onTerminalActivityChange\("running"\)/, "ChatPanel inline tool approvals should mark terminal commands as running");
 assert.match(connectionBar, /relationship-skill-alert/, "ConnectionBar should render the relationship skill alert");
 assert.match(connectionBar, /Relationship skill 未安装/, "ConnectionBar should show missing skill copy");
 assert.match(connectionBar, /Relationship skill 需更新/, "ConnectionBar should show outdated skill copy");
@@ -57,16 +65,25 @@ assert.match(app, /AgentTerminalToolApprovalDialog/, "App should render a global
 assert.match(app, /isGatewayTerminalRequest/, "App should detect pending gateway-terminal tool requests globally");
 assert.match(app, /批准执行/, "gateway-terminal command approval dialog should expose an obvious approve action");
 assert.match(app, /approveToolRequest/, "global gateway-terminal dialog should approve pending tool requests");
+assert.match(app, /terminalActivityBySession/, "App should track terminal activity state per session");
 assert.match(app, /navigator\.clipboard\.writeText\(prompt\)/, "prompt dialog should copy the generated install/update prompt");
 assert.match(app, /callbackHost/, "prompt dialog should include the current Detach Agent callback host when available");
 assert.match(skillInstallPanel, /DETACH_AGENT_RELATIONSHIP_SKILL_VERSION/, "Skill install panel should use the shared required skill version");
 assert.match(skillInstallPanel, /export const relationshipSkillInstallPrompt/, "Skill install panel should export the shared install/update prompt");
 assert.match(skillInstallPanel, /DETACH_AGENT_SKILL_INSTALL_STATUS/, "Skill install panel should request parseable install status");
 assert.match(skillInstallPanel, /detaches-agent-adapter\.mjs/, "Skill install prompt should also install the adapter CLI helper");
+assert.match(terminalPanel, /activityState === "running"/, "TerminalPanel should show a running activity label");
+assert.match(terminalPanel, /运行中/, "TerminalPanel should expose the running state copy");
+assert.match(toolQueuePanel, /onTerminalActivityChange\?\.\("running"\)/, "ToolQueuePanel should mark terminal commands as running");
+assert.doesNotMatch(toolQueuePanel, /onRevealTerminal\(\);/, "ToolQueuePanel should not auto-open the terminal after approving a command");
 
 assert.match(css, /@keyframes skill-alert-pulse/, "CSS should include the orange breathing alert animation");
 assert.match(css, /relationship-skill-prompt-dialog/, "CSS should style the relationship skill prompt dialog");
 assert.match(css, /local-control-card/, "CSS should style the control-local enable panel");
+assert.match(css, /prompt-preset-rail/, "CSS should style the prompt floating ball rail");
+assert.match(css, /prompt-preset-list[\s\S]*overflow-y: auto/, "prompt floating ball list should support vertical scrolling");
+assert.match(css, /prompt-preset-rail:not\(\.mobile-open\) \.prompt-preset-list/, "prompt floating ball rail should collapse on small screens");
+assert.match(css, /prompt-preset-editor/, "CSS should style the prompt preset editor drawer");
 assert.match(preview, /Main Agent 高级配置预览/, "static HTML preview should exist");
 assert.match(preview, /Relationship skill 未安装/, "static HTML preview should show the missing skill reminder");
 
