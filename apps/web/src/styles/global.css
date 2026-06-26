@@ -1857,6 +1857,54 @@ h3 { font-size: 14px; }
   margin-top: 14px;
 }
 
+.file-browser-help {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.file-browser-help details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.file-browser-help summary {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.file-browser-help details > div {
+  display: grid;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.file-browser-help p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.file-browser-help code {
+  display: block;
+  padding: 8px;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #d1fae5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .file-browser-status {
   height: 26px;
   display: inline-flex;

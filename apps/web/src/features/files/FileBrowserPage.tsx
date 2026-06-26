@@ -157,6 +157,7 @@ export function FileBrowserPage() {
               <span>密码保存</span><strong>使用浏览器密码管理器</strong>
             </div>
             {error ? <div className="panel-error">{error}</div> : null}
+            <FileBrowserConnectionHelp />
             <div className="file-browser-actions">
               {state === "connected" ? (
                 <button type="button" className="secondary-button" onClick={() => setShowConfig(false)}>返回浏览</button>
@@ -206,6 +207,34 @@ export function FileBrowserPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function FileBrowserConnectionHelp() {
+  return (
+    <div className="file-browser-help">
+      <details>
+        <summary>已经安装了 File Browser，如何排查无法连接？</summary>
+        <div>
+          <p>先在服务器上确认服务是否监听当前端口：</p>
+          <code>ss -lntp | grep 39999</code>
+          <p>再从服务器本机测试 HTTP 是否返回 File Browser 页面：</p>
+          <code>curl -I http://127.0.0.1:39999</code>
+          <p>如果本机可访问但 DetachAgent 连接失败，重点检查监听地址是否为 0.0.0.0、服务器防火墙、安全组、Tailscale/LAN 路由，以及页面里填写的 IP 是否是 Main Agent 可访问地址。</p>
+        </div>
+      </details>
+      <details>
+        <summary>服务器还没有 File Browser，如何安装启动？</summary>
+        <div>
+          <p>可以使用官方安装脚本安装单二进制版本：</p>
+          <code>curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash</code>
+          <p>启动示例，监听 39999 端口并绑定到所有网卡：</p>
+          <code>filebrowser -a 0.0.0.0 -p 39999 -r /path/to/files</code>
+          <p>也可以用 Docker 运行，确保把宿主机目录和 39999 端口映射出来：</p>
+          <code>docker run -d --name filebrowser -p 39999:80 -v /path/to/files:/srv filebrowser/filebrowser</code>
+        </div>
+      </details>
     </div>
   );
 }

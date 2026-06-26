@@ -314,6 +314,20 @@ function describeFileServiceFetchError(error: unknown, host: string, port: numbe
   return anyError.message || String(error);
 }
 
+async function assertLikelyFileBrowser(response: Response): Promise<void> {
+  const contentType = response.headers.get("content-type") || "";
+  if (response.status >= 500) throw new Error(`File Browser responded with HTTP ${response.status}.`);
+  if (!response.ok && response.status !== 401 && response.status !== 403) {
+    throw new Error(`File Browser responded with HTTP ${response.status}.`);
+  }
+  if (!/text\/html|text\/plain|application\/json/i.test(contentType)) return;
+  const body = (await response.text()).slice(0, 64 * 1024);
+  // File Browser 的根页面通常会暴露产品名；如果端口返回了别的 Web 服务，提前提示用户换端口或安装服务。
+  if (body && !/file\s*browser|filebrowser/i.test(body)) {
+    throw new Error("服务有 HTTP 响应，但不像 File Browser。请确认端口指向的是 filebrowser/filebrowser 服务。");
+  }
+}
+
 async function markFileServiceTested(input: {
   type: "filebrowser";
   host: string;
@@ -894,7 +908,7 @@ apiRoutes.post("/file-service/test", async (req, res) => {
       redirect: "manual",
       signal: controller.signal
     });
-    if (response.status >= 500) throw new Error(`File Browser responded with HTTP ${response.status}.`);
+    await assertLikelyFileBrowser(response);
     await markFileServiceTested({ type, host, port, status: "ok", error: "", checkedAt });
     res.json({ ok: true, type, host, port, baseUrl, checkedAt });
   } catch (error) {
