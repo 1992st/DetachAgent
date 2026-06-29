@@ -318,8 +318,8 @@ async function chatSendAndMaybeWait(input: {
   raw: boolean;
 }): Promise<WaitResult> {
   return withChatSocket(input.context.baseUrl, input.target, input.timeoutMs, (socket, finish, state) => {
-    socket.on("message", (data) => {
-      const event = parseSocketEvent(data);
+    socket.addEventListener("message", (messageEvent) => {
+      const event = parseSocketEvent(messageEvent.data);
       if (!event) return;
       if (input.raw || event.type === "chat" || event.type === "agent" || event.type === "error" || event.type === "sent") {
         state.events.push(event);
@@ -352,8 +352,8 @@ async function listenForEvents(input: {
 }): Promise<WaitResult> {
   return withChatSocket(input.context.baseUrl, input.target, input.timeoutMs, (socket, _finish, state) => {
     state.runId = input.runId;
-    socket.on("message", (data) => {
-      const event = parseSocketEvent(data);
+    socket.addEventListener("message", (messageEvent) => {
+      const event = parseSocketEvent(messageEvent.data);
       if (!event) return;
       if (event.type === "ready" && input.runId) {
         socket.send(JSON.stringify({ type: "track-run", runId: input.runId } satisfies ChatSocketClientEvent));
@@ -398,13 +398,13 @@ function withChatSocket(
     if (timeoutMs > 0) {
       timer = setTimeout(() => finish(true), timeoutMs);
     }
-    socket.on("error", (error: Error) => {
+    socket.addEventListener("error", (errorEvent) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      reject(new CliError(`Detach Agent chat socket is unreachable at ${baseUrl}.`, 3, error));
+      reject(new CliError(`Detach Agent chat socket is unreachable at ${baseUrl}.`, 3, errorEvent));
     });
-    socket.on("close", () => {
+    socket.addEventListener("close", () => {
       if (!settled && timeoutMs === 0) finish(false);
     });
     attach(socket, finish, state);
