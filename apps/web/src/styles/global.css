@@ -1550,22 +1550,24 @@ h3 { font-size: 14px; }
   position: fixed;
   top: 184px;
   right: 10px;
-  bottom: 116px;
   z-index: 55;
-  width: 88px;
-  padding: 10px 14px;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 10px;
-  border: 1px solid rgba(15, 23, 42, 0.03);
+  max-height: 258px;
+  padding: 7px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.02);
   border-radius: 8px;
-  background:  rgba(165, 204, 236, 0.23);
-  box-shadow:  0 10px 24px rgba(15, 23, 42, 0.06);;
-  backdrop-filter:  blur(8px);
+  background: rgba(248, 250, 252, 0.28);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+  backdrop-filter: blur(5px);
+  pointer-events: none;
 }
 
 .prompt-preset-list {
   min-height: 0;
+  max-height: 206px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1577,6 +1579,7 @@ h3 { font-size: 14px; }
 
 .prompt-preset-mobile-toggle {
   display: none;
+  pointer-events: auto;
 }
 
 .prompt-preset-ball,
@@ -1592,6 +1595,7 @@ h3 { font-size: 14px; }
   font-size: 13px;
   font-weight: 800;
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .prompt-preset-ball {
@@ -3531,6 +3535,7 @@ h3 { font-size: 14px; }
 
   .prompt-preset-rail.mobile-open {
     width: min(420px, calc(100vw - 20px));
+    max-height: 112px;
     grid-template-columns: 44px minmax(0, 1fr) auto;
   }
 

@@ -13,6 +13,7 @@ async function main() {
   await fs.mkdir(runtimeRoot, { recursive: true });
 
   await runPnpm(["--filter", "@detaches/server", "deploy", "--prod", "--no-optional", "--ignore-scripts", path.join(runtimeRoot, "server")]);
+  await fs.rm(path.join(runtimeRoot, "server", "node_modules", ".pnpm", "node_modules", "@detaches", "server"), { force: true });
   await fs.rm(path.join(runtimeRoot, "server", "src"), { recursive: true, force: true });
   await fs.rm(path.join(runtimeRoot, "server", "test"), { recursive: true, force: true });
   await fs.rm(path.join(runtimeRoot, "server", "scripts"), { recursive: true, force: true });
@@ -21,6 +22,7 @@ async function main() {
   await copyDir(path.join(repoRoot, "apps", "web", "dist"), path.join(runtimeRoot, "web", "dist"));
   await copyDir(path.join(repoRoot, "apps", "web", "public"), path.join(runtimeRoot, "web", "public"));
   await copyDir(path.join(repoRoot, "packages", "openclaw-detaches-adapter"), path.join(runtimeRoot, "packages", "openclaw-detaches-adapter"));
+  await stageCli();
 }
 
 function runPnpm(args) {
@@ -55,6 +57,16 @@ async function copyDir(source, destination) {
     dereference: true,
     filter: (item) => !item.includes(`${path.sep}node_modules${path.sep}`)
   });
+}
+
+async function stageCli() {
+  const cliSource = path.join(repoRoot, "cli");
+  const cliDestination = path.join(runtimeRoot, "cli");
+  await fs.rm(cliDestination, { recursive: true, force: true });
+  await fs.mkdir(cliDestination, { recursive: true });
+  await copyDir(path.join(cliSource, "dist"), path.join(cliDestination, "dist"));
+  await fs.copyFile(path.join(cliSource, "package.json"), path.join(cliDestination, "package.json"));
+  await fs.copyFile(path.join(cliSource, "cli_use.md"), path.join(cliDestination, "cli_use.md"));
 }
 
 main().catch((error) => {

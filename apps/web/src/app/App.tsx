@@ -395,9 +395,9 @@ export function App() {
     }
     if (session) {
       setLocalControlRuntimeBySession((current) => {
-        const nextState: LocalControlRuntimeState = status === "ready"
+        const nextState: LocalControlRuntimeState = status === "ready" || status === "outdated"
           ? "ready"
-          : status === "missing" || status === "outdated"
+          : status === "missing"
             ? "install_required"
             : status === "checking"
               ? "checking"

@@ -218,11 +218,15 @@ class ToolBrokerService {
       await this.audit({ type: "tool.approve", requestId, status: "blocked", actor: input.actor, riskAccepted: input.riskAccepted, error: request.error });
       throw new Error(request.error || "Tool request is blocked.");
     }
-    if (request.kind === "main-agent-save-file" && request.status === "running") {
+    if (request.kind === "main-agent-save-file" && (request.status === "running" || request.status === "succeeded")) {
       const transfer = mainAgentFileTransferService.findByRequest(request.id);
       if (transfer) {
+        if ((transfer.status === "succeeded" || transfer.status === "failed") && request.status === "running") {
+          await this.completeMainAgentFileTransfer(transfer);
+        }
+        const latestRequest = this.requests.get(request.id) ?? request;
         return {
-          request,
+          request: latestRequest,
           execution: {
             executionId: transfer.transferId,
             target: request.target,
@@ -233,6 +237,20 @@ class ToolBrokerService {
             forwardStatus: "not-started"
           },
           message: mainAgentTransferApproveMessage(transfer)
+        };
+      }
+      if (request.status === "succeeded") {
+        return {
+          request,
+          execution: {
+            target: request.target,
+            sessionKey: request.sessionKey,
+            wroteToTerminal: false,
+            completed: true,
+            exitCode: 0,
+            forwardStatus: "not-started"
+          },
+          message: "Main Agent file transfer already succeeded."
         };
       }
       await this.fail(request, "Main Agent file transfer was running, but its in-memory transfer state is no longer available. Please retry the request.");
@@ -890,6 +908,7 @@ class ToolBrokerService {
     await this.load();
     const request = this.requests.get(transfer.requestId);
     if (!request || request.kind !== "main-agent-save-file") return;
+    if (!mainAgentFileTransferService.isLatestForRequest(transfer)) return;
     if (request.status === "succeeded" || request.status === "rejected") return;
     const updated = this.update(
       request,

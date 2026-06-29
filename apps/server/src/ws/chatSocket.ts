@@ -128,6 +128,8 @@ export function attachChatSocket(server: HttpServer): void {
           if (runId) activeRunIds.add(runId);
           const parsed = parseRelationshipSkillStatus(response);
           if (parsed) send(socket, { type: "relationship-skill-status", ...parsed, raw: response });
+        } else if (event.type === "track-run") {
+          if (event.runId) activeRunIds.add(event.runId);
         } else if (event.type === "abort") {
           activeRunIds.delete(event.runId);
           await gatewayClient.abortChat(sessionKey, event.runId);

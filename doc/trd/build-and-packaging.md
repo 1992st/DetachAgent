@@ -63,6 +63,20 @@ electron-builder --win nsis --x64
 
 The Windows installer must be built and validated on Windows before it is considered releasable.
 
+macOS temporary distribution packaging is explicitly selected with:
+
+```bash
+pnpm package:mac
+```
+
+That runs Electron Builder with:
+
+```bash
+CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64 --x64
+```
+
+The macOS package is intentionally unsigned for temporary distribution. It is useful for internal testing and direct sharing, but users may need to approve the app in macOS Gatekeeper on first launch.
+
 ## Compile
 
 Run type checks:
@@ -82,6 +96,25 @@ Build only the Electron desktop TypeScript entrypoints:
 ```bash
 pnpm --filter @detaches/desktop build
 ```
+
+## Versioning
+
+The release version is stored in the root workspace package, the Electron desktop package, and the CLI package. Keep them in sync before packaging:
+
+```bash
+pnpm version:set 0.1.1
+```
+
+The version is used by Electron Builder artifact names:
+
+```text
+release/
+  detaches-agent-<version>-win-x64-setup.exe
+  detaches-agent-<version>-mac-arm64.dmg
+  detaches-agent-<version>-mac-x64.dmg
+```
+
+Do not edit only one `package.json`; mixed versions can produce misleading installer names and CLI output.
 
 ## Run Development Stack
 
@@ -262,7 +295,7 @@ Create a checksum before sharing:
 Get-FileHash release\detaches-agent-<version>-win-x64-setup.exe -Algorithm SHA256
 ```
 
-## Release Script
+## Windows Release Script
 
 The full Windows release script is:
 
@@ -271,6 +304,67 @@ pnpm release:win
 ```
 
 It runs typecheck, build, adapter tests, server smoke, and Windows packaging. Use it on Windows for release candidates.
+
+## macOS Temporary Distribution Packaging
+
+Use a macOS machine for macOS artifacts.
+
+Required tools:
+
+- Node.js 22 LTS.
+- pnpm 9.15.9 through Corepack.
+- Git.
+- Xcode Command Line Tools.
+
+Setup:
+
+```bash
+xcode-select --install
+corepack enable
+pnpm install --frozen-lockfile
+```
+
+Set the release version:
+
+```bash
+pnpm version:set 0.1.1
+```
+
+Build a temporary unsigned DMG:
+
+```bash
+pnpm package:mac
+```
+
+Expected artifacts:
+
+```text
+release/
+  detaches-agent-<version>-mac-arm64.dmg
+  detaches-agent-<version>-mac-x64.dmg
+```
+
+Create checksums before sharing:
+
+```bash
+shasum -a 256 release/detaches-agent-<version>-mac-*.dmg
+```
+
+Temporary distribution options:
+
+- Directly share the DMG through a trusted internal channel.
+- Attach the DMG and checksum to a GitHub Release.
+- Upload the DMG and checksum to an internal object store or file share.
+
+Because the temporary macOS package is unsigned and not notarized, recipients may see a macOS security warning on first launch. This is expected for temporary distribution and should not be used as the final public release path.
+
+The full signed macOS release-candidate script is:
+
+```bash
+pnpm release:mac
+```
+
+It runs typecheck, build, adapter tests, server smoke, signed macOS DMG packaging, and skips notarization by default. It requires a Developer ID Application certificate. Use `scripts/package-macos-release.sh --checks --notarize --notary-profile <profile>` when a notarized candidate is required.
 
 ## What macOS Can And Cannot Close
 

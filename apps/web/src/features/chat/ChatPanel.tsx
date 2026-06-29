@@ -1007,11 +1007,18 @@ function ToolRequests({
           if (transfer) {
             setTransfers((current) => ({ ...current, [index]: transfer }));
             setResultSummaries((current) => ({ ...current, [index]: mainAgentTransferSummary(transfer) }));
+            if (transfer.status === "succeeded") {
+              setErrors((current) => clearIndexedValue(current, index));
+            }
           }
           if (transfer && (transfer.status === "succeeded" || transfer.status === "failed")) {
             delete pollTimersRef.current[index];
             setHandled((current) => ({ ...current, [index]: transfer.status === "succeeded" ? "approved" : "error" }));
-            if (transfer.error) setErrors((current) => ({ ...current, [index]: transfer.error || "" }));
+            setErrors((current) => transfer.status === "succeeded"
+              ? clearIndexedValue(current, index)
+              : transfer.error
+                ? { ...current, [index]: transfer.error }
+                : current);
             return;
           }
           pollTimersRef.current[index] = window.setTimeout(poll, transfer?.status === "waiting-password" ? 3000 : 1000);
@@ -1055,6 +1062,9 @@ function ToolRequests({
         const actionLabel = request.kind === "main-agent-save-file" ? "Save" : request.kind === "file-transfer" ? "Transfer" : request.kind === "adapter-install" ? "Install" : "Run";
         const transfer = transfers[index];
         const runningTransfer = request.kind === "main-agent-save-file" && request.status === "running";
+        const latestTransferSucceeded = transfer?.status === "succeeded";
+        const displayRequestError = latestTransferSucceeded ? undefined : request.error;
+        const displayInlineError = latestTransferSucceeded ? undefined : errors[index];
         return (
           <div className={`terminal-request-card ${request.kind === "file-transfer" ? "file-transfer-card" : ""}`} key={request.id}>
             <div>
@@ -1064,9 +1074,9 @@ function ToolRequests({
               {request.reason ? <p>{request.reason}</p> : null}
               <code>{toolRequestCode(request)}</code>
               <small>requestId: {request.id}</small>
-              {request.error ? <p className="request-error">{request.error}</p> : null}
+              {displayRequestError ? <p className="request-error">{displayRequestError}</p> : null}
               {unsupported ? <p className="request-error">{unsupportedTargetMessage(request)}</p> : null}
-              {errors[index] ? <p className="request-error">{errors[index]}</p> : null}
+              {displayInlineError ? <p className="request-error">{displayInlineError}</p> : null}
               {resultSummaries[index] ? <small>{resultSummaries[index]}</small> : null}
               {transfer ? <InlineTransferProgress transfer={transfer} /> : null}
               {transfer?.status === "waiting-password" || transfer?.needsPassword ? (
@@ -1112,7 +1122,16 @@ function ToolRequests({
                         ...current,
                         [index]: transfer ? mainAgentTransferSummary(transfer) : toolResultSummary(response)
                       }));
-                      if (transfer) setTransfers((current) => ({ ...current, [index]: transfer }));
+                      if (transfer) {
+                        setTransfers((current) => ({ ...current, [index]: transfer }));
+                        if (transfer.status === "succeeded") {
+                          setErrors((current) => clearIndexedValue(current, index));
+                          setHandled((current) => ({ ...current, [index]: "approved" }));
+                        } else if (transfer.status === "failed" && transfer.error) {
+                          setErrors((current) => ({ ...current, [index]: transfer.error || "" }));
+                          setHandled((current) => ({ ...current, [index]: "error" }));
+                        }
+                      }
                       if (request.kind === "main-agent-save-file") scheduleMainAgentTransferPoll(request, index);
                       if (request.kind === "terminal") onTerminalActivityChange("connected");
                     })
@@ -1254,6 +1273,13 @@ function transferFromResult(response: ToolExecutionResultResponse): MainAgentFil
   } catch {
     return null;
   }
+}
+
+function clearIndexedValue<T>(record: Record<number, T>, index: number): Record<number, T> {
+  if (!(index in record)) return record;
+  const next = { ...record };
+  delete next[index];
+  return next;
 }
 
 function mainAgentTransferSummary(transfer: MainAgentFileTransferSnapshot): string {

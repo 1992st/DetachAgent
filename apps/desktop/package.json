@@ -8,7 +8,8 @@
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "dev": "node scripts/dev.mjs",
     "stage:runtime": "node scripts/stage-runtime.mjs",
-    "package:win": "pnpm --dir ../.. build && pnpm build && pnpm stage:runtime && electron-builder --win nsis --x64"
+    "package:win": "pnpm --dir ../.. build && pnpm build && pnpm stage:runtime && electron-builder --win nsis --x64",
+    "package:mac": "pnpm --dir ../.. build && pnpm build && pnpm stage:runtime && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64 --x64"
   },
   "dependencies": {
     "electron-is-dev": "^3.0.1"

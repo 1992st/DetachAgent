@@ -123,6 +123,19 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  cli:
+    dependencies:
+      '@detaches/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.29
+        version: 22.19.20
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   packages/openclaw-detaches-adapter: {}
 
   packages/shared:

@@ -56,6 +56,8 @@ assert.match(app, /relationshipSkillInstalledVersion/, "App should keep the inst
 assert.match(app, /relationshipSkillRequiredVersion/, "App should keep the required relationship skill version");
 assert.match(app, /localControlConsentByScope/, "App should track local-control consent per agent scope");
 assert.match(app, /localControlRuntimeBySession/, "App should track local-control runtime per session");
+assert.match(app, /status === "ready" \|\| status === "outdated"[\s\S]*\? "ready"/, "outdated relationship skill should still allow best-effort local-control file transfer");
+assert.match(app, /status === "missing"[\s\S]*\? "install_required"/, "missing relationship skill should still block local-control file transfer");
 assert.match(app, /relationshipSkillCheckNonce/, "New session should explicitly trigger the relationship skill check only when consent is enabled");
 assert.match(app, /relationshipSkillPromptOpen/, "skill action should open the copyable prompt dialog");
 assert.match(app, /RelationshipSkillPromptDialog/, "App should render a relationship skill prompt dialog");
@@ -83,8 +85,14 @@ assert.match(css, /@keyframes skill-alert-pulse/, "CSS should include the orange
 assert.match(css, /relationship-skill-prompt-dialog/, "CSS should style the relationship skill prompt dialog");
 assert.match(css, /local-control-card/, "CSS should style the control-local enable panel");
 assert.match(css, /prompt-preset-rail/, "CSS should style the prompt floating ball rail");
-assert.match(css, /prompt-preset-list[\s\S]*overflow-y: auto/, "prompt floating ball list should support vertical scrolling");
+assert.match(css, /prompt-preset-rail[\s\S]*pointer-events: none/, "prompt floating ball rail should not block nearby document controls");
+assert.match(css, /prompt-preset-ball,[\s\S]*prompt-preset-add[\s\S]*pointer-events: auto/, "prompt floating ball buttons should remain clickable");
+assert.match(css, /prompt-preset-mobile-toggle[\s\S]*pointer-events: auto/, "prompt floating ball mobile toggle should remain clickable");
+assert.match(css, /prompt-preset-rail[\s\S]*max-height: 258px/, "prompt floating ball rail should cap at roughly four preset balls plus add button");
+assert.match(css, /prompt-preset-list[\s\S]*flex-direction: column[\s\S]*overflow-y: auto/, "prompt floating ball list should remain a vertical scrollable column");
 assert.match(css, /prompt-preset-rail:not\(\.mobile-open\) \.prompt-preset-list/, "prompt floating ball rail should collapse on small screens");
+assert.match(chatPanel, /clearIndexedValue/, "ChatPanel should clear stale inline transfer errors after a later success");
+assert.match(chatPanel, /latestTransferSucceeded/, "ChatPanel should let the latest successful transfer hide older request errors");
 assert.match(css, /prompt-preset-editor/, "CSS should style the prompt preset editor drawer");
 assert.match(css, /composer\.drag-over/, "CSS should highlight the composer while dragging files");
 assert.match(preview, /Main Agent 高级配置预览/, "static HTML preview should exist");

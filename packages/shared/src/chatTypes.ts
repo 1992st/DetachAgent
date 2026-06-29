@@ -73,6 +73,7 @@ export type ChatSocketClientEvent =
       localControlScope?: string;
       idempotencyKey?: string;
     }
+  | { type: "track-run"; runId: string }
   | { type: "bootstrap-relationship-skill-check"; idempotencyKey?: string }
   | { type: "history" }
   | { type: "abort"; runId: string };

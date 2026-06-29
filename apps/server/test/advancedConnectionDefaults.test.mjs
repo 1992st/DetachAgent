@@ -21,10 +21,12 @@ const terminalRunStoreSource = fs.readFileSync(path.join(repoRoot, "apps/server/
 const terminalStreamHubSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/agentTerminal/terminalStreamHub.ts"), "utf8");
 const commandGuardServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/tools/commandGuardService.ts"), "utf8");
 const toolBrokerServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/tools/toolBrokerService.ts"), "utf8");
+const mainAgentFileTransferSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/files/mainAgentFileTransferService.ts"), "utf8");
 const terminalServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/terminal/terminalService.ts"), "utf8");
 const adminTerminalServiceSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/terminal/adminTerminalService.ts"), "utf8");
 const adminTerminalHelperSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/services/terminal/adminTerminalHelper.ts"), "utf8");
 const terminalSocketSource = fs.readFileSync(path.join(repoRoot, "apps/server/src/ws/terminalSocket.ts"), "utf8");
+const desktopStageRuntimeSource = fs.readFileSync(path.join(repoRoot, "apps/desktop/scripts/stage-runtime.mjs"), "utf8");
 const terminalTypesSource = fs.readFileSync(path.join(repoRoot, "packages/shared/src/terminalTypes.ts"), "utf8");
 const detachesContextTypesSource = fs.readFileSync(path.join(repoRoot, "packages/shared/src/detachesContextTypes.ts"), "utf8");
 const terminalPanelSource = fs.readFileSync(path.join(repoRoot, "apps/web/src/features/terminal/TerminalPanel.tsx"), "utf8");
@@ -421,6 +423,48 @@ assert.match(
   toolBrokerServiceSource,
   /Command Guard 和 Tool Queue 审批/,
   "Tool Broker should document that administrator terminal does not bypass approval"
+);
+
+assert.match(
+  mainAgentFileTransferSource,
+  /latestTransferRecordByRequest/,
+  "Main Agent file transfer lookup should use the latest execution for a retried request"
+);
+
+assert.match(
+  mainAgentFileTransferSource,
+  /matches\.at\(-1\)/,
+  "Main Agent file transfer lookup should prefer the newest transfer record"
+);
+
+assert.match(
+  toolBrokerServiceSource,
+  /isLatestForRequest\(transfer\)/,
+  "Tool Broker should ignore stale transfer completion events from older executions"
+);
+
+assert.match(
+  toolBrokerServiceSource,
+  /request\.status === "running" \|\| request\.status === "succeeded"/,
+  "Tool Broker should return a completed success response for already-succeeded main-agent file transfers"
+);
+
+assert.match(
+  desktopStageRuntimeSource,
+  /stageCli/,
+  "desktop runtime staging should include the CLI companion package"
+);
+
+assert.match(
+  desktopStageRuntimeSource,
+  /copyDir\(path\.join\(cliSource, "dist"\)/,
+  "desktop runtime staging should copy the built CLI dist"
+);
+
+assert.match(
+  desktopStageRuntimeSource,
+  /cli_use\.md/,
+  "desktop runtime staging should include the CLI user guide"
 );
 
 assert.match(

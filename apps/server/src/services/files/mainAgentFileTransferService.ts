@@ -85,8 +85,12 @@ class MainAgentFileTransferService {
   }
 
   findByRequest(requestId: string): MainAgentFileTransferSnapshot | null {
-    const transfer = [...this.transfers.values()].find((item) => item.requestId === requestId);
+    const transfer = this.latestTransferRecordByRequest(requestId);
     return transfer ? snapshot(transfer) : null;
+  }
+
+  isLatestForRequest(transfer: MainAgentFileTransferSnapshot): boolean {
+    return this.latestTransferRecordByRequest(transfer.requestId)?.transferId === transfer.transferId;
   }
 
   providePassword(transferId: string, password: string): MainAgentFileTransferSnapshot {
@@ -364,6 +368,11 @@ class MainAgentFileTransferService {
   private touch(transfer: TransferRecord, patch: Partial<MainAgentFileTransferSnapshot>): void {
     Object.assign(transfer, patch, { updatedAt: new Date().toISOString() });
     this.emitter.emit("transfer", snapshot(transfer));
+  }
+
+  private latestTransferRecordByRequest(requestId: string): TransferRecord | null {
+    const matches = [...this.transfers.values()].filter((item) => item.requestId === requestId);
+    return matches.at(-1) ?? null;
   }
 
   private async audit(event: AuditEvent): Promise<void> {
