@@ -5,6 +5,7 @@ import type { AgentSummary, AgentsListResponse, ChatSocketClientEvent, ChatSocke
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:38888";
 const DEFAULT_TIMEOUT_MS = 120_000;
+const CLI_VERSION = "1.2.0";
 
 interface ParsedArgs {
   positionals: string[];
@@ -124,7 +125,7 @@ async function main(argv: string[]): Promise<number> {
   const [scope, command, ...rest] = parsed.positionals;
 
   if (booleanFlag(parsed.flags, "version") || scope === "--version") {
-    console.log("0.1.0");
+    console.log(CLI_VERSION);
     return 0;
   }
   if (!scope || scope === "help" || booleanFlag(parsed.flags, "help")) {

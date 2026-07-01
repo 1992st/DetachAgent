@@ -9,7 +9,8 @@ dist/
 .scratch/
 outputs/
 release/*
-!release/detaches-agent-0.1.0-win-x64-setup.exe
+!release/detaches-agent-1.2.0-win-x64-setup.exe
+!release/detaches-agent-1.2.0-win-x64-setup.exe.sha256
 .codex/tmp/
 .codex/tools/
 main.js

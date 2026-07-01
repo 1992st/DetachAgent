@@ -50,7 +50,7 @@ type PersistedSettings = Partial<RuntimeSettings> & {
 
 const settingsPath = path.join(appConfig.storageDir, "cache", "settings.json");
 const legacySettingsPath = path.join(repoRoot, "storage", "cache", "settings.json");
-const DEFAULT_FILEBROWSER_PORT = 39999;
+const DEFAULT_FILEBROWSER_PORT = 8002;
 
 function sanitizeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;

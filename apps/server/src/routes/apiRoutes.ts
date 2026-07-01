@@ -40,7 +40,7 @@ const uploadSingleFile = upload.single("file");
 export const apiRoutes = express.Router();
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_FILEBROWSER_PORT = 39999;
+const DEFAULT_FILEBROWSER_PORT = 8002;
 
 apiRoutes.get("/terminal/apps", async (_req, res) => {
   try {

@@ -21,6 +21,10 @@ if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
 const packageFiles = [
   path.join(repoRoot, "package.json"),
   path.join(repoRoot, "apps", "desktop", "package.json"),
+  path.join(repoRoot, "apps", "server", "package.json"),
+  path.join(repoRoot, "apps", "web", "package.json"),
+  path.join(repoRoot, "packages", "shared", "package.json"),
+  path.join(repoRoot, "packages", "openclaw-detaches-adapter", "package.json"),
   path.join(repoRoot, "cli", "package.json")
 ];
 

@@ -1,7 +1,7 @@
 {
   "name": "detaches-agent",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently -n server,web -c cyan,green --kill-others-on-fail \"pnpm --filter @detaches/server dev\" \"node scripts/wait-for-server.mjs && pnpm --filter @detaches/web dev\"",

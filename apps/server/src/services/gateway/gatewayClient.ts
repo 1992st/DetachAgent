@@ -370,7 +370,7 @@ export class GatewayClient extends EventEmitter {
       client: {
         id: clientId,
         displayName: "detaches_agent local UI",
-        version: "0.1.0",
+        version: "1.2.0",
         platform,
         deviceFamily: "desktop",
         mode: clientMode,
@@ -389,7 +389,7 @@ export class GatewayClient extends EventEmitter {
         nonce
       },
       locale: "zh-CN",
-      userAgent: "detaches-agent/0.1.0"
+      userAgent: "detaches-agent/1.2.0"
     };
   }
 
