@@ -1,10 +1,13 @@
 node_modules/
+.pnpm-store/
 dist/
 .turbo/
 .vite/
 .tmp-*
 .tmp-electron-user-data/
 .desktop-runtime/
+.scratch/
+outputs/
 release/*
 !release/detaches-agent-0.1.0-win-x64-setup.exe
 .codex/tmp/
