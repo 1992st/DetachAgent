@@ -1,11 +1,15 @@
 import { type CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { ChevronDown, ChevronRight, Copy, ExternalLink, FileText, Folder, Library, MessageCircle, Plus, RefreshCw, Send, Settings, Square, X } from "lucide-react";
 import type { AgentSummary, ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, LibraryConfigResponse, LibraryEntry, LibraryPathResolution, LibraryServerConfig } from "@detaches/shared";
 import {
   activateLibraryServer,
   checkLibraryUrl,
+  fetchLibraryTextFile,
   fetchLibraryConfig,
   fetchLibraryDirectory,
+  libraryFileUrl,
   resolveLibraryPath,
   saveLibraryServer,
   testLibraryServer,
@@ -14,6 +18,8 @@ import {
 
 const DEFAULT_LIBRARY_PORT = 8000;
 const FLOAT_STORAGE_KEY = "detaches.library.floatPosition.v1";
+const LOCAL_DRAWIO_URL = "/vendor/drawio/index.html";
+const ONLINE_DRAWIO_URL = "https://embed.diagrams.net/";
 
 interface Props {
   selectedAgent: AgentSummary | null;
@@ -348,7 +354,7 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
             <header className="library-reader-toolbar">
               <div>
                 <strong>{selectedFile?.title || "选择一个文件开始阅读"}</strong>
-                <small>{selectedFile?.displayPath || "也可以点击右下角馆员询问 workspace 文档"}</small>
+                <small>{selectedFile ? `${fileKindLabel(selectedFile.relativePath)} · ${selectedFile.displayPath}` : "也可以点击右下角馆员询问 workspace 文档"}</small>
               </div>
               <div className="library-reader-actions">
                 <button type="button" className="icon-button" title="刷新预览" disabled={!selectedFile} onClick={() => {
@@ -363,12 +369,19 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
                 <a className={`icon-button ${selectedFile ? "" : "disabled"}`} title="外部打开" href={selectedFile?.url || "#"} target="_blank" rel="noreferrer">
                   <ExternalLink size={15} />
                 </a>
+                {selectedFile && (isPdfFile(selectedFile.relativePath) || isDrawioFile(selectedFile.relativePath)) ? <span className="library-reader-badge">只读预览</span> : null}
               </div>
             </header>
             <div className="library-frame-wrap">
               {selectedFile ? (
                 <>
-                  <iframe key={readerKey} title="Library reader" src={selectedFile.url} onLoad={() => void checkSelectedUrl()} />
+                  <LibraryReader
+                    key={readerKey}
+                    file={selectedFile}
+                    serverId={activeServer.id}
+                    onNotice={setReaderNotice}
+                    onFallbackLoad={() => void checkSelectedUrl()}
+                  />
                   {readerNotice ? <ReaderNotice notice={readerNotice} selectedFile={selectedFile} activeServer={activeServer} onConfigure={() => setConfigOpen(true)} /> : null}
                 </>
               ) : (
@@ -422,7 +435,7 @@ function LibraryConfigPanel({ form, defaultHost, busy, error, onChange, onSubmit
         <label>Port<input value={form.port} onChange={(event) => onChange({ ...form, port: event.target.value })} inputMode="numeric" placeholder="8000" /></label>
       </div>
       <label>Agent 根目录<input value={form.agentRootPath} onChange={(event) => onChange({ ...form, agentRootPath: event.target.value })} placeholder="/mnt/agent/workspace" /></label>
-      <p className="library-config-note">Agent 根目录是 Agent 查找文件时看到的 workspace 根路径。图书馆会用它裁剪 Agent 返回的绝对路径，并转换成浏览器 URL。每个端口可以保存不同的 Agent 根目录。</p>
+      <p className="library-config-note">Agent 根目录用于映射浏览路径。PDF、Markdown 和 draw.io 预览会优先尝试从本机同路径读取，失败时回退当前 HTTP 服务。</p>
       {error ? <div className="panel-error">{error}</div> : null}
       <div className="library-config-actions">
         <button type="submit" className="primary-button" disabled={busy}>{busy ? "保存中..." : "保存并测试"}</button>
@@ -515,6 +528,208 @@ function RecentList({ files, onOpen }: { files: SelectedFile[]; onOpen: (file: S
   );
 }
 
+function LibraryReader({ file, serverId, onNotice, onFallbackLoad }: {
+  file: SelectedFile;
+  serverId: string;
+  onNotice: (notice: string | null) => void;
+  onFallbackLoad: () => void;
+}) {
+  const [vendorState, setVendorState] = useState<"checking" | "ready" | "missing">("checking");
+  const [drawioBaseUrl, setDrawioBaseUrl] = useState(LOCAL_DRAWIO_URL);
+  const vendorUrl = isPdfFile(file.relativePath) ? "/vendor/pdfjs/web/viewer.html" : isDrawioFile(file.relativePath) ? LOCAL_DRAWIO_URL : "";
+
+  useEffect(() => {
+    if (!vendorUrl) {
+      setVendorState("ready");
+      return;
+    }
+    let cancelled = false;
+    fetch(vendorUrl, { method: "GET" })
+      .then(async (response) => {
+        if (!response.ok) return false;
+        const text = await response.text().catch(() => "");
+        return vendorLooksInstalled(vendorUrl, text);
+      })
+      .then((installed) => {
+        if (cancelled) return;
+        if (installed) {
+          setDrawioBaseUrl(LOCAL_DRAWIO_URL);
+          setVendorState("ready");
+        } else if (isDrawioFile(file.relativePath) && navigator.onLine) {
+          setDrawioBaseUrl(ONLINE_DRAWIO_URL);
+          setVendorState("ready");
+          onNotice("本地 draw.io 资源未安装，已临时使用在线 embed.diagrams.net。离线使用请运行 pnpm vendors:library。");
+        } else {
+          setVendorState("missing");
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        if (isDrawioFile(file.relativePath) && navigator.onLine) {
+          setDrawioBaseUrl(ONLINE_DRAWIO_URL);
+          setVendorState("ready");
+          onNotice("本地 draw.io 资源不可用，已临时使用在线 embed.diagrams.net。");
+        } else {
+          setVendorState("missing");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [vendorUrl]);
+
+  if (vendorState === "checking") {
+    return <div className="library-empty-reader"><RefreshCw size={34} /><p>正在检查预览资源...</p></div>;
+  }
+  if (vendorState === "missing") {
+    return (
+      <div className="library-empty-reader">
+        <FileText size={38} />
+        <p>{isPdfFile(file.relativePath) ? "PDF.js 预览资源未安装。" : "draw.io 预览资源未安装。"}</p>
+        <small>请运行 pnpm vendors:library 后重新打包，或检查 apps/web/public/vendor。</small>
+      </div>
+    );
+  }
+
+  if (isPdfFile(file.relativePath)) {
+    return <iframe title="PDF reader" src={pdfViewerUrl(serverId, file.relativePath)} onLoad={() => onNotice(null)} />;
+  }
+  if (isDrawioFile(file.relativePath)) {
+    return <DrawioPreview file={file} serverId={serverId} drawioBaseUrl={drawioBaseUrl} onNotice={onNotice} />;
+  }
+  if (isTextFile(file.relativePath)) {
+    return <TextReader file={file} serverId={serverId} onNotice={onNotice} />;
+  }
+  return <iframe title="Library reader" src={file.url} onLoad={onFallbackLoad} />;
+}
+
+function TextReader({ file, serverId, onNotice }: { file: SelectedFile; serverId: string; onNotice: (notice: string | null) => void }) {
+  const [text, setText] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    fetchLibraryTextFile(serverId, file.relativePath)
+      .then((content) => {
+        if (cancelled) return;
+        setText(content);
+        onNotice(null);
+      })
+      .catch((error) => {
+        if (!cancelled) onNotice(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [serverId, file.relativePath]);
+  if (isMarkdownFile(file.relativePath)) return <MarkdownPreview source={text} />;
+  return <pre className="library-text-reader">{text}</pre>;
+}
+
+function MarkdownPreview({ source }: { source: string }) {
+  return (
+    <article className="library-markdown-preview">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>
+    </article>
+  );
+}
+
+function DrawioPreview({ file, serverId, drawioBaseUrl, onNotice }: { file: SelectedFile; serverId: string; drawioBaseUrl: string; onNotice: (notice: string | null) => void }) {
+  const [svg, setSvg] = useState("");
+  const [xml, setXml] = useState("");
+  const [ready, setReady] = useState(false);
+  const [frameSrc, setFrameSrc] = useState("");
+  const [status, setStatus] = useState("正在加载 draw.io 预览引擎...");
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const xmlRef = useRef("");
+  const svgRef = useRef("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchLibraryTextFile(serverId, file.relativePath)
+      .then((text) => {
+        if (!cancelled) {
+          xmlRef.current = text;
+          setXml(text);
+          setStatus("正在等待 draw.io 预览引擎...");
+        }
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatus("draw.io 文件读取失败。");
+        onNotice(message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [serverId, file.relativePath, onNotice]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      if (!svgRef.current) {
+        setStatus("draw.io 预览生成超时。");
+        onNotice("draw.io 预览生成超时：未收到 diagrams.net 的 export 响应。请检查本地 vendor/drawio 是否完整，或当前文件 XML 是否可被 draw.io 打开。");
+      }
+    }, 6000);
+    return () => window.clearTimeout(timeout);
+  }, [file.relativePath, drawioBaseUrl, onNotice]);
+
+  useEffect(() => {
+    function receive(event: MessageEvent) {
+      if (event.source !== frameRef.current?.contentWindow) return;
+      const data = parseDrawioMessage(event.data);
+      if (!data) return;
+      if (data.event === "init") {
+        setReady(true);
+        setStatus("正在加载 draw.io 文件...");
+      }
+      if (data.event === "load" && xmlRef.current && frameRef.current?.contentWindow) {
+        setStatus("正在导出 draw.io 预览...");
+        frameRef.current.contentWindow.postMessage(JSON.stringify({ action: "export", format: "svg", xml: xmlRef.current, embedImages: true }), "*");
+      }
+      if (data.event === "export" && typeof data.data === "string") {
+        svgRef.current = data.data;
+        setSvg(data.data);
+        setStatus("");
+        onNotice(null);
+      }
+      if (data.event === "error") {
+        setStatus("draw.io 预览导出失败。");
+        onNotice("draw.io 预览导出失败。");
+      }
+    }
+    window.addEventListener("message", receive);
+    return () => window.removeEventListener("message", receive);
+  }, [onNotice]);
+
+  useEffect(() => {
+    setFrameSrc(drawioEmbedUrl(drawioBaseUrl));
+    setReady(false);
+    setSvg("");
+    svgRef.current = "";
+    setStatus("正在加载 draw.io 预览引擎...");
+  }, [drawioBaseUrl, file.relativePath]);
+
+  useEffect(() => {
+    if (!ready || !xml || !frameRef.current?.contentWindow) return;
+    setStatus("正在加载 draw.io 文件...");
+    frameRef.current.contentWindow.postMessage(JSON.stringify({ action: "load", xml }), "*");
+    const timeout = window.setTimeout(() => {
+      if (!svgRef.current && frameRef.current?.contentWindow && xmlRef.current) {
+        setStatus("正在导出 draw.io 预览...");
+        frameRef.current.contentWindow.postMessage(JSON.stringify({ action: "export", format: "svg", xml: xmlRef.current, embedImages: true }), "*");
+      }
+    }, 600);
+    return () => window.clearTimeout(timeout);
+  }, [ready, xml]);
+
+  return (
+    <div className="drawio-preview">
+      {svg ? <img src={svg} alt={file.title} /> : <div className="library-empty-reader"><FileText size={38} /><p>{status || "正在生成 draw.io 预览..."}</p></div>}
+      {frameSrc ? <iframe ref={frameRef} title="draw.io preview worker" className="drawio-hidden-frame" src={frameSrc} /> : null}
+    </div>
+  );
+}
+
+
 function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, activeServer, selectedFile, recentFiles, onPositionChange, onOpenChange, onRecommendedFiles }: {
   open: boolean;
   position: FloatPosition;
@@ -561,7 +776,7 @@ function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, ac
       } else if (data.type === "chat") {
         const message = chatMessageFromPayload(data.payload);
         if (message) {
-          setMessages((current) => upsertMessage(current, message));
+          setMessages((current) => upsertLibraryChat(current, message));
           const files = extractLibraryFiles(message.text);
           if (files.length) onRecommendedFiles(files);
         }
@@ -662,7 +877,7 @@ function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, ac
             {messages.map((message) => (
               <article className={`library-chat-message ${message.role}`} key={message.id}>
                 <span>{message.role}</span>
-                <p>{message.text}</p>
+                <p>{displayLibraryChatText(message.text)}</p>
               </article>
             ))}
           </div>
@@ -729,10 +944,12 @@ function chatMessageFromPayload(payload: unknown): ChatMessage | null {
   const record = payload as Record<string, unknown>;
   const text = collectPayloadText(payload).join("\n").trim();
   if (!text) return null;
+  const identity = streamIdentity(record);
+  const runId = runIdentity(record);
   return {
-    id: String(record.id || record.messageId || crypto.randomUUID()),
-    runId: typeof record.runId === "string" ? record.runId : undefined,
-    role: String(record.role || "assistant"),
+    id: identity ?? crypto.randomUUID(),
+    runId,
+    role: roleFromGatewayPayload(record),
     text,
     timestamp: new Date().toISOString(),
     raw: payload
@@ -756,12 +973,150 @@ function collectPayloadText(value: unknown, output: string[] = [], depth = 0): s
   return output;
 }
 
-function upsertMessage(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
-  const index = messages.findIndex((item) => item.id === message.id);
+function upsertLibraryChat(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
+  const index = findExistingLibraryMessage(messages, message);
   if (index < 0) return [...messages, message];
   const next = [...messages];
-  next[index] = message;
+  next[index] = {
+    ...next[index],
+    runId: next[index].runId ?? message.runId,
+    text: mergeLibraryStreamText(next[index].text, message.text, message.raw),
+    timestamp: message.timestamp,
+    raw: message.raw
+  };
   return next;
+}
+
+function findExistingLibraryMessage(messages: ChatMessage[], message: ChatMessage): number {
+  const byId = messages.findIndex((item) => item.id === message.id);
+  if (byId >= 0) return byId;
+  if (message.runId) {
+    const byRun = messages.findIndex((item) => item.runId === message.runId && item.role === message.role);
+    if (byRun >= 0) return byRun;
+  }
+  if (message.role !== "assistant") return -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const current = messages[index];
+    if (current.role === "user") return -1;
+    if (current.role === "assistant") return index;
+  }
+  return -1;
+}
+
+function mergeLibraryStreamText(previous: string, incoming: string, raw: unknown): string {
+  previous = collapseRepeatedText(previous);
+  incoming = collapseRepeatedText(incoming);
+  if (!previous || incoming === previous) return incoming || previous;
+  if (incoming.startsWith(previous)) return incoming;
+  if (previous.includes(incoming)) return previous;
+  if (incoming.includes(previous)) return incoming;
+  const overlap = suffixPrefixOverlap(previous, incoming);
+  if (overlap >= 16) return collapseRepeatedText(`${previous}${incoming.slice(overlap)}`);
+  return isDeltaPayload(raw) ? collapseRepeatedText(`${previous}${incoming}`) : incoming.length >= previous.length ? incoming : collapseRepeatedText(`${previous}${incoming}`);
+}
+
+function isDeltaPayload(value: unknown, depth = 0): boolean {
+  if (!value || depth > 4) return false;
+  if (Array.isArray(value)) return value.some((item) => isDeltaPayload(item, depth + 1));
+  if (typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  const eventType = String(record.type ?? record.event ?? record.kind ?? "").toLowerCase();
+  if (eventType.includes("delta") || typeof record.delta === "string") return true;
+  for (const key of ["payload", "message", "data", "event", "item"]) {
+    if (isDeltaPayload(record[key], depth + 1)) return true;
+  }
+  return false;
+}
+
+function collapseRepeatedText(text: string): string {
+  let current = text;
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = collapseRepeatedLines(collapseRepeatedChunks(current));
+    if (next === current) return current;
+    current = next;
+  }
+  return current;
+}
+
+function collapseRepeatedLines(text: string): string {
+  const lines = text.split("\n");
+  const output: string[] = [];
+  for (const line of lines) {
+    const current = line.trim();
+    const previous = output.at(-1)?.trim() ?? "";
+    if (meaningfulRepeatChunk(current) && meaningfulRepeatChunk(previous)) {
+      if (current === previous || previous.startsWith(current)) continue;
+      if (current.startsWith(previous)) {
+        output[output.length - 1] = line;
+        continue;
+      }
+    }
+    output.push(line);
+  }
+  return output.join("\n");
+}
+
+function collapseRepeatedChunks(text: string): string {
+  let current = text;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const maxSize = Math.min(500, Math.floor(current.length / 2));
+    for (let size = maxSize; size >= 8; size -= 1) {
+      const chunk = current.slice(current.length - size);
+      if (!meaningfulRepeatChunk(chunk)) continue;
+      const previousStart = current.length - size * 2;
+      if (previousStart >= 0 && current.slice(previousStart, previousStart + size) === chunk) {
+        current = `${current.slice(0, previousStart)}${chunk}`;
+        changed = true;
+        break;
+      }
+    }
+  }
+  return current;
+}
+
+function meaningfulRepeatChunk(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length >= 4 && /[\p{L}\p{N}]/u.test(trimmed) && !trimmed.startsWith("```");
+}
+
+function suffixPrefixOverlap(previous: string, incoming: string): number {
+  const max = Math.min(previous.length, incoming.length, 2000);
+  for (let length = max; length >= 16; length -= 1) {
+    if (previous.endsWith(incoming.slice(0, length))) return length;
+  }
+  return 0;
+}
+
+function runIdentity(payload: Record<string, unknown>): string | undefined {
+  const direct = payload.runId ?? payload.run_id;
+  if (typeof direct === "string" && direct.trim()) return direct;
+  const run = payload.run as Record<string, unknown> | undefined;
+  if (run && typeof run.id === "string" && run.id.trim()) return run.id;
+  for (const key of ["payload", "message", "event", "data", "meta", "metadata"]) {
+    const child = payload[key];
+    if (child && typeof child === "object") {
+      const found = runIdentity(child as Record<string, unknown>);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+function streamIdentity(payload: Record<string, unknown>): string | null {
+  for (const key of ["messageId", "message_id", "runId", "run_id", "responseId", "response_id", "id"]) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  const message = payload.message as Record<string, unknown> | undefined;
+  if (message) return streamIdentity(message);
+  return null;
+}
+
+function roleFromGatewayPayload(payload: Record<string, unknown>): string {
+  const message = payload.message as Record<string, unknown> | undefined;
+  return String(payload.role ?? message?.role ?? "assistant");
 }
 
 function extractLibraryFiles(text: string): Array<{ title?: string; absolutePath?: string; reason?: string; snippet?: string }> {
@@ -776,6 +1131,13 @@ function extractLibraryFiles(text: string): Array<{ title?: string; absolutePath
     }
   }
   return files;
+}
+
+function displayLibraryChatText(text: string): string {
+  return text
+    .replace(/```library-files\s*[\s\S]*?```/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function loadFloatPosition(): FloatPosition {
@@ -799,6 +1161,61 @@ function defaultLibraryHost(config: LibraryConfigResponse): string {
 function browserFallbackHost(): string {
   const host = window.location.hostname;
   return host && host !== "localhost" ? host : "127.0.0.1";
+}
+
+function isPdfFile(relativePath: string): boolean {
+  return relativePath.toLowerCase().endsWith(".pdf");
+}
+
+function isDrawioFile(relativePath: string): boolean {
+  const lower = relativePath.toLowerCase();
+  return lower.endsWith(".drawio") || lower.endsWith(".dio");
+}
+
+function fileKindLabel(relativePath: string): string {
+  if (isPdfFile(relativePath)) return "PDF";
+  if (isDrawioFile(relativePath)) return "draw.io";
+  if (isMarkdownFile(relativePath)) return "Markdown";
+  if (isTextFile(relativePath)) return "文本";
+  return "文件";
+}
+
+function isMarkdownFile(relativePath: string): boolean {
+  const lower = relativePath.toLowerCase();
+  return lower.endsWith(".md") || lower.endsWith(".markdown");
+}
+
+function isTextFile(relativePath: string): boolean {
+  const lower = relativePath.toLowerCase();
+  return isMarkdownFile(lower) || lower.endsWith(".txt") || lower.endsWith(".log");
+}
+
+function pdfViewerUrl(serverId: string, relativePath: string): string {
+  const file = libraryFileUrl(serverId, relativePath);
+  return `/vendor/pdfjs/web/viewer.html?file=${encodeURIComponent(file)}`;
+}
+
+function drawioEmbedUrl(baseUrl = LOCAL_DRAWIO_URL): string {
+  const separator = baseUrl.includes("?") ? "&" : "?";
+  return `${baseUrl}${separator}embed=1&proto=json&spin=1&noSaveBtn=0&noExitBtn=0`;
+}
+
+function vendorLooksInstalled(url: string, html: string): boolean {
+  const normalized = html.toLowerCase();
+  if (url.includes("/pdfjs/")) return normalized.includes("pdf.js") || normalized.includes("pdfjs");
+  if (url.includes("/drawio/")) return normalized.includes("draw.io") || normalized.includes("diagrams.net") || normalized.includes("mxgraph");
+  return true;
+}
+
+function parseDrawioMessage(value: unknown): Record<string, unknown> | null {
+  if (!value) return null;
+  if (typeof value === "object") return value as Record<string, unknown>;
+  if (typeof value !== "string") return null;
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
 function popoverStyle(position: FloatPosition, quadrant: string): CSSProperties {

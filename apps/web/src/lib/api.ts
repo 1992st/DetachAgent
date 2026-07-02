@@ -509,6 +509,17 @@ export async function checkLibraryUrl(serverId: string, relativePath: string): P
   return res.json();
 }
 
+export function libraryFileUrl(serverId: string, relativePath: string): string {
+  const params = new URLSearchParams({ path: relativePath });
+  return apiUrl(`/api/library/servers/${encodeURIComponent(serverId)}/files?${params}`);
+}
+
+export async function fetchLibraryTextFile(serverId: string, relativePath: string): Promise<string> {
+  const res = await fetch(libraryFileUrl(serverId, relativePath));
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.text();
+}
+
 export async function fetchLocalTerminalApps(): Promise<LocalTerminalAppsResponse> {
   const res = await fetch(apiUrl("/api/terminal/apps"));
   if (!res.ok) throw new Error(await errorMessage(res));

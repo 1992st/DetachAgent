@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import type {
@@ -127,6 +128,61 @@ export const libraryService = {
       return fallback;
     });
     return { ok: response.ok, status: response.status, statusText: response.statusText, url };
+  },
+
+  async readFile(id: string, relativePath: string): Promise<{ filePath: string; extension: string; size: number; contentType: string; buffer?: Buffer }> {
+    const settings = await settingsStore.publicSettings();
+    const server = requireServer(settings.libraryServers ?? [], id);
+    const safeRelativePath = sanitizeRelativePath(relativePath);
+    const filePath = filesystemPathForRelativePath(server, safeRelativePath);
+    const extension = fileExtension(safeRelativePath);
+    if (!isReadableLibraryFile(extension)) throw new Error("Unsupported library file type.");
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) throw new Error("Library path is not a file.");
+    return {
+      filePath,
+      extension,
+      size: stat.size,
+      contentType: contentTypeForExtension(extension)
+    };
+  },
+
+  async readFileBuffer(id: string, relativePath: string): Promise<{ buffer: Buffer; contentType: string; size: number; extension: string }> {
+    const info = await this.readFile(id, relativePath);
+    return {
+      ...info,
+      buffer: await fs.readFile(info.filePath)
+    };
+  },
+
+  async readFileRange(id: string, relativePath: string, rangeHeader?: string): Promise<{
+    buffer: Buffer;
+    contentType: string;
+    size: number;
+    range?: { start: number; end: number };
+  }> {
+    const settings = await settingsStore.publicSettings();
+    const server = requireServer(settings.libraryServers ?? [], id);
+    const safeRelativePath = sanitizeRelativePath(relativePath);
+    const extension = fileExtension(safeRelativePath);
+    if (!isReadableLibraryFile(extension)) throw new Error("Unsupported library file type.");
+    const info = await this.readFile(id, safeRelativePath).catch(() => null);
+    if (!info) return readRemoteLibraryFile(server, safeRelativePath, extension, rangeHeader);
+    if (info.extension !== ".pdf") {
+      return { buffer: await fs.readFile(info.filePath), contentType: info.contentType, size: info.size };
+    }
+    const range = parseRangeHeader(rangeHeader, info.size);
+    if (!range) {
+      return { buffer: await fs.readFile(info.filePath), contentType: info.contentType, size: info.size };
+    }
+    const handle = await fs.open(info.filePath, "r");
+    try {
+      const buffer = Buffer.alloc(range.end - range.start + 1);
+      await handle.read(buffer, 0, buffer.length, range.start);
+      return { buffer, contentType: info.contentType, size: info.size, range };
+    } finally {
+      await handle.close();
+    }
   }
 };
 
@@ -180,6 +236,14 @@ function normalizeAbsolutePath(value: string): string | null {
   return path.posix.normalize(trimmed).replace(/\/+$/, "") || "/";
 }
 
+function normalizeFilesystemRoot(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.includes("\0")) return undefined;
+  if (path.win32.isAbsolute(trimmed) && process.platform === "win32") return path.win32.normalize(trimmed).replace(/[\\/]+$/, "") || path.win32.parse(trimmed).root;
+  if (path.isAbsolute(trimmed)) return path.normalize(trimmed).replace(/[\\/]+$/, "") || path.parse(trimmed).root;
+  return undefined;
+}
+
 function sanitizeRelativePath(value: string): string {
   const trimmed = safeDecodeURIComponent(String(value || "").trim()).replace(/\\/g, "/");
   if (!trimmed || trimmed === ".") return "";
@@ -201,6 +265,76 @@ function urlForRelativePath(server: LibraryServerConfig, relativePath: string): 
     .map((segment) => encodeURIComponent(segment))
     .join("/");
   return new URL(encoded, baseUrl(server)).toString();
+}
+
+function filesystemPathForRelativePath(server: LibraryServerConfig, relativePath: string): string {
+  const root = server.agentRootPath;
+  const normalizedRoot = normalizeFilesystemRoot(root || "");
+  if (!normalizedRoot) throw new Error("Current library server has no readable local root path.");
+  const safeRelativePath = sanitizeRelativePath(relativePath);
+  const pathApi = process.platform === "win32" ? path.win32 : path;
+  const candidate = pathApi.resolve(normalizedRoot, ...safeRelativePath.split("/").filter(Boolean));
+  const relative = pathApi.relative(normalizedRoot, candidate);
+  if (relative === "" || (!relative.startsWith("..") && !pathApi.isAbsolute(relative))) return candidate;
+  throw new Error("Library path is outside the configured local root.");
+}
+
+function fileExtension(relativePath: string): string {
+  return path.posix.extname(relativePath).toLowerCase();
+}
+
+function isReadableLibraryFile(extension: string): boolean {
+  return [".pdf", ".drawio", ".dio", ".md", ".markdown", ".txt", ".log"].includes(extension);
+}
+
+function contentTypeForExtension(extension: string): string {
+  if (extension === ".pdf") return "application/pdf";
+  if (extension === ".drawio" || extension === ".dio") return "application/xml; charset=utf-8";
+  if (extension === ".md" || extension === ".markdown") return "text/markdown; charset=utf-8";
+  return "text/plain; charset=utf-8";
+}
+
+function parseRangeHeader(value: string | undefined, size: number): { start: number; end: number } | null {
+  if (!value) return null;
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(value.trim());
+  if (!match) return null;
+  let start = match[1] ? Number.parseInt(match[1], 10) : 0;
+  let end = match[2] ? Number.parseInt(match[2], 10) : size - 1;
+  if (!match[1] && match[2]) {
+    const suffix = Number.parseInt(match[2], 10);
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= size) return null;
+  return { start, end: Math.min(end, size - 1) };
+}
+
+async function readRemoteLibraryFile(server: LibraryServerConfig, relativePath: string, extension: string, rangeHeader?: string): Promise<{
+  buffer: Buffer;
+  contentType: string;
+  size: number;
+  range?: { start: number; end: number };
+}> {
+  const headers: Record<string, string> = {};
+  if (rangeHeader && extension === ".pdf") headers.Range = rangeHeader;
+  const response = await fetchWithTimeout(urlForRelativePath(server, relativePath), { headers }, 8000);
+  if (!response.ok && response.status !== 206) throw new Error(`Library file request failed: HTTP ${response.status} ${response.statusText}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const contentRange = response.headers.get("content-range") || "";
+  const rangeMatch = /^bytes\s+(\d+)-(\d+)\/(\d+)$/i.exec(contentRange);
+  if (rangeMatch) {
+    return {
+      buffer,
+      contentType: contentTypeForExtension(extension),
+      size: Number.parseInt(rangeMatch[3], 10),
+      range: { start: Number.parseInt(rangeMatch[1], 10), end: Number.parseInt(rangeMatch[2], 10) }
+    };
+  }
+  return {
+    buffer,
+    contentType: contentTypeForExtension(extension),
+    size: Number.parseInt(response.headers.get("content-length") || "", 10) || buffer.length
+  };
 }
 
 function requireServer(servers: LibraryServerConfig[], id: string): LibraryServerConfig {

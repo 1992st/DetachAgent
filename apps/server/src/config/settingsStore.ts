@@ -113,7 +113,11 @@ function defaultProfile(): PersistedProfile {
 }
 
 function publicProfile(profile: PersistedProfile): RemoteProfile {
-  const { authToken: _authToken, authPassword: _authPassword, ...rest } = profile;
+  const {
+    authToken: _authToken,
+    authPassword: _authPassword,
+    ...rest
+  } = profile;
   return {
     ...rest,
     hasAuthToken: Boolean(profile.authToken),

@@ -1,0 +1,17 @@
+{
+  "generatedAt": "2026-07-02T03:19:30.595Z",
+  "vendors": [
+    {
+      "name": "pdfjs",
+      "version": "4.10.38",
+      "url": "https://github.com/mozilla/pdf.js/releases/download/v4.10.38/pdfjs-4.10.38-dist.zip",
+      "sha256": "32bdd9c5198b77dbaa8f02de81f34476888b3abdd64b9fb5f607f81f01487e6a"
+    },
+    {
+      "name": "drawio",
+      "version": "28.0.4",
+      "url": "https://github.com/jgraph/drawio/releases/download/v28.0.4/draw.war",
+      "sha256": "36ea8c2e7a7c710f2169d68dc0407da386c0f4d022d96c200abef357418856b8"
+    }
+  ]
+}

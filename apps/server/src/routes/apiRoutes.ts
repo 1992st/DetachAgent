@@ -312,6 +312,26 @@ apiRoutes.post("/library/servers/:id/check-url", async (req, res) => {
   }
 });
 
+apiRoutes.get("/library/servers/:id/files", async (req, res) => {
+  try {
+    const relativePath = typeof req.query.path === "string" ? req.query.path : "";
+    const result = await libraryService.readFileRange(req.params.id, relativePath, req.header("range") || undefined);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Type", result.contentType);
+    res.setHeader("Content-Disposition", "inline");
+    if (result.range) {
+      res.status(206);
+      res.setHeader("Content-Range", `bytes ${result.range.start}-${result.range.end}/${result.size}`);
+      res.setHeader("Content-Length", String(result.buffer.length));
+    } else {
+      res.setHeader("Content-Length", String(result.size));
+    }
+    res.send(result.buffer);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 function isLoopbackRequest(req: express.Request): boolean {
   const address = req.socket.remoteAddress || "";
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";

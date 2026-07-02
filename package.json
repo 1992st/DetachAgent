@@ -10,6 +10,7 @@
     "build": "pnpm --filter @detaches/shared build && pnpm --filter @detaches/server build && pnpm --filter @detaches/web build && pnpm --filter @detaches/cli build",
     "typecheck": "pnpm --filter @detaches/shared build && pnpm --filter @detaches/server typecheck && pnpm --filter @detaches/web typecheck && pnpm --filter @detaches/desktop build && pnpm --filter @detaches/cli typecheck",
     "desktop:dev": "pnpm --filter @detaches/desktop dev",
+    "vendors:library": "node scripts/fetch-library-vendors.mjs",
     "version:set": "node scripts/set-version.mjs",
     "package:win": "pnpm build && pnpm --filter @detaches/desktop package:win",
     "release:win": "pnpm typecheck && pnpm build && pnpm --filter @detaches/openclaw-detaches-adapter test && pnpm --filter @detaches/server smoke && pnpm --filter @detaches/desktop package:win",

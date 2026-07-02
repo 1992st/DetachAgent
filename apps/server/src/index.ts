@@ -30,6 +30,7 @@ async function main(): Promise<void> {
   const app = express();
   app.use(cors({ origin: true }));
   app.use(express.json({ limit: "4mb" }));
+  app.use("/vendor", express.static(vendorRoot(), { fallthrough: true }));
   app.use("/api", apiRoutes);
   app.get("/", (_req, res) => res.json({ ok: true, app: "detaches_agent server" }));
 
@@ -60,6 +61,12 @@ async function main(): Promise<void> {
       startExtraListener(app, host);
     }
   });
+}
+
+function vendorRoot(): string {
+  const resourcesDir = process.env.DETACHES_RESOURCES_DIR?.trim();
+  if (resourcesDir) return path.join(resourcesDir, "app", "web", "public", "vendor");
+  return path.join(process.cwd(), "..", "web", "public", "vendor");
 }
 
 function uniqueListenHosts(hosts: string[]): string[] {
