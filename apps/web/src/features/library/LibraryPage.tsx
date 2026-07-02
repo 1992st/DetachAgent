@@ -1269,10 +1269,42 @@ function normalizePositiveInteger(value: unknown): number | undefined {
 }
 
 function displayLibraryChatText(text: string): string {
-  return stripLibraryManagerPrompt(text)
+  return stripLibraryToolResult(stripLibraryManagerPrompt(text))
     .replace(/```library-files\s*[\s\S]*?```/gi, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function stripLibraryToolResult(text: string): string {
+  const firstMarker = firstToolResultMarkerIndex(text);
+  if (firstMarker == null) return text;
+  const afterMarker = text.slice(firstMarker);
+  if (!isCompleteToolResultText(afterMarker)) return text;
+  const before = text.slice(0, firstMarker).trimEnd();
+  const nextHumanText = /\n(?=(?:user|assistant|system)\s*:)/i.exec(afterMarker);
+  return nextHumanText ? `${before}\n${afterMarker.slice(nextHumanText.index + 1)}`.trim() : before;
+}
+
+function firstToolResultMarkerIndex(text: string): number | undefined {
+  const markers = [
+    "[detaches_agent 工具结果]",
+    "TOOLRESULT",
+    "Tool request execution snapshot from the user's local detaches_agent broker.",
+    "Main Agent file transfer snapshot from the user's local detaches_agent broker."
+  ];
+  return markers
+    .map((marker) => text.indexOf(marker))
+    .filter((index) => index >= 0)
+    .sort((a, b) => a - b)[0];
+}
+
+function isCompleteToolResultText(text: string): boolean {
+  const hasToolMarker = firstToolResultMarkerIndex(text) != null;
+  const hasClosedJsonFence = /```json[\s\S]*?```/.test(text);
+  const hasResultInstruction = /Result-handling instruction for the receiving agent:/i.test(text);
+  const hasTerminalEnding = /terminal replay snapshot/i.test(text);
+  const hasTransferEnding = /do not invent a workaround outside the detaches_agent tool flow\./i.test(text);
+  return hasToolMarker && hasClosedJsonFence && hasResultInstruction && (hasTerminalEnding || hasTransferEnding);
 }
 
 function stripLibraryManagerPrompt(text: string): string {

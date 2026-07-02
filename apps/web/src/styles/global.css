@@ -3603,19 +3603,6 @@ h3 { font-size: 14px; }
   font-size: 14px;
 }
 
-.library-toolbar {
-  min-height: 52px;
-  padding: 9px 14px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-  background: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.library-title,
-.library-service-controls,
 .library-reader-actions,
 .library-config-heading,
 .library-config-actions {
@@ -3624,15 +3611,13 @@ h3 { font-size: 14px; }
   gap: 10px;
 }
 
-.library-title span,
-.library-agent-root,
 .library-reader-toolbar small {
   color: var(--muted);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 
-.library-service-controls select,
+.library-service-select,
 .library-filter,
 .library-config-panel input,
 .library-chat-composer input {
@@ -3644,8 +3629,12 @@ h3 { font-size: 14px; }
   color: #172033;
 }
 
-.library-agent-root {
-  max-width: 320px;
+.library-service-select.compact {
+  min-height: 30px;
+  max-width: 190px;
+  padding: 0 8px;
+  color: #475569;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3880,9 +3869,32 @@ button.library-recommendation {
   gap: 12px;
 }
 
+.library-reader-toolbar > div:first-child,
+.library-reader-actions {
+  min-width: 0;
+}
+
+.library-reader-toolbar > div:first-child {
+  flex: 1;
+}
+
 .library-reader-toolbar strong,
 .library-reader-toolbar small {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-reader-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.library-reader-actions .icon-button {
+  width: 30px;
+  height: 30px;
 }
 
 .library-frame-wrap {
@@ -4229,14 +4241,8 @@ button.library-recommendation {
     height: calc(100vh - 88px);
   }
 
-  .library-toolbar {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .library-service-controls {
-    width: 100%;
-    flex-wrap: wrap;
+  .library-service-select.compact {
+    max-width: 150px;
   }
 
   .library-main {

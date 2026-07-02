@@ -30,6 +30,9 @@ assert.match(webLibrarySource, /TextReader/, "library UI should route Markdown a
 assert.match(webLibrarySource, /fetchLibraryTextFile\(serverId, file\.relativePath\)/, "Markdown, text, and draw.io XML should be read through the Detaches UTF-8 file endpoint");
 assert.match(webLibrarySource, /ReactMarkdown/, "Markdown files should render in preview mode by default");
 assert.match(webLibrarySource, /remarkGfm/, "Markdown preview should support GitHub-flavored Markdown tables");
+assert.match(webLibrarySource, /stripLibraryManagerPrompt\(text\)/, "library chat visible text should strip embedded manager prompts at render time");
+assert.match(webLibrarySource, /你是 Detaches 图书馆管理员/, "library prompt stripping should anchor on the stable manager prompt marker");
+assert.match(webLibrarySource, /visibleText \? \(/, "library chat should not render empty message bubbles after display filtering");
 assert.match(webLibrarySource, /event\.source !== frameRef\.current\?\.contentWindow/, "draw.io postMessage handling should be scoped to its iframe");
 assert.match(webLibrarySource, /setFrameSrc\(drawioEmbedUrl\(drawioBaseUrl\)\)/, "draw.io iframe src should be set after message handlers are mounted to avoid missing init");
 assert.match(webLibrarySource, /embed=1&proto=json/, "draw.io preview should use diagrams.net JSON embed mode");

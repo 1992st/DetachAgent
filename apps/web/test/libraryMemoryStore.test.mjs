@@ -37,6 +37,11 @@ assert.match(libraryPage, /`\#page=\$\{pageNumber\}`/, "PDF pageNumber should be
 assert.match(libraryPage, /findMarkdownLocationTarget\(articleRef\.current, source, location\)/, "Markdown reader should find a location target after render");
 assert.match(libraryPage, /findMarkdownHeadingTarget\(root, location\.heading\)[\s\S]*findMarkdownLineTarget\(root, source, location\.lineStart\)[\s\S]*findMarkdownTextTarget\(root, location\.textQuote\)/, "Markdown location priority should be heading, then line, then text quote");
 assert.match(libraryPage, /classList\.add\("library-location-highlight"\)/, "Markdown target should be highlighted after scrolling");
+assert.match(libraryPage, /stripLibraryToolResult\(stripLibraryManagerPrompt\(text\)\)/, "library chat display should pass text through the tool-result folding filter");
+assert.match(libraryPage, /\[detaches_agent 工具结果\]/, "library chat display should recognize forwarded detaches tool results");
+assert.match(libraryPage, /"TOOLRESULT"/, "library chat display should recognize TOOLRESULT payloads");
+assert.match(libraryPage, /if \(!isCompleteToolResultText\(afterMarker\)\) return text;/, "library chat display should keep streaming tool results visible until complete");
+assert.match(libraryPage, /hasClosedJsonFence[\s\S]*hasResultInstruction[\s\S]*hasTerminalEnding \|\| hasTransferEnding/, "library chat display should fold only complete tool result snapshots");
 assert.match(libraryPage, /messages: data\.payload\.messages,[\s\S]*hydratedFromHistory: true/, "librarian chat history should hydrate memory messages");
 assert.match(libraryPage, /extractLibraryFilesFromMessages\(data\.payload\.messages\)/, "history hydration should reparse library-files recommendations");
 assert.match(libraryPage, /createLibrarySessionKey\(scopeKey\)/, "new librarian sessions should explicitly create a new session key");
