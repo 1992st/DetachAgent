@@ -3997,6 +3997,13 @@ button.library-recommendation {
   margin: 10px 0;
 }
 
+.library-markdown-preview .library-location-highlight {
+  border-radius: 6px;
+  outline: 2px solid rgba(37, 99, 235, 0.28);
+  background: rgba(37, 99, 235, 0.08);
+  transition: background 180ms ease, outline-color 180ms ease;
+}
+
 .library-markdown-preview ul,
 .library-markdown-preview ol {
   margin: 10px 0 14px;

@@ -5,9 +5,14 @@ import path from "node:path";
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const store = fs.readFileSync(path.join(repoRoot, "apps/web/src/features/library/libraryMemoryStore.ts"), "utf8");
 const libraryPage = fs.readFileSync(path.join(repoRoot, "apps/web/src/features/library/LibraryPage.tsx"), "utf8");
+const prompt = fs.readFileSync(path.join(repoRoot, "apps/server/src/prompts/library-manager.md"), "utf8");
+const chatSocket = fs.readFileSync(path.join(repoRoot, "apps/server/src/ws/chatSocket.ts"), "utf8");
 
 assert.match(store, /interface LibraryMemoryStore[\s\S]*scopes: Record<string, LibraryWorkspaceState>/, "library memory store should hold scope-keyed workspace state");
 assert.match(store, /export interface LibraryWorkspaceState[\s\S]*sessionKey: string/, "workspace state should keep a stable librarian session key");
+assert.match(store, /export interface LibraryFileLocation[\s\S]*pageNumber\?: number[\s\S]*heading\?: string[\s\S]*lineStart\?: number[\s\S]*lineEnd\?: number[\s\S]*textQuote\?: string/, "library file location should support PDF and Markdown targets");
+assert.match(store, /export interface RecommendedFile[\s\S]*location\?: LibraryFileLocation/, "recommended files should keep optional location metadata");
+assert.match(store, /export interface SelectedFile[\s\S]*location\?: LibraryFileLocation/, "selected files should carry recommendation location metadata");
 assert.match(store, /ui:[\s\S]*activeTab: LibraryActiveTab[\s\S]*filter: string[\s\S]*floatOpen: boolean[\s\S]*floatPosition: FloatPosition[\s\S]*configOpen: boolean/, "workspace state should keep key UI state in memory");
 assert.match(store, /reader:[\s\S]*selectedFile: SelectedFile \| null[\s\S]*readerNotice: string \| null[\s\S]*readerRevision: number/, "workspace state should keep reader state in memory");
 assert.match(store, /directory:[\s\S]*tree: Record<string, DirectoryNodeState>[\s\S]*loadedServerId\?: string/, "workspace state should keep directory state in memory");
@@ -26,10 +31,20 @@ assert.doesNotMatch(libraryPage, /recent: \{ files: \[\] \}/, "server changes sh
 assert.match(libraryPage, /recent: \{ files: \[file, \.\.\.current\.recent\.files\.filter\(\(item\) => item\.url !== file\.url\)\]\.slice\(0, 12\) \}/, "recent files should be URL-deduped and capped");
 assert.match(libraryPage, /mergeRecommended\(current, resolved\)/, "recommendations should use the merge helper");
 assert.match(libraryPage, /return Array\.from\(byPath\.values\(\)\)\.slice\(0, 80\)/, "recommendations should be capped");
+assert.match(libraryPage, /location: file\.location \?\? snippetLocation\(file\.snippet\)/, "recommended opens should carry explicit location or snippet fallback");
+assert.match(libraryPage, /function pdfViewerUrl\(serverId: string, relativePath: string, location\?: LibraryFileLocation\)/, "PDF reader URL should accept location metadata");
+assert.match(libraryPage, /`\#page=\$\{pageNumber\}`/, "PDF pageNumber should become a PDF.js hash");
+assert.match(libraryPage, /findMarkdownLocationTarget\(articleRef\.current, source, location\)/, "Markdown reader should find a location target after render");
+assert.match(libraryPage, /findMarkdownHeadingTarget\(root, location\.heading\)[\s\S]*findMarkdownLineTarget\(root, source, location\.lineStart\)[\s\S]*findMarkdownTextTarget\(root, location\.textQuote\)/, "Markdown location priority should be heading, then line, then text quote");
+assert.match(libraryPage, /classList\.add\("library-location-highlight"\)/, "Markdown target should be highlighted after scrolling");
 assert.match(libraryPage, /messages: data\.payload\.messages,[\s\S]*hydratedFromHistory: true/, "librarian chat history should hydrate memory messages");
 assert.match(libraryPage, /extractLibraryFilesFromMessages\(data\.payload\.messages\)/, "history hydration should reparse library-files recommendations");
 assert.match(libraryPage, /createLibrarySessionKey\(scopeKey\)/, "new librarian sessions should explicitly create a new session key");
 assert.match(libraryPage, /librarianChat:[\s\S]*messages: \[\],[\s\S]*draft: "",[\s\S]*lastRunId: null,[\s\S]*hydratedFromHistory: false/, "new librarian session should reset chat state only");
 assert.doesNotMatch(libraryPage, /localStorage\.setItem\([^)]*library/i, "library workspace state should not be persisted to localStorage");
+assert.match(prompt, /"location": \{[\s\S]*"pageNumber": 12[\s\S]*"heading": "Markdown 标题，可选"[\s\S]*"lineStart": 120[\s\S]*"lineEnd": 140[\s\S]*"textQuote": "文件中可定位的一小段原文，可选"/, "library manager prompt should document location metadata");
+assert.match(prompt, /PDF 文件优先填写 pageNumber/, "library manager prompt should ask for PDF page numbers");
+assert.match(prompt, /Markdown 文件优先填写 heading/, "library manager prompt should ask for Markdown headings");
+assert.match(chatSocket, /"      \\"location\\": \{"/, "fallback library prompt should include location metadata");
 
 console.log("libraryMemoryStore: ok");

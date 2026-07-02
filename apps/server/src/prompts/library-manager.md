@@ -41,10 +41,22 @@
       "title": "简短标题",
       "absolutePath": "/absolute/path/under/agent/root/file.md",
       "reason": "为什么这个文件相关",
-      "snippet": "可选，最多一两句话"
+      "snippet": "可选，最多一两句话",
+      "location": {
+        "pageNumber": 12,
+        "heading": "Markdown 标题，可选",
+        "lineStart": 120,
+        "lineEnd": 140,
+        "textQuote": "文件中可定位的一小段原文，可选"
+      }
     }
   ]
 }
 ```
+
+location 是可选字段，但如果你能判断具体位置，请尽量填写：
+- PDF 文件优先填写 pageNumber。
+- Markdown 文件优先填写 heading；没有标题时填写 lineStart 或 textQuote。
+- 不确定具体位置时省略 location，不要编造页码或行号。
 
 普通回答可以解释文件内容，但文件列表必须使用上面的 JSON 格式。

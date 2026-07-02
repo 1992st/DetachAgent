@@ -23,6 +23,7 @@ import {
   type DirectoryNodeState,
   type FloatPosition,
   type LibraryActiveTab,
+  type LibraryFileLocation,
   type LibraryWorkspaceState,
   type RecommendedFile,
   type SelectedFile
@@ -35,6 +36,14 @@ const ONLINE_DRAWIO_URL = "https://embed.diagrams.net/";
 interface Props {
   selectedAgent: AgentSummary | null;
   clientIdentity: ClientIdentity | null;
+}
+
+interface LibraryRecommendedFileInput {
+  title?: string;
+  absolutePath?: string;
+  reason?: string;
+  snippet?: string;
+  location?: LibraryFileLocation;
 }
 
 export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
@@ -255,7 +264,8 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
       absolutePath: file.absolutePath,
       relativePath: file.resolution.relativePath,
       displayPath: file.resolution.displayPath || file.resolution.relativePath,
-      url: file.resolution.url
+      url: file.resolution.url,
+      location: file.location ?? snippetLocation(file.snippet)
     });
   }
 
@@ -279,7 +289,7 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
     }
   }
 
-  async function resolveRecommendedFiles(files: Array<{ title?: string; absolutePath?: string; reason?: string; snippet?: string }>) {
+  async function resolveRecommendedFiles(files: LibraryRecommendedFileInput[]) {
     if (!activeServer) return;
     const resolved: RecommendedFile[] = [];
     for (const file of files) {
@@ -295,6 +305,7 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
         absolutePath: file.absolutePath,
         reason: file.reason,
         snippet: file.snippet,
+        location: normalizeLibraryFileLocation(file.location) ?? snippetLocation(file.snippet),
         resolution
       });
     }
@@ -624,7 +635,7 @@ function LibraryReader({ file, serverId, onNotice, onFallbackLoad }: {
   }
 
   if (isPdfFile(file.relativePath)) {
-    return <iframe title="PDF reader" src={pdfViewerUrl(serverId, file.relativePath)} onLoad={() => onNotice(null)} />;
+    return <iframe title="PDF reader" src={pdfViewerUrl(serverId, file.relativePath, file.location)} onLoad={() => onNotice(null)} />;
   }
   if (isDrawioFile(file.relativePath)) {
     return <DrawioPreview file={file} serverId={serverId} drawioBaseUrl={drawioBaseUrl} onNotice={onNotice} />;
@@ -652,13 +663,25 @@ function TextReader({ file, serverId, onNotice }: { file: SelectedFile; serverId
       cancelled = true;
     };
   }, [serverId, file.relativePath]);
-  if (isMarkdownFile(file.relativePath)) return <MarkdownPreview source={text} />;
+  if (isMarkdownFile(file.relativePath)) return <MarkdownPreview source={text} location={file.location} />;
   return <pre className="library-text-reader">{text}</pre>;
 }
 
-function MarkdownPreview({ source }: { source: string }) {
+function MarkdownPreview({ source, location }: { source: string; location?: LibraryFileLocation }) {
+  const articleRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!source || !location || !articleRef.current) return;
+    const target = findMarkdownLocationTarget(articleRef.current, source, location);
+    if (!target) return;
+    target.scrollIntoView({ block: "center" });
+    target.classList.add("library-location-highlight");
+    const timeout = window.setTimeout(() => target.classList.remove("library-location-highlight"), 2200);
+    return () => window.clearTimeout(timeout);
+  }, [source, location?.heading, location?.lineStart, location?.lineEnd, location?.textQuote]);
+
   return (
-    <article className="library-markdown-preview">
+    <article className="library-markdown-preview" ref={articleRef}>
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>
     </article>
   );
@@ -774,7 +797,7 @@ function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, ac
   defaultFloatPosition: FloatPosition;
   onPositionChange: (next: FloatPosition) => void;
   onOpenChange: (open: boolean) => void;
-  onRecommendedFiles: (files: Array<{ title?: string; absolutePath?: string; reason?: string; snippet?: string }>) => void;
+  onRecommendedFiles: (files: LibraryRecommendedFileInput[]) => void;
   onWorkspaceChange: (next: LibraryWorkspaceState) => void;
 }) {
   const workspaceState = getLibraryWorkspaceState(scopeKey, defaultFloatPosition);
@@ -1014,7 +1037,7 @@ function updateLibraryChatState(
   onWorkspaceChange(next);
 }
 
-function extractLibraryFilesFromMessages(messages: ChatMessage[]): Array<{ title?: string; absolutePath?: string; reason?: string; snippet?: string }> {
+function extractLibraryFilesFromMessages(messages: ChatMessage[]): LibraryRecommendedFileInput[] {
   return messages.flatMap((message) => extractLibraryFiles(message.text));
 }
 
@@ -1197,18 +1220,52 @@ function roleFromGatewayPayload(payload: Record<string, unknown>): string {
   return String(payload.role ?? message?.role ?? "assistant");
 }
 
-function extractLibraryFiles(text: string): Array<{ title?: string; absolutePath?: string; reason?: string; snippet?: string }> {
-  const files: Array<{ title?: string; absolutePath?: string; reason?: string; snippet?: string }> = [];
+function extractLibraryFiles(text: string): LibraryRecommendedFileInput[] {
+  const files: LibraryRecommendedFileInput[] = [];
   const pattern = /```library-files\s*([\s\S]*?)```/gi;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text))) {
     try {
-      const parsed = JSON.parse(match[1] || "{}") as { files?: Array<{ title?: string; absolutePath?: string; reason?: string; snippet?: string }> };
-      if (Array.isArray(parsed.files)) files.push(...parsed.files);
+      const parsed = JSON.parse(match[1] || "{}") as { files?: LibraryRecommendedFileInput[] };
+      if (Array.isArray(parsed.files)) {
+        files.push(...parsed.files.map((file) => ({
+          ...file,
+          location: normalizeLibraryFileLocation(file.location)
+        })));
+      }
     } catch {
     }
   }
   return files;
+}
+
+function normalizeLibraryFileLocation(location: unknown): LibraryFileLocation | undefined {
+  if (!location || typeof location !== "object") return undefined;
+  const record = location as Record<string, unknown>;
+  const normalized: LibraryFileLocation = {};
+  const pageNumber = normalizePositiveInteger(record.pageNumber);
+  const lineStart = normalizePositiveInteger(record.lineStart);
+  const lineEnd = normalizePositiveInteger(record.lineEnd);
+  if (pageNumber) normalized.pageNumber = pageNumber;
+  if (typeof record.heading === "string" && record.heading.trim()) normalized.heading = record.heading.trim();
+  if (lineStart) normalized.lineStart = lineStart;
+  if (lineEnd) normalized.lineEnd = lineEnd;
+  if (typeof record.textQuote === "string" && record.textQuote.trim()) normalized.textQuote = record.textQuote.trim();
+  return hasLibraryLocation(normalized) ? normalized : undefined;
+}
+
+function snippetLocation(snippet?: string): LibraryFileLocation | undefined {
+  const textQuote = snippet?.trim();
+  return textQuote ? { textQuote } : undefined;
+}
+
+function hasLibraryLocation(location: LibraryFileLocation): boolean {
+  return Boolean(location.pageNumber || location.heading || location.lineStart || location.lineEnd || location.textQuote);
+}
+
+function normalizePositiveInteger(value: unknown): number | undefined {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number.parseInt(value, 10) : NaN;
+  return Number.isInteger(number) && number > 0 ? number : undefined;
 }
 
 function displayLibraryChatText(text: string): string {
@@ -1286,9 +1343,57 @@ function isTextFile(relativePath: string): boolean {
   return isMarkdownFile(lower) || lower.endsWith(".txt") || lower.endsWith(".log");
 }
 
-function pdfViewerUrl(serverId: string, relativePath: string): string {
+function pdfViewerUrl(serverId: string, relativePath: string, location?: LibraryFileLocation): string {
   const file = libraryFileUrl(serverId, relativePath);
-  return `/vendor/pdfjs/web/viewer.html?file=${encodeURIComponent(file)}`;
+  const pageNumber = normalizePositiveInteger(location?.pageNumber);
+  return `/vendor/pdfjs/web/viewer.html?file=${encodeURIComponent(file)}${pageNumber ? `#page=${pageNumber}` : ""}`;
+}
+
+function findMarkdownLocationTarget(root: HTMLElement, source: string, location: LibraryFileLocation): HTMLElement | null {
+  const headingTarget = location.heading ? findMarkdownHeadingTarget(root, location.heading) : null;
+  if (headingTarget) return headingTarget;
+  const lineTarget = location.lineStart ? findMarkdownLineTarget(root, source, location.lineStart) : null;
+  if (lineTarget) return lineTarget;
+  return location.textQuote ? findMarkdownTextTarget(root, location.textQuote) : null;
+}
+
+function findMarkdownHeadingTarget(root: HTMLElement, heading: string): HTMLElement | null {
+  const normalized = normalizeLocationText(stripMarkdownHeadingMarker(heading));
+  if (!normalized) return null;
+  const headings = Array.from(root.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6"));
+  return headings.find((element) => normalizeLocationText(element.textContent || "") === normalized) ?? null;
+}
+
+function findMarkdownLineTarget(root: HTMLElement, source: string, lineStart: number): HTMLElement | null {
+  const lines = source.split(/\r?\n/);
+  const index = Math.max(0, Math.min(lines.length - 1, lineStart - 1));
+  const targetText = firstMeaningfulMarkdownLine(lines.slice(index)) || lines[index] || "";
+  return targetText ? findMarkdownTextTarget(root, stripMarkdownSyntax(targetText)) : null;
+}
+
+function firstMeaningfulMarkdownLine(lines: string[]): string {
+  return lines.find((line) => stripMarkdownSyntax(line).trim()) || "";
+}
+
+function findMarkdownTextTarget(root: HTMLElement, quote: string): HTMLElement | null {
+  const normalizedQuote = normalizeLocationText(stripMarkdownSyntax(quote));
+  if (!normalizedQuote) return null;
+  const blocks = Array.from(root.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6,p,li,blockquote,td,th,pre"));
+  return blocks.find((element) => normalizeLocationText(element.textContent || "").includes(normalizedQuote)) ?? null;
+}
+
+function stripMarkdownHeadingMarker(value: string): string {
+  return value.replace(/^#{1,6}\s+/, "");
+}
+
+function stripMarkdownSyntax(value: string): string {
+  return stripMarkdownHeadingMarker(value)
+    .replace(/[`*_~>\-[\]#]+/g, " ")
+    .replace(/\((https?:\/\/|\.?\/)[^)]+\)/g, " ");
+}
+
+function normalizeLocationText(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 function drawioEmbedUrl(baseUrl = LOCAL_DRAWIO_URL): string {

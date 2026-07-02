@@ -3,12 +3,21 @@ import type { ChatMessage, LibraryEntry, LibraryPathResolution } from "@detaches
 export type LibraryActiveTab = "root" | "recommended" | "recent";
 export type LibrarySocketState = "idle" | "connecting" | "connected" | "closed" | "error";
 
+export interface LibraryFileLocation {
+  pageNumber?: number;
+  heading?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  textQuote?: string;
+}
+
 export interface RecommendedFile {
   id: string;
   title: string;
   absolutePath: string;
   reason?: string;
   snippet?: string;
+  location?: LibraryFileLocation;
   resolution: LibraryPathResolution;
 }
 
@@ -19,6 +28,7 @@ export interface SelectedFile {
   relativePath: string;
   displayPath: string;
   url: string;
+  location?: LibraryFileLocation;
 }
 
 export interface DirectoryNodeState {
@@ -138,4 +148,3 @@ export function updateLibraryWorkspaceState(
   store.scopes[scopeKey] = next;
   return next;
 }
-
