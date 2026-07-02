@@ -86,10 +86,11 @@ export function attachChatSocket(server: HttpServer): void {
     const sessionKey = decodeURIComponent(url.pathname.replace("/api/chat/", ""));
     const sessionMode: ChatSessionMode = url.searchParams.get("sessionMode") === "main" ? "main" : "device";
     const activeRunIds = new Set<string>();
+    const pendingSendRunIds = new Set<string>();
     send(socket, { type: "ready", sessionKey });
 
     const forwardChat = (payload: unknown, frame?: unknown) => {
-      if (isGatewayEventForSession(sessionKey, activeRunIds, payload, frame)) {
+      if (isGatewayEventForSession(sessionKey, activeRunIds, pendingSendRunIds.size > 0, payload, frame)) {
         send(socket, { type: "chat", payload });
         const skillStatus = parseRelationshipSkillStatus(payload);
         if (skillStatus) {
@@ -98,7 +99,7 @@ export function attachChatSocket(server: HttpServer): void {
       }
     };
     const forwardAgent = (payload: unknown, frame?: unknown) => {
-      if (isGatewayEventForSession(sessionKey, activeRunIds, payload, frame)) {
+      if (isGatewayEventForSession(sessionKey, activeRunIds, pendingSendRunIds.size > 0, payload, frame)) {
         send(socket, { type: "agent", payload });
       }
     };
@@ -138,37 +139,45 @@ export function attachChatSocket(server: HttpServer): void {
         if (event.type === "history") {
           await sendHistory();
         } else if (event.type === "send") {
+          const selectedModel = typeof (event as any).model === "string" ? (event as any).model.trim() : "";
+          const pendingSendId = event.idempotencyKey || `${Date.now()}-${Math.random()}`;
+          pendingSendRunIds.add(pendingSendId);
           const includeLocalControlContext = event.includeLocalControlContext === true;
           const includeStagedFileContext = includeLocalControlContext && event.includeStagedFileContext === true;
-          const detachesContext = includeLocalControlContext
-            ? await buildDetachesSessionContext(sessionMode, sessionKey, includeStagedFileContext ? event.attachments : [], { createContextExport: true })
-            : null;
-          const clientContext = detachesContext
-            ? await buildChatClientContext(sessionMode, sessionKey, includeStagedFileContext ? event.attachments : [], { detachesContext })
-            : undefined;
-          const response = await gatewayClient.sendChat({
-            sessionKey,
-            message: await buildOutboundMessage(
-              await buildLibraryMessage(event.message, event.libraryContext),
-              detachesContext,
-              includeStagedFileContext ? event.attachments : [],
-              includeStagedFileContext ? event.attachmentContextOverride : undefined
-            ),
-            thinking: event.thinking,
-            attachments: includeStagedFileContext ? undefined : event.attachments,
-            idempotencyKey: event.idempotencyKey,
-            clientContext,
-            clientContextFallbackMessage: detachesContext ? renderDetachesClientContextFallback(detachesContext) : undefined,
-            promptGate: {
-              includeLocalControlContext,
-              includeStagedFileContext,
-              localControlScope: event.localControlScope,
-              activationReason: event.activationReason
-            }
-          });
-          const runId = typeof (response as any)?.runId === "string" ? (response as any).runId : "";
-          if (runId) activeRunIds.add(runId);
-          send(socket, { type: "sent", payload: { runId: (response as any)?.runId, raw: response } });
+          try {
+            const detachesContext = includeLocalControlContext
+              ? await buildDetachesSessionContext(sessionMode, sessionKey, includeStagedFileContext ? event.attachments : [], { createContextExport: true })
+              : null;
+            const clientContext = detachesContext
+              ? await buildChatClientContext(sessionMode, sessionKey, includeStagedFileContext ? event.attachments : [], { detachesContext })
+              : undefined;
+            const response = await gatewayClient.sendChat({
+              sessionKey,
+              message: await buildOutboundMessage(
+                await buildLibraryMessage(event.message, event.libraryContext),
+                detachesContext,
+                includeStagedFileContext ? event.attachments : [],
+                includeStagedFileContext ? event.attachmentContextOverride : undefined
+              ),
+              model: selectedModel,
+              thinking: event.thinking,
+              attachments: includeStagedFileContext ? undefined : event.attachments,
+              idempotencyKey: event.idempotencyKey,
+              clientContext,
+              clientContextFallbackMessage: detachesContext ? renderDetachesClientContextFallback(detachesContext) : undefined,
+              promptGate: {
+                includeLocalControlContext,
+                includeStagedFileContext,
+                localControlScope: event.localControlScope,
+                activationReason: event.activationReason
+              }
+            });
+            const runId = typeof (response as any)?.runId === "string" ? (response as any).runId : "";
+            if (runId) activeRunIds.add(runId);
+            send(socket, { type: "sent", payload: { runId: (response as any)?.runId, raw: response } });
+          } finally {
+            pendingSendRunIds.delete(pendingSendId);
+          }
         } else if (event.type === "bootstrap-relationship-skill-check") {
           send(socket, { type: "relationship-skill-status", status: "checking", message: "Checking detach-agent-relationship skill..." });
           const response = await gatewayClient.sendChat({
@@ -399,7 +408,7 @@ function formatFileSize(size: number): string {
   return `${(size / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function isGatewayEventForSession(sessionKey: string, activeRunIds: Set<string>, payload: unknown, frame?: unknown): boolean {
+function isGatewayEventForSession(sessionKey: string, activeRunIds: Set<string>, allowPendingSendEvents: boolean, payload: unknown, frame?: unknown): boolean {
   const keys = new Set<string>();
   collectSessionKeys(payload, keys);
   collectSessionKeys(frame, keys);
@@ -408,7 +417,8 @@ function isGatewayEventForSession(sessionKey: string, activeRunIds: Set<string>,
   const runIds = new Set<string>();
   collectRunIds(payload, runIds);
   collectRunIds(frame, runIds);
-  if (runIds.size === 0) return false;
+  if (runIds.size === 0) return allowPendingSendEvents;
+  if (allowPendingSendEvents) return true;
   return [...runIds].some((runId) => activeRunIds.has(runId));
 }
 

@@ -6,6 +6,8 @@ import type {
   GatewayEventFrame,
   GatewayCapabilitySummary,
   GatewayHello,
+  GatewayModelOption,
+  GatewayModelsResponse,
   GatewayRequestFrame,
   GatewayResponseFrame
 } from "@detaches/shared";
@@ -34,6 +36,7 @@ export class GatewayClient extends EventEmitter {
   private connected = false;
   private lastError: string | null = null;
   private chatSendClientContextSupported: boolean | null = null;
+  private selectedModelsBySession = new Map<string, string>();
 
   async connect(): Promise<void> {
     if (this.connected && this.socket?.readyState === WebSocket.OPEN) return;
@@ -85,6 +88,7 @@ export class GatewayClient extends EventEmitter {
   async sendChat(params: {
     sessionKey: string;
     message: string;
+    model?: string;
     thinking?: string;
     attachments?: unknown[];
     idempotencyKey?: string;
@@ -123,6 +127,7 @@ export class GatewayClient extends EventEmitter {
     };
     const sendChatRequest = async (includeClientContext: boolean, phase: "initial" | "fallback") => {
       const payload = buildPayload(includeClientContext);
+      const startedAt = Date.now();
       await cloudPromptLogService.logChatSend({
         phase,
         sessionKey: params.sessionKey,
@@ -134,9 +139,45 @@ export class GatewayClient extends EventEmitter {
         activationReason: params.promptGate?.activationReason,
         payload
       });
-      return this.request("chat.send", payload, 35000);
+      try {
+        const response = await this.request("chat.send", payload, 35000);
+        await cloudPromptLogService.logChatResult({
+          phase,
+          sessionKey: params.sessionKey,
+          idempotencyKey: payload.idempotencyKey,
+          includeClientContext,
+          includeLocalControlContext: params.promptGate?.includeLocalControlContext,
+          includeStagedFileContext: params.promptGate?.includeStagedFileContext,
+          localControlScope: params.promptGate?.localControlScope,
+          activationReason: params.promptGate?.activationReason,
+          ok: true,
+          durationMs: Date.now() - startedAt,
+          payload: response
+        });
+        return response;
+      } catch (error) {
+        await cloudPromptLogService.logChatResult({
+          phase,
+          sessionKey: params.sessionKey,
+          idempotencyKey: payload.idempotencyKey,
+          includeClientContext,
+          includeLocalControlContext: params.promptGate?.includeLocalControlContext,
+          includeStagedFileContext: params.promptGate?.includeStagedFileContext,
+          localControlScope: params.promptGate?.localControlScope,
+          activationReason: params.promptGate?.activationReason,
+          ok: false,
+          durationMs: Date.now() - startedAt,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        throw error;
+      }
     };
     const includeClientContext = Boolean(params.clientContext) && this.chatSendClientContextSupported !== false;
+    const selectedModel = params.model?.trim();
+    if (selectedModel && this.selectedModelsBySession.get(params.sessionKey) !== selectedModel) {
+      await this.switchChatModel(params.sessionKey, selectedModel, params.idempotencyKey);
+      this.selectedModelsBySession.set(params.sessionKey, selectedModel);
+    }
     if (!includeClientContext) {
       return sendChatRequest(false, "initial");
     }
@@ -156,6 +197,26 @@ export class GatewayClient extends EventEmitter {
   async abortChat(sessionKey: string, runId: string): Promise<unknown> {
     await this.connect();
     return this.request("chat.abort", { sessionKey, runId }, 10000);
+  }
+
+  async switchChatModel(sessionKey: string, model: string, idempotencyKey?: string): Promise<unknown> {
+    await this.connect();
+    const payload = {
+      sessionKey,
+      message: `/model ${model}`,
+      thinking: "",
+      timeoutMs: 12000,
+      idempotencyKey: idempotencyKey ? `${idempotencyKey}:model` : `model:${nanoid()}`
+    };
+    await cloudPromptLogService.logChatSend({
+      phase: "initial",
+      sessionKey,
+      idempotencyKey: payload.idempotencyKey,
+      includeClientContext: false,
+      activationReason: "model-switch",
+      payload
+    });
+    return this.request("chat.send", payload, 15000);
   }
 
   getHello(): GatewayHello | null {
@@ -186,6 +247,38 @@ export class GatewayClient extends EventEmitter {
     };
   }
 
+  async listModels(params: { agentId?: string } = {}): Promise<GatewayModelsResponse> {
+    await this.connect();
+    const hello = this.hello;
+    const methods = methodsFromHello(hello);
+    const errors: string[] = [];
+    const raw: Record<string, unknown> = { hello };
+    let models: GatewayModelOption[] = [];
+
+    if (methods.includes("chat.metadata")) {
+      try {
+        const agentId = params.agentId?.trim();
+        const metadata = await withTimeout(this.request("chat.metadata", agentId ? { agentId } : {}, 2500, true, false), 3000, "Gateway chat.metadata model discovery timed out.");
+        raw["chat.metadata"] = metadata;
+        models = collectOpenClawModelList(metadata, "chat.metadata");
+      } catch (error) {
+        errors.push(`chat.metadata: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    } else {
+      errors.push("chat.metadata is not advertised by this Gateway.");
+    }
+
+    return {
+      connected: this.connected,
+      models,
+      selectedModel: selectedModelFromMetadata(raw["chat.metadata"]),
+      source: models.length ? Array.from(new Set(models.map((model) => model.source).filter(Boolean))).join("+") : "none",
+      methods,
+      errors: errors.length ? errors : undefined,
+      raw
+    };
+  }
+
   getLastError(): string | null {
     return this.lastError;
   }
@@ -197,6 +290,7 @@ export class GatewayClient extends EventEmitter {
     this.connected = false;
     this.hello = null;
     this.chatSendClientContextSupported = null;
+    this.selectedModelsBySession.clear();
     this.rejectAll(new Error("Gateway disconnected."));
   }
 
@@ -393,7 +487,7 @@ export class GatewayClient extends EventEmitter {
     };
   }
 
-  async request(method: string, params?: unknown, timeoutMs = 15000, ensureConnected = true): Promise<unknown> {
+  async request(method: string, params?: unknown, timeoutMs = 15000, ensureConnected = true, disconnectOnTimeout = true): Promise<unknown> {
     if (ensureConnected) await this.connect();
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       throw new Error("Gateway socket is not open.");
@@ -404,7 +498,7 @@ export class GatewayClient extends EventEmitter {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
-        this.disconnect();
+        if (disconnectOnTimeout) this.disconnect();
         reject(new Error(`Gateway request timed out: ${method}`));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timeout });
@@ -455,4 +549,67 @@ export function resolveDirectGatewayUrl(gatewayDirectUrl: string, gatewayDirectH
 function methodsFromHello(hello: GatewayHello | null): string[] {
   const rawMethods = (hello?.features as any)?.methods;
   return Array.isArray(rawMethods) ? rawMethods.filter((method): method is string => typeof method === "string") : [];
+}
+
+function collectOpenClawModelList(value: unknown, source: string): GatewayModelOption[] {
+  const output: GatewayModelOption[] = [];
+  const models = Array.isArray((value as any)?.models) ? (value as any).models : [];
+  for (const item of models) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const id = stringValue(record.id);
+    if (!id) continue;
+    const provider = stringValue(record.provider);
+    const ref = provider && !id.includes("/") ? `${provider}/${id}` : id;
+    addModel(output, {
+      id: ref,
+      label: stringValue(record.name) || stringValue(record.label) || ref,
+      provider,
+      source,
+      raw: item
+    });
+  }
+  return uniqueModels(output);
+}
+
+function addModel(output: GatewayModelOption[], model: GatewayModelOption): void {
+  const id = model.id.trim();
+  if (!id || id.length > 120) return;
+  if (/^(configured|available|ready|main|global|default)$/i.test(id)) return;
+  output.push({ ...model, id, label: model.label.trim() || id });
+}
+
+function uniqueModels(models: GatewayModelOption[]): GatewayModelOption[] {
+  const byId = new Map<string, GatewayModelOption>();
+  for (const model of models) {
+    const key = model.id.toLowerCase();
+    const existing = byId.get(key);
+    if (!existing) {
+      byId.set(key, model);
+      continue;
+    }
+    byId.set(key, {
+      ...existing,
+      label: existing.label || model.label,
+      provider: existing.provider || model.provider,
+      source: Array.from(new Set([existing.source, model.source].filter(Boolean))).join("+"),
+      raw: existing.raw ?? model.raw
+    });
+  }
+  return Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function selectedModelFromMetadata(value: unknown): string | undefined {
+  const models: unknown[] = Array.isArray((value as any)?.models) ? (value as any).models : [];
+  const selected = models.find((model) => Boolean((model as any)?.selected || (model as any)?.current || (model as any)?.isDefault));
+  if (!selected || typeof selected !== "object") return undefined;
+  const record = selected as Record<string, unknown>;
+  const id = stringValue(record.id);
+  if (!id) return undefined;
+  const provider = stringValue(record.provider);
+  return provider && !id.includes("/") ? `${provider}/${id}` : id;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

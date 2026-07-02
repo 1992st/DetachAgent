@@ -2,10 +2,11 @@ import { type CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, useEffect
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronDown, ChevronRight, Copy, ExternalLink, FileText, Folder, Library, MessageCircle, Plus, RefreshCw, Send, Settings, Square, X } from "lucide-react";
-import type { AgentSummary, ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, LibraryConfigResponse, LibraryEntry, LibraryPathResolution, LibraryServerConfig } from "@detaches/shared";
+import type { AgentSummary, ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, GatewayModelOption, LibraryConfigResponse, LibraryEntry, LibraryPathResolution, LibraryServerConfig } from "@detaches/shared";
 import {
   activateLibraryServer,
   checkLibraryUrl,
+  fetchGatewayModels,
   fetchLibraryTextFile,
   fetchLibraryConfig,
   fetchLibraryDirectory,
@@ -32,6 +33,7 @@ import {
 const DEFAULT_LIBRARY_PORT = 8000;
 const LOCAL_DRAWIO_URL = "/vendor/drawio/index.html";
 const ONLINE_DRAWIO_URL = "https://embed.diagrams.net/";
+const LIBRARY_MODEL_STORAGE_KEY = "detaches.library.selectedModel.v1";
 
 interface Props {
   selectedAgent: AgentSummary | null;
@@ -809,7 +811,50 @@ function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, ac
   const socketRef = useRef<WebSocket | null>(null);
   const dragRef = useRef<{ startX: number; startY: number; x: number; y: number; dragging: boolean } | null>(null);
   const onRecommendedFilesRef = useRef(onRecommendedFiles);
+  const [models, setModels] = useState<GatewayModelOption[]>([]);
+  const [modelState, setModelState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState(() => window.localStorage.getItem(modelStorageKey(null, LIBRARY_MODEL_STORAGE_KEY)) || "");
   onRecommendedFilesRef.current = onRecommendedFiles;
+
+  useEffect(() => {
+    setSelectedModel(window.localStorage.getItem(modelStorageKey(selectedAgent?.id, LIBRARY_MODEL_STORAGE_KEY)) || "");
+  }, [selectedAgent?.id]);
+
+  useEffect(() => {
+    let disposed = false;
+    setModelState("loading");
+    setModelError(null);
+    fetchGatewayModels(selectedAgent?.id)
+      .then((response) => {
+        if (disposed) return;
+        setModels(response.models);
+        setSelectedModel((current) => {
+          if (current && response.models.length && !response.models.some((model) => model.id === current)) return response.selectedModel || "";
+          if (!current && response.selectedModel) return response.selectedModel;
+          return current;
+        });
+        setModelState("ready");
+      })
+      .catch((error) => {
+        if (disposed) return;
+        if (isAbortError(error)) {
+          setModelState("ready");
+          return;
+        }
+        setModelError(error instanceof Error ? error.message : String(error));
+        setModelState("error");
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [selectedAgent?.id]);
+
+  useEffect(() => {
+    const key = modelStorageKey(selectedAgent?.id, LIBRARY_MODEL_STORAGE_KEY);
+    if (selectedModel) window.localStorage.setItem(key, selectedModel);
+    else window.localStorage.removeItem(key);
+  }, [selectedAgent?.id, selectedModel]);
 
   useEffect(() => {
     if (!open || !sessionKey) return;
@@ -879,6 +924,7 @@ function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, ac
     socketRef.current.send(JSON.stringify({
       type: "send",
       message: text,
+      model: selectedModel || undefined,
       idempotencyKey: crypto.randomUUID(),
       includeLocalControlContext: false,
       includeStagedFileContext: false,
@@ -963,6 +1009,13 @@ function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, ac
             })}
           </div>
           <form className="library-chat-composer" onSubmit={send}>
+            <ModelSelect
+              value={selectedModel}
+              models={models}
+              state={modelState}
+              error={modelError}
+              onChange={setSelectedModel}
+            />
             <input value={draft} onChange={(event) => setLibraryChatState(scopeKey, defaultFloatPosition, onWorkspaceChange, { draft: event.target.value })} placeholder="询问 workspace 里的文档..." disabled={!selectedAgent || !activeServer?.agentRootPath || socketState !== "connected"} />
             <button className="primary-button compact" disabled={!draft.trim() || !selectedAgent || !activeServer?.agentRootPath || socketState !== "connected"}>
               <Send size={14} />
@@ -976,6 +1029,49 @@ function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, ac
 
 function DirectoryError({ error, onRetry }: { error: string; onRetry: () => void }) {
   return <div className="library-directory-error"><p>{error}</p><button type="button" className="secondary-button compact" onClick={onRetry}>重试</button></div>;
+}
+
+function ModelSelect({
+  value,
+  models,
+  state,
+  error,
+  onChange
+}: {
+  value: string;
+  models: GatewayModelOption[];
+  state: "idle" | "loading" | "ready" | "error";
+  error: string | null;
+  onChange: (value: string) => void;
+}) {
+  const knownSelected = !value || models.some((model) => model.id === value);
+  const title = error || (models.length ? "选择本次发送使用的模型" : "Gateway 未提供模型列表，使用 Agent 默认模型");
+  return (
+    <select
+      className="model-select compact"
+      value={value}
+      title={title}
+      aria-label="选择模型"
+      onChange={(event) => onChange(event.target.value)}
+      disabled={state === "loading" && !models.length}
+    >
+      <option value="">{state === "loading" ? "模型..." : "自动模型"}</option>
+      {!knownSelected && value ? <option value={value}>{value}</option> : null}
+      {models.map((model) => (
+        <option value={model.id} key={model.id}>
+          {model.provider ? `${model.label} · ${model.provider}` : model.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function modelStorageKey(agentId: string | null | undefined, baseKey: string): string {
+  return agentId ? `${baseKey}.${agentId}` : baseKey;
 }
 
 function ReaderNotice({ notice, selectedFile, activeServer, onConfigure }: { notice: string; selectedFile: SelectedFile; activeServer: LibraryServerConfig; onConfigure: () => void }) {

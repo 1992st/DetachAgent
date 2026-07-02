@@ -12,6 +12,7 @@ import type {
   InteractionResolveInput,
   InteractionResultResponse,
   FileUploadResponse,
+  GatewayModelsResponse,
   LibraryConfigResponse,
   LibraryDirectoryResponse,
   LibraryPathResolution,
@@ -116,6 +117,20 @@ export async function fetchHealth(): Promise<AppHealth> {
 
 export async function fetchAgents(): Promise<AgentsListResponse> {
   const res = await fetch(apiUrl("/api/agents"));
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function fetchGatewayModels(agentId?: string | null): Promise<GatewayModelsResponse> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 3500);
+  const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : "";
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(`/api/gateway/models${query}`), { signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeout);
+  }
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();
 }

@@ -77,3 +77,21 @@ export interface GatewayCapabilitySummary {
   candidateAdapters: Array<"gateway-managed" | "remote-agent-host" | "local-user-machine">;
   methods: string[];
 }
+
+export interface GatewayModelOption {
+  id: string;
+  label: string;
+  provider?: string;
+  source?: string;
+  raw?: unknown;
+}
+
+export interface GatewayModelsResponse {
+  connected: boolean;
+  models: GatewayModelOption[];
+  selectedModel?: string;
+  source: string;
+  methods: string[];
+  errors?: string[];
+  raw?: unknown;
+}

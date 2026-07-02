@@ -4,7 +4,7 @@ import { appConfig } from "../../config/appConfig.js";
 
 export interface CloudPromptLogEntry {
   ts: string;
-  event: "chat.send";
+  event: "chat.send" | "chat.result";
   phase: "initial" | "fallback";
   method: "chat.send";
   sessionKey: string;
@@ -15,6 +15,9 @@ export interface CloudPromptLogEntry {
   localControlScope?: string;
   activationReason?: string;
   payload: unknown;
+  ok?: boolean;
+  durationMs?: number;
+  error?: string;
 }
 
 export interface CloudPromptLogListResponse {
@@ -32,6 +35,19 @@ class CloudPromptLogService {
       ts: new Date().toISOString(),
       event: "chat.send",
       method: "chat.send",
+      ...entry
+    };
+    const logPath = this.logPath();
+    await fs.mkdir(path.dirname(logPath), { recursive: true });
+    await fs.appendFile(logPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+  }
+
+  async logChatResult(entry: Omit<CloudPromptLogEntry, "ts" | "event" | "method" | "payload"> & { payload?: unknown }): Promise<void> {
+    const record: CloudPromptLogEntry = {
+      ts: new Date().toISOString(),
+      event: "chat.result",
+      method: "chat.send",
+      payload: entry.payload,
       ...entry
     };
     const logPath = this.logPath();

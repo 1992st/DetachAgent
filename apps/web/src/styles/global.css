@@ -1534,7 +1534,7 @@ h3 { font-size: 14px; }
   min-height: 86px;
   padding: 12px;
   display: grid;
-  grid-template-columns: 36px 1fr auto;
+  grid-template-columns: 36px minmax(128px, 180px) 1fr auto;
   gap: 10px;
   border-top: 1px solid var(--line);
   background: var(--panel);
@@ -1777,6 +1777,24 @@ h3 { font-size: 14px; }
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
+}
+
+.model-select {
+  min-width: 0;
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  padding: 0 9px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.model-select.compact {
+  width: 118px;
+  height: 34px;
+  font-size: 12px;
 }
 
 .send-button,
@@ -4227,7 +4245,7 @@ button.library-recommendation {
   padding: 10px;
   border-top: 1px solid rgba(15, 23, 42, 0.08);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 118px minmax(0, 1fr) auto;
   gap: 8px;
 }
 

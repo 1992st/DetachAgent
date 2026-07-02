@@ -1197,6 +1197,15 @@ apiRoutes.get("/gateway/capabilities", async (_req, res) => {
   }
 });
 
+apiRoutes.get("/gateway/models", async (_req, res) => {
+  try {
+    const agentId = typeof _req.query.agentId === "string" ? _req.query.agentId : undefined;
+    res.json(await gatewayClient.listModels({ agentId }));
+  } catch (error) {
+    res.status(503).json({ connected: false, models: [], source: "error", methods: [], errors: [error instanceof Error ? error.message : String(error)] });
+  }
+});
+
 apiRoutes.get("/adapters/openclaw-detaches", async (_req, res) => {
   try {
     res.json(await openclawDetachesAdapterService.info());

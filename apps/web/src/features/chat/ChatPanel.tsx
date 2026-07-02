@@ -1,11 +1,12 @@
 import { type CSSProperties, type DragEvent, FormEvent, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Check, Copy, Eye, FileText, List, Minus, Paperclip, Plus, Send, Square, Trash2, X } from "lucide-react";
-import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, MainAgentFileTransferSnapshot, RelationshipSkillStatus, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
-import { approveToolRequest, extractToolRequests, fetchCloudPromptLogs, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward, submitMainAgentTransferPassword, wsUrl } from "../../lib/api.js";
+import type { ChatMessage, ChatSessionMode, ChatSocketServerEvent, ClientIdentity, GatewayModelOption, MainAgentFileTransferSnapshot, RelationshipSkillStatus, ToolExecutionResultResponse, ToolRequestRecord, ToolTarget, UploadedFileRef } from "@detaches/shared";
+import { approveToolRequest, extractToolRequests, fetchCloudPromptLogs, fetchGatewayModels, fetchToolRequestResult, fetchToolRequests, rejectToolRequest, retryToolResultForward, submitMainAgentTransferPassword, wsUrl } from "../../lib/api.js";
 import { DEFAULT_LOG_FILTER, LOG_FILTER_LEVELS, appendRealtimeLog, createLogInput, filterRealtimeLogs, formatLogDetail, type LogEntry, type LogFilterLevel, type LogWriter } from "../logs/realtimeLog.js";
 import { TerminalPanel, type TerminalPanelHandle } from "../terminal/TerminalPanel.js";
 
 const PROMPT_PRESETS_STORAGE_KEY = "detaches.promptPresets.v1";
+const CHAT_MODEL_STORAGE_KEY = "detaches.chat.selectedModel.v1";
 const PRESET_COLORS = ["#2563eb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#475569", "#db2777"];
 const PRESET_CLICK_DELAY_MS = 180;
 
@@ -88,6 +89,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
   const [logOpen, setLogOpen] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logFilter, setLogFilter] = useState<LogFilterLevel>(DEFAULT_LOG_FILTER);
+  const [models, setModels] = useState<GatewayModelOption[]>([]);
+  const [modelState, setModelState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState(() => window.localStorage.getItem(modelStorageKey(null, CHAT_MODEL_STORAGE_KEY)) || "");
   const [chatFontSize, setChatFontSize] = useState(() => {
     const saved = Number(window.localStorage.getItem("detaches.chatFontSize"));
     return Number.isFinite(saved) && saved >= 12 && saved <= 20 ? saved : 14;
@@ -143,6 +148,45 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
       localControlScope
     }));
   }
+
+  useEffect(() => {
+    setSelectedModel(window.localStorage.getItem(modelStorageKey(agentId, CHAT_MODEL_STORAGE_KEY)) || "");
+  }, [agentId]);
+
+  useEffect(() => {
+    let disposed = false;
+    setModelState("loading");
+    setModelError(null);
+    fetchGatewayModels(agentId)
+      .then((response) => {
+        if (disposed) return;
+        setModels(response.models);
+        setSelectedModel((current) => {
+          if (current && response.models.length && !response.models.some((model) => model.id === current)) return response.selectedModel || "";
+          if (!current && response.selectedModel) return response.selectedModel;
+          return current;
+        });
+        setModelState("ready");
+      })
+      .catch((error) => {
+        if (disposed) return;
+        if (isAbortError(error)) {
+          setModelState("ready");
+          return;
+        }
+        setModelError(error instanceof Error ? error.message : String(error));
+        setModelState("error");
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [agentId]);
+
+  useEffect(() => {
+    const key = modelStorageKey(agentId, CHAT_MODEL_STORAGE_KEY);
+    if (selectedModel) window.localStorage.setItem(key, selectedModel);
+    else window.localStorage.removeItem(key);
+  }, [agentId, selectedModel]);
 
   useEffect(() => {
     let disposed = false;
@@ -405,6 +449,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
       includeStagedFileContext: options.includeStagedFileContext,
       activationReason: options.activationReason,
       localControlScope,
+      model: selectedModel || undefined,
       idempotencyKey
     }));
     setMessages((current) => [
@@ -603,9 +648,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
         relationshipSkillMessage={relationshipSkillMessage}
         activityState={terminalActivity}
         onEnableLocalControl={onEnableLocalControl}
-        onDisableLocalControl={onDisableLocalControl}
-        onInstallRelationshipSkill={onRelationshipSkillInstallRequired}
-      />
+          onDisableLocalControl={onDisableLocalControl}
+          onInstallRelationshipSkill={onRelationshipSkillInstallRequired}
+        />
       {fileGateOpen ? (
         <FileSendGateDialog
           runtime={localControlRuntime}
@@ -686,6 +731,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel({
         <button type="button" className="icon-button" title="Attach files" onClick={() => fileRef.current?.click()} disabled={!sessionKey}>
           <Paperclip size={18} />
         </button>
+        <ModelSelect
+          value={selectedModel}
+          models={models}
+          state={modelState}
+          error={modelError}
+          onChange={setSelectedModel}
+        />
         <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="发送消息给远端 OpenClaw..." />
         <button className="send-button" disabled={!canSend}>
           <Send size={18} />
@@ -761,6 +813,49 @@ function PromptPresetRail({
       </button>
     </aside>
   );
+}
+
+function ModelSelect({
+  value,
+  models,
+  state,
+  error,
+  onChange
+}: {
+  value: string;
+  models: GatewayModelOption[];
+  state: "idle" | "loading" | "ready" | "error";
+  error: string | null;
+  onChange: (value: string) => void;
+}) {
+  const knownSelected = !value || models.some((model) => model.id === value);
+  const title = error || (models.length ? "选择本次发送使用的模型" : "Gateway 未提供模型列表，使用 Agent 默认模型");
+  return (
+    <select
+      className="model-select"
+      value={value}
+      title={title}
+      aria-label="选择模型"
+      onChange={(event) => onChange(event.target.value)}
+      disabled={state === "loading" && !models.length}
+    >
+      <option value="">{state === "loading" ? "模型..." : "自动模型"}</option>
+      {!knownSelected && value ? <option value={value}>{value}</option> : null}
+      {models.map((model) => (
+        <option value={model.id} key={model.id}>
+          {model.provider ? `${model.label} · ${model.provider}` : model.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function modelStorageKey(agentId: string | null | undefined, baseKey: string): string {
+  return agentId ? `${baseKey}.${agentId}` : baseKey;
 }
 
 function PromptPresetEditor({
