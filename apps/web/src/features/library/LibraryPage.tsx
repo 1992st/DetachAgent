@@ -15,9 +15,20 @@ import {
   testLibraryServer,
   wsUrl
 } from "../../lib/api.js";
+import {
+  createLibrarySessionKey,
+  getLibraryWorkspaceState,
+  libraryScopeKey,
+  updateLibraryWorkspaceState,
+  type DirectoryNodeState,
+  type FloatPosition,
+  type LibraryActiveTab,
+  type LibraryWorkspaceState,
+  type RecommendedFile,
+  type SelectedFile
+} from "./libraryMemoryStore.js";
 
 const DEFAULT_LIBRARY_PORT = 8000;
-const FLOAT_STORAGE_KEY = "detaches.library.floatPosition.v1";
 const LOCAL_DRAWIO_URL = "/vendor/drawio/index.html";
 const ONLINE_DRAWIO_URL = "https://embed.diagrams.net/";
 
@@ -26,54 +37,30 @@ interface Props {
   clientIdentity: ClientIdentity | null;
 }
 
-interface RecommendedFile {
-  id: string;
-  title: string;
-  absolutePath: string;
-  reason?: string;
-  snippet?: string;
-  resolution: LibraryPathResolution;
-}
-
-interface SelectedFile {
-  source: "directory" | "recommendation" | "recent";
-  title: string;
-  absolutePath?: string;
-  relativePath: string;
-  displayPath: string;
-  url: string;
-}
-
-interface DirectoryNodeState {
-  entries?: LibraryEntry[];
-  expanded?: boolean;
-  loading?: boolean;
-  error?: string;
-}
-
-interface FloatPosition {
-  x: number;
-  y: number;
-}
-
 export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
+  const defaultFloatPosition = useMemo(() => loadFloatPosition(), []);
+  const scopeKey = useMemo(
+    () => libraryScopeKey(selectedAgent?.id, clientIdentity?.deviceIdShort),
+    [selectedAgent?.id, clientIdentity?.deviceIdShort]
+  );
+  const [workspaceState, setWorkspaceState] = useState(() => getLibraryWorkspaceState(scopeKey, defaultFloatPosition));
   const [config, setConfig] = useState<LibraryConfigResponse | null>(null);
   const [configLoading, setConfigLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
-  const [configOpen, setConfigOpen] = useState(false);
   const [form, setForm] = useState({ id: "", name: "", host: "", port: String(DEFAULT_LIBRARY_PORT), agentRootPath: "" });
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"root" | "recommended" | "recent">("root");
-  const [filter, setFilter] = useState("");
-  const [tree, setTree] = useState<Record<string, DirectoryNodeState>>({});
-  const [selectedFile, setSelectedFile] = useState<SelectedFile | null>(null);
-  const [readerKey, setReaderKey] = useState(0);
-  const [readerNotice, setReaderNotice] = useState<string | null>(null);
-  const [recommended, setRecommended] = useState<RecommendedFile[]>([]);
-  const [recent, setRecent] = useState<SelectedFile[]>([]);
-  const [floatOpen, setFloatOpen] = useState(false);
-  const [floatPos, setFloatPos] = useState<FloatPosition>(() => loadFloatPosition());
+  const activeTab = workspaceState.ui.activeTab;
+  const filter = workspaceState.ui.filter;
+  const tree = workspaceState.directory.tree;
+  const selectedFile = workspaceState.reader.selectedFile;
+  const readerKey = workspaceState.reader.readerRevision;
+  const readerNotice = workspaceState.reader.readerNotice;
+  const recommended = workspaceState.recommendations.files;
+  const recent = workspaceState.recent.files;
+  const floatOpen = workspaceState.ui.floatOpen;
+  const floatPos = workspaceState.ui.floatPosition;
+  const configOpen = workspaceState.ui.configOpen;
 
   const activeServer = useMemo(() => {
     if (!config) return null;
@@ -85,6 +72,10 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
   }, []);
 
   useEffect(() => {
+    setWorkspaceState(getLibraryWorkspaceState(scopeKey, defaultFloatPosition));
+  }, [scopeKey, defaultFloatPosition]);
+
+  useEffect(() => {
     if (!config) return;
     const server = activeServer;
     setForm(server
@@ -94,11 +85,59 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
   }, [config, activeServer]);
 
   useEffect(() => {
-    setTree({});
-    setSelectedFile(null);
-    setReaderNotice(null);
+    if (!activeServer) return;
+    if (workspaceState.directory.loadedServerId === activeServer.id) return;
+    updateWorkspace((current) => ({
+      ...current,
+      activeServerId: activeServer.id,
+      reader: { ...current.reader, selectedFile: null, readerNotice: null, readerRevision: current.reader.readerRevision + 1 },
+      directory: { tree: {}, loadedServerId: activeServer.id }
+    }));
     if (activeServer) void loadDirectory("");
-  }, [activeServer?.id]);
+  }, [activeServer?.id, workspaceState.directory.loadedServerId]);
+
+  function updateWorkspace(updater: Parameters<typeof updateLibraryWorkspaceState>[1]) {
+    setWorkspaceState(updateLibraryWorkspaceState(scopeKey, updater, defaultFloatPosition));
+  }
+
+  function setConfigOpen(open: boolean) {
+    updateWorkspace((current) => ({ ...current, ui: { ...current.ui, configOpen: open } }));
+  }
+
+  function setActiveTab(tab: LibraryActiveTab) {
+    updateWorkspace((current) => ({ ...current, ui: { ...current.ui, activeTab: tab } }));
+  }
+
+  function setFilterValue(value: string) {
+    updateWorkspace((current) => ({ ...current, ui: { ...current.ui, filter: value } }));
+  }
+
+  function setReaderNoticeValue(notice: string | null) {
+    updateWorkspace((current) => ({ ...current, reader: { ...current.reader, readerNotice: notice } }));
+  }
+
+  function bumpReaderRevision() {
+    updateWorkspace((current) => ({ ...current, reader: { ...current.reader, readerNotice: null, readerRevision: current.reader.readerRevision + 1 } }));
+  }
+
+  function setFloatOpenValue(open: boolean) {
+    updateWorkspace((current) => ({ ...current, ui: { ...current.ui, floatOpen: open } }));
+  }
+
+  function setFloatPositionValue(position: FloatPosition) {
+    updateWorkspace((current) => ({ ...current, ui: { ...current.ui, floatPosition: position } }));
+  }
+
+  function setTreeValue(updater: (current: Record<string, DirectoryNodeState>) => Record<string, DirectoryNodeState>) {
+    updateWorkspace((current) => ({ ...current, directory: { ...current.directory, tree: updater(current.directory.tree) } }));
+  }
+
+  function setRecommendedValue(updater: (current: RecommendedFile[]) => RecommendedFile[]) {
+    updateWorkspace((current) => ({
+      ...current,
+      recommendations: { files: updater(current.recommendations.files), updatedAt: new Date().toISOString() }
+    }));
+  }
 
   async function loadConfig() {
     setConfigLoading(true);
@@ -153,13 +192,13 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
 
   async function loadDirectory(relativePath: string) {
     if (!activeServer) return;
-    setTree((current) => ({
+    setTreeValue((current) => ({
       ...current,
       [relativePath]: { ...current[relativePath], loading: true, error: undefined }
     }));
     try {
       const response = await fetchLibraryDirectory(activeServer.id, relativePath);
-      setTree((current) => ({
+      setTreeValue((current) => ({
         ...current,
         [relativePath]: {
           entries: response.entries,
@@ -168,7 +207,7 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
         }
       }));
     } catch (error) {
-      setTree((current) => ({
+      setTreeValue((current) => ({
         ...current,
         [relativePath]: {
           ...current[relativePath],
@@ -182,11 +221,11 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
   async function toggleDirectory(entry: LibraryEntry) {
     const state = tree[entry.relativePath];
     if (!state?.entries && !state?.loading) {
-      setTree((current) => ({ ...current, [entry.relativePath]: { expanded: true, loading: true } }));
+      setTreeValue((current) => ({ ...current, [entry.relativePath]: { expanded: true, loading: true } }));
       await loadDirectory(entry.relativePath);
       return;
     }
-    setTree((current) => ({
+    setTreeValue((current) => ({
       ...current,
       [entry.relativePath]: { ...current[entry.relativePath], expanded: !current[entry.relativePath]?.expanded }
     }));
@@ -221,10 +260,11 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
   }
 
   function openFile(file: SelectedFile) {
-    setSelectedFile(file);
-    setReaderNotice(null);
-    setReaderKey((current) => current + 1);
-    setRecent((current) => [file, ...current.filter((item) => item.url !== file.url)].slice(0, 12));
+    updateWorkspace((current) => ({
+      ...current,
+      reader: { selectedFile: file, readerNotice: null, readerRevision: current.reader.readerRevision + 1 },
+      recent: { files: [file, ...current.recent.files.filter((item) => item.url !== file.url)].slice(0, 12) }
+    }));
   }
 
   async function checkSelectedUrl() {
@@ -232,10 +272,10 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
     try {
       const response = await checkLibraryUrl(activeServer.id, selectedFile.relativePath);
       if (!response.ok) {
-        setReaderNotice(buildNotFoundNotice(activeServer, selectedFile, response.status));
+        setReaderNoticeValue(buildNotFoundNotice(activeServer, selectedFile, response.status));
       }
     } catch (error) {
-      setReaderNotice(error instanceof Error ? error.message : String(error));
+      setReaderNoticeValue(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -259,7 +299,7 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
       });
     }
     if (!resolved.length) return;
-    setRecommended((current) => mergeRecommended(current, resolved));
+    setRecommendedValue((current) => mergeRecommended(current, resolved));
     setActiveTab("recommended");
   }
 
@@ -271,39 +311,6 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
 
   return (
     <div className="library-workspace">
-      <header className="library-toolbar">
-        <div className="library-title">
-          <Library size={18} />
-          <strong>图书馆</strong>
-          {activeServer ? <span>{activeServer.host}:{activeServer.port}</span> : <span>未配置服务</span>}
-        </div>
-        <div className="library-service-controls">
-          <select
-            value={activeServer?.id || ""}
-            onChange={(event) => void selectServer(event.target.value)}
-            disabled={!config?.servers.length}
-            title="图书馆服务"
-          >
-            {config?.servers.map((server) => (
-              <option value={server.id} key={server.id}>{server.name} · {server.host}:{server.port}</option>
-            ))}
-          </select>
-          <span className="library-agent-root">{activeServer?.agentRootPath || "Agent 根目录未配置"}</span>
-          <button type="button" className="icon-button" title="新增服务" onClick={() => {
-            setForm({ id: "", name: "", host: config ? defaultLibraryHost(config) : browserFallbackHost(), port: String(DEFAULT_LIBRARY_PORT), agentRootPath: config?.suggestedAgentRootPath || "" });
-            setConfigOpen(true);
-          }}>
-            <Plus size={15} />
-          </button>
-          <button type="button" className="icon-button" title="配置" onClick={() => setConfigOpen(true)}>
-            <Settings size={15} />
-          </button>
-          <button type="button" className="icon-button" title="刷新目录" disabled={!activeServer} onClick={() => void loadDirectory("")}>
-            <RefreshCw size={15} />
-          </button>
-        </div>
-      </header>
-
       {configError ? <div className="panel-error">{configError}</div> : null}
       {configOpen || !activeServer ? (
         <LibraryConfigPanel
@@ -323,7 +330,7 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
               <button className={activeTab === "recommended" ? "active" : ""} onClick={() => setActiveTab("recommended")}>馆员推荐</button>
               <button className={activeTab === "recent" ? "active" : ""} onClick={() => setActiveTab("recent")}>最近打开</button>
             </div>
-            <input className="library-filter" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="过滤已加载文件" />
+            <input className="library-filter" value={filter} onChange={(event) => setFilterValue(event.target.value)} placeholder="过滤已加载文件" />
             <div className="library-tree">
               {activeTab === "root" ? (
                 <>
@@ -357,9 +364,31 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
                 <small>{selectedFile ? `${fileKindLabel(selectedFile.relativePath)} · ${selectedFile.displayPath}` : "也可以点击右下角馆员询问 workspace 文档"}</small>
               </div>
               <div className="library-reader-actions">
+                <select
+                  className="library-service-select compact"
+                  value={activeServer?.id || ""}
+                  onChange={(event) => void selectServer(event.target.value)}
+                  disabled={!config?.servers.length}
+                  title="图书馆服务"
+                >
+                  {config?.servers.map((server) => (
+                    <option value={server.id} key={server.id}>{server.name} · {server.host}:{server.port}</option>
+                  ))}
+                </select>
+                <button type="button" className="icon-button" title="新增服务" onClick={() => {
+                  setForm({ id: "", name: "", host: config ? defaultLibraryHost(config) : browserFallbackHost(), port: String(DEFAULT_LIBRARY_PORT), agentRootPath: config?.suggestedAgentRootPath || "" });
+                  setConfigOpen(true);
+                }}>
+                  <Plus size={15} />
+                </button>
+                <button type="button" className="icon-button" title="配置" onClick={() => setConfigOpen(true)}>
+                  <Settings size={15} />
+                </button>
+                <button type="button" className="icon-button" title="刷新目录" disabled={!activeServer} onClick={() => void loadDirectory("")}>
+                  <RefreshCw size={15} />
+                </button>
                 <button type="button" className="icon-button" title="刷新预览" disabled={!selectedFile} onClick={() => {
-                  setReaderNotice(null);
-                  setReaderKey((current) => current + 1);
+                  bumpReaderRevision();
                 }}>
                   <RefreshCw size={15} />
                 </button>
@@ -379,7 +408,7 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
                     key={readerKey}
                     file={selectedFile}
                     serverId={activeServer.id}
-                    onNotice={setReaderNotice}
+                    onNotice={setReaderNoticeValue}
                     onFallbackLoad={() => void checkSelectedUrl()}
                   />
                   {readerNotice ? <ReaderNotice notice={readerNotice} selectedFile={selectedFile} activeServer={activeServer} onConfigure={() => setConfigOpen(true)} /> : null}
@@ -403,9 +432,12 @@ export function LibraryPage({ selectedAgent, clientIdentity }: Props) {
         activeServer={activeServer}
         selectedFile={selectedFile}
         recentFiles={recent}
-        onPositionChange={setFloatPos}
-        onOpenChange={setFloatOpen}
+        scopeKey={scopeKey}
+        defaultFloatPosition={defaultFloatPosition}
+        onPositionChange={setFloatPositionValue}
+        onOpenChange={setFloatOpenValue}
         onRecommendedFiles={(files) => void resolveRecommendedFiles(files)}
+        onWorkspaceChange={setWorkspaceState}
       />
     </div>
   );
@@ -730,7 +762,7 @@ function DrawioPreview({ file, serverId, drawioBaseUrl, onNotice }: { file: Sele
 }
 
 
-function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, activeServer, selectedFile, recentFiles, onPositionChange, onOpenChange, onRecommendedFiles }: {
+function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, activeServer, selectedFile, recentFiles, scopeKey, defaultFloatPosition, onPositionChange, onOpenChange, onRecommendedFiles, onWorkspaceChange }: {
   open: boolean;
   position: FloatPosition;
   selectedAgent: AgentSummary | null;
@@ -738,62 +770,83 @@ function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, ac
   activeServer: LibraryServerConfig | null;
   selectedFile: SelectedFile | null;
   recentFiles: SelectedFile[];
+  scopeKey: string;
+  defaultFloatPosition: FloatPosition;
   onPositionChange: (next: FloatPosition) => void;
   onOpenChange: (open: boolean) => void;
   onRecommendedFiles: (files: Array<{ title?: string; absolutePath?: string; reason?: string; snippet?: string }>) => void;
+  onWorkspaceChange: (next: LibraryWorkspaceState) => void;
 }) {
-  const [sessionKey, setSessionKey] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [draft, setDraft] = useState("");
-  const [socketState, setSocketState] = useState("idle");
-  const [lastRunId, setLastRunId] = useState<string | null>(null);
+  const workspaceState = getLibraryWorkspaceState(scopeKey, defaultFloatPosition);
+  const sessionKey = workspaceState.sessionKey;
+  const messages = workspaceState.librarianChat.messages;
+  const draft = workspaceState.librarianChat.draft;
+  const socketState = workspaceState.librarianChat.socketState;
+  const lastRunId = workspaceState.librarianChat.lastRunId;
   const socketRef = useRef<WebSocket | null>(null);
   const dragRef = useRef<{ startX: number; startY: number; x: number; y: number; dragging: boolean } | null>(null);
-
-  useEffect(() => {
-    if (!selectedAgent || !clientIdentity) return;
-    setSessionKey(librarySessionKey(selectedAgent, clientIdentity));
-    setMessages([]);
-    setLastRunId(null);
-  }, [selectedAgent?.id, clientIdentity?.deviceIdShort]);
+  const onRecommendedFilesRef = useRef(onRecommendedFiles);
+  onRecommendedFilesRef.current = onRecommendedFiles;
 
   useEffect(() => {
     if (!open || !sessionKey) return;
     const params = new URLSearchParams({ sessionMode: "device" satisfies ChatSessionMode });
     const ws = new WebSocket(wsUrl(`/api/chat/${encodeURIComponent(sessionKey)}?${params}`));
     socketRef.current = ws;
-    setSocketState("connecting");
-    ws.onopen = () => setSocketState("connected");
-    ws.onclose = () => setSocketState("closed");
+    setLibraryChatState(scopeKey, defaultFloatPosition, onWorkspaceChange, { socketState: "connecting" });
+    ws.onopen = () => setLibraryChatState(scopeKey, defaultFloatPosition, onWorkspaceChange, { socketState: "connected" });
+    ws.onclose = () => setLibraryChatState(scopeKey, defaultFloatPosition, onWorkspaceChange, { socketState: "closed" });
     ws.onerror = () => {
-      setSocketState("error");
+      setLibraryChatState(scopeKey, defaultFloatPosition, onWorkspaceChange, { socketState: "error" });
       ws.close();
     };
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data) as ChatSocketServerEvent;
       if (data.type === "history") {
-        setMessages(data.payload.messages);
+        setLibraryChatState(scopeKey, defaultFloatPosition, onWorkspaceChange, {
+          messages: data.payload.messages,
+          hydratedFromHistory: true
+        });
+        const files = extractLibraryFilesFromMessages(data.payload.messages);
+        if (files.length) onRecommendedFilesRef.current(files);
       } else if (data.type === "chat") {
         const message = chatMessageFromPayload(data.payload);
         if (message) {
-          setMessages((current) => upsertLibraryChat(current, message));
+          updateLibraryChatState(scopeKey, defaultFloatPosition, onWorkspaceChange, (chat) => ({
+            ...chat,
+            messages: upsertLibraryChat(chat.messages, message)
+          }));
           const files = extractLibraryFiles(message.text);
-          if (files.length) onRecommendedFiles(files);
+          if (files.length) onRecommendedFilesRef.current(files);
         }
       } else if (data.type === "sent") {
-        setLastRunId(data.payload.runId ?? null);
+        setLibraryChatState(scopeKey, defaultFloatPosition, onWorkspaceChange, { lastRunId: data.payload.runId ?? null });
       } else if (data.type === "error") {
-        setMessages((current) => [...current, { id: crypto.randomUUID(), role: "system", text: data.message, timestamp: new Date().toISOString() }]);
+        updateLibraryChatState(scopeKey, defaultFloatPosition, onWorkspaceChange, (chat) => ({
+          ...chat,
+          messages: [...chat.messages, { id: crypto.randomUUID(), role: "system", text: data.message, timestamp: new Date().toISOString() }]
+        }));
       }
     };
     return () => ws.close();
-  }, [open, sessionKey]);
+  }, [open, sessionKey, scopeKey, defaultFloatPosition]);
 
   function newSession() {
     if (!selectedAgent || !clientIdentity) return;
-    setMessages([]);
-    setLastRunId(null);
-    setSessionKey(librarySessionKey(selectedAgent, clientIdentity));
+    const nextSessionKey = createLibrarySessionKey(scopeKey);
+    const next = updateLibraryWorkspaceState(scopeKey, (current) => ({
+      ...current,
+      sessionKey: nextSessionKey,
+      librarianChat: {
+        ...current.librarianChat,
+        messages: [],
+        draft: "",
+        socketState: "idle",
+        lastRunId: null,
+        hydratedFromHistory: false
+      }
+    }), defaultFloatPosition);
+    onWorkspaceChange(next);
   }
 
   function send(event: FormEvent) {
@@ -814,8 +867,11 @@ function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, ac
         recentFiles: recentFiles.map((file) => file.absolutePath || file.displayPath)
       }
     }));
-    setMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", text, timestamp: new Date().toISOString() }]);
-    setDraft("");
+    updateLibraryChatState(scopeKey, defaultFloatPosition, onWorkspaceChange, (chat) => ({
+      ...chat,
+      messages: [...chat.messages, { id: crypto.randomUUID(), role: "user", text, timestamp: new Date().toISOString() }],
+      draft: ""
+    }));
   }
 
   function abort() {
@@ -836,7 +892,6 @@ function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, ac
     const y = Math.max(80, Math.min(window.innerHeight - 64, drag.y + event.clientY - drag.startY));
     drag.dragging = true;
     onPositionChange({ x, y });
-    saveFloatPosition({ x, y });
   }
 
   function pointerUp() {
@@ -874,15 +929,18 @@ function LibraryFloatingChat({ open, position, selectedAgent, clientIdentity, ac
           </header>
           <div className="library-chat-messages">
             {!selectedAgent ? <div className="library-muted">请先在聊天页选择 Agent。</div> : !activeServer?.agentRootPath ? <div className="library-muted">请先配置当前端口的 Agent 根目录。</div> : null}
-            {messages.map((message) => (
-              <article className={`library-chat-message ${message.role}`} key={message.id}>
-                <span>{message.role}</span>
-                <p>{displayLibraryChatText(message.text)}</p>
-              </article>
-            ))}
+            {messages.map((message) => {
+              const visibleText = displayLibraryChatText(message.text);
+              return visibleText ? (
+                <article className={`library-chat-message ${message.role}`} key={message.id}>
+                  <span>{message.role}</span>
+                  <p>{visibleText}</p>
+                </article>
+              ) : null;
+            })}
           </div>
           <form className="library-chat-composer" onSubmit={send}>
-            <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="询问 workspace 里的文档..." disabled={!selectedAgent || !activeServer?.agentRootPath || socketState !== "connected"} />
+            <input value={draft} onChange={(event) => setLibraryChatState(scopeKey, defaultFloatPosition, onWorkspaceChange, { draft: event.target.value })} placeholder="询问 workspace 里的文档..." disabled={!selectedAgent || !activeServer?.agentRootPath || socketState !== "connected"} />
             <button className="primary-button compact" disabled={!draft.trim() || !selectedAgent || !activeServer?.agentRootPath || socketState !== "connected"}>
               <Send size={14} />
             </button>
@@ -934,10 +992,30 @@ function mergeRecommended(current: RecommendedFile[], next: RecommendedFile[]): 
   return Array.from(byPath.values()).slice(0, 80);
 }
 
-function librarySessionKey(agent: AgentSummary, identity: ClientIdentity): string {
-  const agentId = agent.id.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || "custom";
-  const device = identity.deviceIdShort || "local";
-  return `agent:${agentId}:library:${device}:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+function setLibraryChatState(
+  scopeKey: string,
+  defaultFloatPosition: FloatPosition,
+  onWorkspaceChange: (next: LibraryWorkspaceState) => void,
+  patch: Partial<LibraryWorkspaceState["librarianChat"]>
+) {
+  updateLibraryChatState(scopeKey, defaultFloatPosition, onWorkspaceChange, (chat) => ({ ...chat, ...patch }));
+}
+
+function updateLibraryChatState(
+  scopeKey: string,
+  defaultFloatPosition: FloatPosition,
+  onWorkspaceChange: (next: LibraryWorkspaceState) => void,
+  updater: (chat: LibraryWorkspaceState["librarianChat"]) => LibraryWorkspaceState["librarianChat"]
+) {
+  const next = updateLibraryWorkspaceState(scopeKey, (current) => ({
+    ...current,
+    librarianChat: updater(current.librarianChat)
+  }), defaultFloatPosition);
+  onWorkspaceChange(next);
+}
+
+function extractLibraryFilesFromMessages(messages: ChatMessage[]): Array<{ title?: string; absolutePath?: string; reason?: string; snippet?: string }> {
+  return messages.flatMap((message) => extractLibraryFiles(message.text));
 }
 
 function chatMessageFromPayload(payload: unknown): ChatMessage | null {
@@ -1134,23 +1212,41 @@ function extractLibraryFiles(text: string): Array<{ title?: string; absolutePath
 }
 
 function displayLibraryChatText(text: string): string {
-  return text
+  return stripLibraryManagerPrompt(text)
     .replace(/```library-files\s*[\s\S]*?```/gi, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
-function loadFloatPosition(): FloatPosition {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(FLOAT_STORAGE_KEY) || "") as FloatPosition;
-    if (Number.isFinite(parsed.x) && Number.isFinite(parsed.y)) return parsed;
-  } catch {
+function stripLibraryManagerPrompt(text: string): string {
+  const marker = "你是 Detaches 图书馆管理员";
+  const start = text.indexOf(marker);
+  if (start < 0) return text;
+  const before = text.slice(0, start);
+  const prompt = text.slice(start);
+  const endPatterns = [
+    /普通回答可以解释文件内容，但文件列表必须使用上面的 JSON 格式。\s*/u,
+    /```library-files[\s\S]*?```\s*/u
+  ];
+  for (const pattern of endPatterns) {
+    const match = pattern.exec(prompt);
+    if (match?.index != null) return `${before}${prompt.slice(match.index + match[0].length)}`;
   }
-  return { x: Math.max(24, window.innerWidth - 88), y: Math.max(100, window.innerHeight - 120) };
+
+  const contextLabels = [
+    "当前图书馆 HTTP 服务：",
+    "当前端口对应的 Agent 根目录：",
+    "当前目录：",
+    "当前打开文件：",
+    "最近打开文件："
+  ];
+  const matchedLabels = contextLabels.filter((label) => prompt.includes(label)).length;
+  if (matchedLabels >= 2) return before;
+  return text;
 }
 
-function saveFloatPosition(position: FloatPosition) {
-  window.localStorage.setItem(FLOAT_STORAGE_KEY, JSON.stringify(position));
+function loadFloatPosition(): FloatPosition {
+  return { x: Math.max(24, window.innerWidth - 88), y: Math.max(100, window.innerHeight - 120) };
 }
 
 function defaultLibraryHost(config: LibraryConfigResponse): string {
