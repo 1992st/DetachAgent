@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { nanoid } from "nanoid";
-import type { PublicSettings, RemoteProfile } from "@detaches/shared";
+import type { LibraryServerConfig, PublicSettings, RemoteProfile } from "@detaches/shared";
 import { appConfig, repoRoot, type AppConfig } from "./appConfig.js";
 
 export interface RuntimeSettings {
@@ -34,6 +34,8 @@ export interface RuntimeSettings {
   fileServiceLastStatus?: "ok" | "error";
   fileServiceLastTestedAt?: string;
   fileServiceLastError?: string;
+  libraryServers?: LibraryServerConfig[];
+  activeLibraryServerId?: string;
 }
 
 type PersistedProfile = RuntimeSettings & {
@@ -104,7 +106,9 @@ function defaultProfile(): PersistedProfile {
     publicBaseUrl: appConfig.publicBaseUrl,
     fileServiceType: undefined,
     fileServiceHost: "",
-    fileServicePort: DEFAULT_FILEBROWSER_PORT
+    fileServicePort: DEFAULT_FILEBROWSER_PORT,
+    libraryServers: [],
+    activeLibraryServerId: undefined
   };
 }
 
@@ -315,6 +319,10 @@ export class SettingsStore {
     if (fileServiceLastTestedAt !== undefined) output.fileServiceLastTestedAt = fileServiceLastTestedAt;
     const fileServiceLastError = sanitizeString(input.fileServiceLastError);
     if (fileServiceLastError !== undefined) output.fileServiceLastError = fileServiceLastError;
+    const libraryServers = sanitizeLibraryServers(input.libraryServers);
+    if (libraryServers !== undefined) output.libraryServers = libraryServers;
+    const activeLibraryServerId = sanitizeString(input.activeLibraryServerId);
+    if (activeLibraryServerId !== undefined) output.activeLibraryServerId = activeLibraryServerId;
     const authToken = sanitizeString(input.authToken);
     if (authToken !== undefined) output.authToken = authToken;
     const authPassword = sanitizeString(input.authPassword);
@@ -345,6 +353,39 @@ export class SettingsStore {
       // best effort
     }
   }
+}
+
+function sanitizeLibraryServers(value: unknown): LibraryServerConfig[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const servers: LibraryServerConfig[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const host = sanitizeString(record.host);
+    const port = sanitizePort(record.port);
+    const agentRootPath = sanitizeString(record.agentRootPath);
+    if (!host || !port || !agentRootPath) continue;
+    const key = `${host}:${port}`;
+    const server: LibraryServerConfig = {
+      id: sanitizeString(record.id) || nanoid(),
+      name: sanitizeString(record.name) || key,
+      host,
+      port,
+      agentRootPath,
+      lastStatus: record.lastStatus === "ok" || record.lastStatus === "error" ? record.lastStatus : undefined,
+      lastTestedAt: sanitizeString(record.lastTestedAt),
+      lastError: sanitizeString(record.lastError)
+    };
+    if (seen.has(key)) {
+      const index = servers.findIndex((candidate) => `${candidate.host}:${candidate.port}` === key);
+      if (index >= 0) servers[index] = server;
+    } else {
+      seen.add(key);
+      servers.push(server);
+    }
+  }
+  return servers;
 }
 
 export const settingsStore = new SettingsStore();

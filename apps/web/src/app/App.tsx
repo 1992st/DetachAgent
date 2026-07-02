@@ -9,8 +9,9 @@ import { SettingsPanel } from "../features/settings/SettingsPanel.js";
 import { ToolQueuePanel } from "../features/tools/ToolQueuePanel.js";
 import { relationshipSkillInstallPrompt, relationshipSkillVersion } from "../features/skills/SkillInstallPanel.js";
 import { FileBrowserPage } from "../features/files/FileBrowserPage.js";
+import { LibraryPage } from "../features/library/LibraryPage.js";
 
-type ViewMode = "chat" | "network" | "tool-queue" | "file-browser";
+type ViewMode = "chat" | "network" | "tool-queue" | "file-browser" | "library";
 type LocalControlRuntimeState = "idle" | "checking" | "install_required" | "installing" | "ready" | "error";
 // 仅用于 terminal toggle 的轻量展示，不代表 terminal websocket 的真实连接生命周期。
 type TerminalActivityState = "connected" | "running";
@@ -540,6 +541,10 @@ export function App() {
             <FolderOpen size={15} />
             文件浏览
           </button>
+          <button className={view === "library" ? "active" : ""} onClick={() => setView("library")}>
+            <FileText size={15} />
+            图书馆
+          </button>
         </div>
         <div className="top-debug-terminal-slot" />
       </nav>
@@ -615,8 +620,10 @@ export function App() {
             }}
           />
         </div>
-      ) : (
+      ) : view === "file-browser" ? (
         <FileBrowserPage />
+      ) : (
+        <LibraryPage selectedAgent={selectedAgent} clientIdentity={clientIdentity} />
       )}
     </div>
   );

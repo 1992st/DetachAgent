@@ -30,6 +30,7 @@ import { cloudPromptLogService } from "../services/gateway/cloudPromptLogService
 import { interactionBrokerService } from "../services/interactions/interactionBrokerService.js";
 import { callbackAddressService } from "../services/callback/callbackAddressService.js";
 import { agentTerminalService } from "../services/agentTerminal/agentTerminalService.js";
+import { libraryService } from "../services/library/libraryService.js";
 
 const upload = multer({
   dest: path.join(appConfig.storageDir, "cache"),
@@ -242,6 +243,72 @@ apiRoutes.get("/logs/cloud-prompts", async (req, res) => {
     res.json(await cloudPromptLogService.list(limit));
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.get("/library/config", async (_req, res) => {
+  try {
+    res.json(await libraryService.config());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/library/servers", async (req, res) => {
+  try {
+    res.json(await libraryService.saveServer({
+      id: typeof req.body?.id === "string" ? req.body.id : undefined,
+      name: typeof req.body?.name === "string" ? req.body.name : undefined,
+      host: String(req.body?.host || ""),
+      port: req.body?.port,
+      agentRootPath: String(req.body?.agentRootPath || "")
+    }));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/library/servers/:id/activate", async (req, res) => {
+  try {
+    res.json(await libraryService.activateServer(req.params.id));
+  } catch (error) {
+    res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/library/servers/:id/test", async (req, res) => {
+  try {
+    res.json(await libraryService.testServer(req.params.id));
+  } catch (error) {
+    const withConfig = error as Error & { config?: unknown };
+    res.status(400).json({
+      error: error instanceof Error ? error.message : String(error),
+      config: withConfig.config
+    });
+  }
+});
+
+apiRoutes.get("/library/servers/:id/list", async (req, res) => {
+  try {
+    res.json(await libraryService.listDirectory(req.params.id, typeof req.query.path === "string" ? req.query.path : ""));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/library/servers/:id/resolve", async (req, res) => {
+  try {
+    res.json(await libraryService.resolvePath(req.params.id, String(req.body?.absolutePath || "")));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+apiRoutes.post("/library/servers/:id/check-url", async (req, res) => {
+  try {
+    res.json(await libraryService.checkUrl(req.params.id, String(req.body?.relativePath || "")));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
 

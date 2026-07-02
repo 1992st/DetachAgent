@@ -35,6 +35,14 @@ export interface ChatSendRequest {
   activationReason?: LocalControlActivationReason;
 }
 
+export interface LibraryPromptContext {
+  libraryBaseUrl: string;
+  agentRootPath: string;
+  currentRelativePath?: string;
+  currentFilePath?: string;
+  recentFiles?: string[];
+}
+
 export interface ChatSendResponse {
   runId?: string;
   raw?: unknown;
@@ -71,6 +79,7 @@ export type ChatSocketClientEvent =
       includeStagedFileContext?: boolean;
       activationReason?: LocalControlActivationReason;
       localControlScope?: string;
+      libraryContext?: LibraryPromptContext;
       idempotencyKey?: string;
     }
   | { type: "track-run"; runId: string }

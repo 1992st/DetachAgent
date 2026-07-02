@@ -1,3 +1,5 @@
+import type { LibraryServerConfig } from "./libraryTypes.js";
+
 export interface RemoteProfile {
   id: string;
   name: string;
@@ -28,6 +30,8 @@ export interface RemoteProfile {
   fileServiceLastStatus?: "ok" | "error";
   fileServiceLastTestedAt?: string;
   fileServiceLastError?: string;
+  libraryServers?: LibraryServerConfig[];
+  activeLibraryServerId?: string;
   hasAuthToken: boolean;
   hasAuthPassword: boolean;
   lastTestedAt?: string;
@@ -75,6 +79,8 @@ export interface RemoteProfileUpdate {
   fileServiceLastStatus?: "ok" | "error";
   fileServiceLastTestedAt?: string;
   fileServiceLastError?: string;
+  libraryServers?: LibraryServerConfig[];
+  activeLibraryServerId?: string;
 }
 
 export interface SettingsUpdate extends RemoteProfileUpdate {

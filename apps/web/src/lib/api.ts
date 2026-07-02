@@ -12,6 +12,11 @@ import type {
   InteractionResolveInput,
   InteractionResultResponse,
   FileUploadResponse,
+  LibraryConfigResponse,
+  LibraryDirectoryResponse,
+  LibraryPathResolution,
+  LibraryServerSaveInput,
+  LibraryUrlCheckResponse,
   LocalTerminalAppsResponse,
   LocalTerminalOpenResponse,
   MainAgentFileTransferPasswordResponse,
@@ -443,6 +448,62 @@ export async function testFileService(input: FileServiceTestInput): Promise<File
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input)
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function fetchLibraryConfig(): Promise<LibraryConfigResponse> {
+  const res = await fetch(apiUrl("/api/library/config"));
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function saveLibraryServer(input: LibraryServerSaveInput): Promise<LibraryConfigResponse> {
+  const res = await fetch(apiUrl("/api/library/servers"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function activateLibraryServer(id: string): Promise<LibraryConfigResponse> {
+  const res = await fetch(apiUrl(`/api/library/servers/${encodeURIComponent(id)}/activate`), { method: "POST" });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function testLibraryServer(id: string): Promise<LibraryConfigResponse> {
+  const res = await fetch(apiUrl(`/api/library/servers/${encodeURIComponent(id)}/test`), { method: "POST" });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function fetchLibraryDirectory(serverId: string, relativePath = ""): Promise<LibraryDirectoryResponse> {
+  const params = new URLSearchParams();
+  if (relativePath) params.set("path", relativePath);
+  const res = await fetch(apiUrl(`/api/library/servers/${encodeURIComponent(serverId)}/list${params.toString() ? `?${params}` : ""}`));
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function resolveLibraryPath(serverId: string, absolutePath: string): Promise<LibraryPathResolution> {
+  const res = await fetch(apiUrl(`/api/library/servers/${encodeURIComponent(serverId)}/resolve`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ absolutePath })
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return res.json();
+}
+
+export async function checkLibraryUrl(serverId: string, relativePath: string): Promise<LibraryUrlCheckResponse> {
+  const res = await fetch(apiUrl(`/api/library/servers/${encodeURIComponent(serverId)}/check-url`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ relativePath })
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return res.json();

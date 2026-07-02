@@ -12,5 +12,6 @@ export * from "./terminalTypes.js";
 export * from "./toolBrokerTypes.js";
 export * from "./interactionTypes.js";
 export * from "./relationshipSkillTypes.js";
+export * from "./libraryTypes.js";
 export * from "./agentConfigAssistant/index.js";
 export * from "./agentTerminalTypes.js";
